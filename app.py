@@ -1,0 +1,138 @@
+import io
+import pandas as pd
+import streamlit as st
+
+st.set_page_config(page_title="Keyword Scoring Tool", page_icon="🔎", layout="centered")
+
+st.title("🔎 Keyword Scoring Tool")
+st.caption("Score keywords by Search Volume (A) and Keyword Difficulty (B).")
+
+# Default thresholds (editable in Settings)
+MIN_VALID_VOLUME = 100
+KD_BUCKETS = [
+    (1, 25, 4),
+    (26, 50, 3),
+    (51, 75, 2),
+    (76, 100, 1),
+]
+
+def calculate_score(volume: float, kd: float) -> int:
+    try:
+        if pd.isna(volume) or pd.isna(kd):
+            return 0
+        volume = float(volume)
+        kd = float(kd)
+    except Exception:
+        return 0
+
+    if volume < MIN_VALID_VOLUME:
+        return 0
+    for low, high, score in KD_BUCKETS:
+        if low <= kd <= high:
+            return score
+    return 0
+
+def add_score_columns(df: pd.DataFrame, volume_col: str, kd_col: str) -> pd.DataFrame:
+    out = df.copy()
+    out["Score"] = [calculate_score(v, k) for v, k in zip(out[volume_col], out[kd_col])]
+    label_map = {4: "Excellent", 3: "Good", 2: "Okay", 1: "Meh", 0: "Not rated"}
+    out["Tier"] = out["Score"].map(label_map).fillna("Not rated")
+    return out
+
+def find_column(df: pd.DataFrame, candidates) -> str | None:
+    cols_lower = {c.lower(): c for c in df.columns}
+    for cand in candidates:
+        if cand.lower() in cols_lower:
+            return cols_lower[cand.lower()]
+    for c in df.columns:
+        lc = c.lower()
+        if any(k in lc for k in candidates):
+            return c
+    return None
+
+with st.expander("⚙️ Settings", expanded=False):
+    MIN_VALID_VOLUME = st.number_input("Minimum valid Volume (A must be ≥ this to score)", min_value=0, value=100, step=50)
+    kd_1_min = st.number_input("KD bucket 1: start", min_value=0, value=1, step=1)
+    kd_1_max = st.number_input("KD bucket 1: end", min_value=0, value=25, step=1)
+    kd_2_min = st.number_input("KD bucket 2: start", min_value=0, value=26, step=1)
+    kd_2_max = st.number_input("KD bucket 2: end", min_value=0, value=50, step=1)
+    kd_3_min = st.number_input("KD bucket 3: start", min_value=0, value=51, step=1)
+    kd_3_max = st.number_input("KD bucket 3: end", min_value=0, value=75, step=1)
+    kd_4_min = st.number_input("KD bucket 4: start", min_value=0, value=76, step=1)
+    kd_4_max = st.number_input("KD bucket 4: end", min_value=0, value=100, step=1)
+    KD_BUCKETS = [
+        (kd_1_min, kd_1_max, 4),
+        (kd_2_min, kd_2_max, 3),
+        (kd_3_min, kd_3_max, 2),
+        (kd_4_min, kd_4_max, 1),
+    ]
+
+st.subheader("Single Keyword Score")
+with st.form("single"):
+    col1, col2 = st.columns(2)
+    with col1:
+        vol_val = st.number_input("Search Volume (A)", min_value=0, step=10, value=0)
+    with col2:
+        kd_val = st.number_input("Keyword Difficulty (B)", min_value=0, step=1, value=0)
+    submitted = st.form_submit_button("Calculate Score")
+    if submitted:
+        sc = calculate_score(vol_val, kd_val)
+        tier = {4: "Excellent", 3: "Good", 2: "Okay", 1: "Meh", 0: "Not rated"}[sc]
+        st.success(f"Score: **{sc}** • Tier: **{tier}**")
+
+st.markdown("---")
+st.subheader("Bulk Scoring (CSV Upload)")
+st.markdown("Upload a CSV with columns like **Keyword**, **Volume** (or Search Volume), and **KD** "
+            "(or Difficulty / Keyword Difficulty). Column names are flexible.")
+
+uploaded = st.file_uploader("Upload CSV", type=["csv"])
+
+example = pd.DataFrame({
+    "Keyword": ["best running shoes", "seo tools", "crm software"],
+    "Volume": [5400, 880, 12000],
+    "KD": [38, 72, 18],
+})
+
+with st.expander("See example CSV format"):
+    st.dataframe(example, use_container_width=True)
+    csv_bytes = example.to_csv(index=False).encode("utf-8")
+    st.download_button("Download example.csv", data=csv_bytes, file_name="example.csv", mime="text/csv")
+
+if uploaded is not None:
+    try:
+        df = pd.read_csv(uploaded)
+    except Exception:
+        st.error("Could not read the file. Please upload a valid CSV.")
+        st.stop()
+
+    vol_col = find_column(df, ["volume", "search volume", "sv"])
+    kd_col = find_column(df, ["kd", "difficulty", "keyword difficulty"])
+    kw_col = find_column(df, ["keyword", "query", "term"])
+
+    missing = []
+    if vol_col is None: missing.append("Volume")
+    if kd_col is None: missing.append("Keyword Difficulty")
+    if missing:
+        st.error("Missing required column(s): " + ", ".join(missing))
+    else:
+        scored = add_score_columns(df, vol_col, kd_col)
+        ordered_cols = []
+        if kw_col: ordered_cols.append(kw_col)
+        ordered_cols += [vol_col, kd_col, "Score", "Tier"]
+        remaining = [c for c in scored.columns if c not in ordered_cols]
+        scored = scored[ordered_cols + remaining]
+
+        st.success("Scoring complete.")
+        st.dataframe(scored, use_container_width=True)
+
+        buff = io.BytesIO()
+        scored.to_csv(buff, index=False)
+        st.download_button(
+            "Download scored CSV",
+            data=buff.getvalue(),
+            file_name="scored_keywords.csv",
+            mime="text/csv"
+        )
+
+st.markdown("---")
+st.caption("© 2025 Keyword Scoring Tool • For commercial rollout, move logic to a backend API to keep it private.")
