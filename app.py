@@ -90,7 +90,11 @@ with st.form("single"):
         sc = calculate_score(vol_val, kd_val)
         label = LABEL_MAP.get(sc, "Not rated")
         color = COLOR_MAP.get(sc, "#9ca3af")
-        st.markdown(f"<div style='font-size: 20px; font-weight: bold; color: {color};'>Score: {sc} • Tier: {label}</div>", unsafe_allow_html=True)
+        st.markdown(f"""
+            <div style='background-color:{color}; padding:16px; border-radius:8px; text-align:center;'>
+                <span style='font-size:22px; font-weight:bold; color:#000;'>Score: {sc} • Tier: {label}</span>
+            </div>
+        """, unsafe_allow_html=True)
 
 st.markdown("---")
 st.subheader("Bulk Scoring (CSV Upload)")
