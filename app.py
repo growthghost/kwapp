@@ -38,12 +38,9 @@ COLOR_MAP = {
 }
 
 strategy_descriptions = {
-    "Low Hanging Fruit": "Keywords that can be used to rank quickly with minimal effort. Ideal for new content or low-authority sites.
-Try targeting long-tail keywords, create quick-win content, and build a few internal links.",
-    "In The Game": "Moderate difficulty keywords that are within reach for growing sites.
-Focus on optimizing content, earning backlinks, and matching search intent to climb the ranks.",
-    "Competitive": "High-volume, high-difficulty keywords dominated by authoritative domains.
-Requires strong content, domain authority, and strategic SEO to compete. Great for long-term growth."
+    "Low Hanging Fruit": "Keywords that can be used to rank quickly with minimal effort. Ideal for new content or low-authority sites. Try targeting long-tail keywords, create quick-win content, and build a few internal links.",
+    "In The Game": "Moderate difficulty keywords that are within reach for growing sites. Focus on optimizing content, earning backlinks, and matching search intent to climb the ranks.",
+    "Competitive": "High-volume, high-difficulty keywords dominated by authoritative domains. Requires strong content, domain authority, and strategic SEO to compete. Great for long-term growth."
 }
 
 scoring_mode = st.selectbox("Choose Scoring Strategy", ["Low Hanging Fruit", "In The Game", "Competitive"])
