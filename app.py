@@ -31,6 +31,15 @@ LABEL_MAP = {
     1: "Very Low",
     0: "Not rated",
 }
+COLOR_MAP = {
+    6: "#2ecc71",   # Bright Green
+    5: "#a3e635",   # Lime
+    4: "#facc15",   # Yellow
+    3: "#fb923c",   # Orange
+    2: "#f87171",   # Tomato
+    1: "#ef4444",   # Red
+    0: "#9ca3af",   # Gray
+}
 
 # ----------------------------
 # Settings (6 equal KD buckets)
