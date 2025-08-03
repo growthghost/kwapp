@@ -22,8 +22,8 @@ LABEL_MAP = {
     5: "Excellent",
     4: "Good",
     3: "Fair",
-    2: "Difficult",
-    1: "Very Difficult",
+    2: "Low",
+    1: "Very Low",
     0: "Not rated",
 }
 
@@ -54,9 +54,10 @@ if scoring_mode == "Low Hanging Fruit":
         (26, 50, 3),
         (51, 75, 2),
         (76, 100, 1),
+
     ]
 elif scoring_mode == "In The Game":
-    MIN_VALID_VOLUME = 1500
+    MIN_VALID_VOLUME = 500
     KD_BUCKETS = [
         (0, 30, 6),
         (31, 45, 5),
@@ -66,7 +67,7 @@ elif scoring_mode == "In The Game":
         (81, 100, 1),
     ]
 elif scoring_mode == "Competitive":
-    MIN_VALID_VOLUME = 1501
+    MIN_VALID_VOLUME = 1000
     KD_BUCKETS = [
         (0, 40, 6),
         (41, 60, 5),
@@ -77,6 +78,7 @@ elif scoring_mode == "Competitive":
     ]
 st.markdown(f"""
 <div style='background: linear-gradient(to right, #3b82f6, #60a5fa); padding:16px; border-radius:8px; margin-bottom:16px;'>
+    <div style='margin-bottom:6px; font-size:13px; color:#f0f9ff;'>Minimum Search Volume Required: <strong>{MIN_VALID_VOLUME}</strong></div>
     <strong style='color:#ffffff; font-size:18px;'>{scoring_mode}</strong><br>
     <span style='color:#f8fafc; font-size:15px;'>{strategy_descriptions[scoring_mode]}</span>
 </div>
@@ -115,6 +117,9 @@ with st.form("single"):
     with col2:
         kd_val = st.number_input("Keyword Difficulty (B)", min_value=0, step=1, value=0)
     if st.form_submit_button("Calculate Score"):
+        if vol_val < MIN_VALID_VOLUME:
+            st.warning(f"The selected strategy requires a minimum search volume of {MIN_VALID_VOLUME}.
+Please enter a volume that meets the threshold.")
         sc = calculate_score(vol_val, kd_val)
         label = LABEL_MAP.get(sc, "Not rated")
         color = COLOR_MAP.get(sc, "#9ca3af")
