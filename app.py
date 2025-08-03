@@ -117,8 +117,7 @@ with st.form("single"):
         kd_val = st.number_input("Keyword Difficulty (B)", min_value=0, step=1, value=0)
     if st.form_submit_button("Calculate Score"):
         if vol_val < MIN_VALID_VOLUME:
-            st.warning(f"The selected strategy requires a minimum search volume of {MIN_VALID_VOLUME}. Please enter a volume that meets the threshold.")
-Please enter a volume that meets the threshold.")
+            st.warning(f"The selected strategy requires a minimum search volume of {MIN_VALID_VOLUME}. Please enter a volume that meets the threshold."))
         sc = calculate_score(vol_val, kd_val)
         label = LABEL_MAP.get(sc, "Not rated")
         color = COLOR_MAP.get(sc, "#9ca3af")
