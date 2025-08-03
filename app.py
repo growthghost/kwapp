@@ -22,8 +22,8 @@ LABEL_MAP = {
     5: "Excellent",
     4: "Good",
     3: "Fair",
-    2: "Low",
-    1: "Very Low",
+    2: "Difficult",
+    1: "Very Difficult",
     0: "Not rated",
 }
 
