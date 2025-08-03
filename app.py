@@ -88,7 +88,9 @@ with st.form("single"):
         kd_val = st.number_input("Keyword Difficulty (B)", min_value=0, step=1, value=0)
     if st.form_submit_button("Calculate Score"):
         sc = calculate_score(vol_val, kd_val)
-        st.success(f"Score: **{sc}** • Tier: **{LABEL_MAP.get(sc, 'Not rated')}**")
+        label = LABEL_MAP.get(sc, "Not rated")
+        color = COLOR_MAP.get(sc, "#9ca3af")
+        st.markdown(f"<div style='font-size: 20px; font-weight: bold; color: {color};'>Score: {sc} • Tier: {label}</div>", unsafe_allow_html=True)
 
 st.markdown("---")
 st.subheader("Bulk Scoring (CSV Upload)")
