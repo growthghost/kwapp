@@ -45,9 +45,9 @@ strategy_descriptions = {
 
 scoring_mode = st.selectbox("Choose Scoring Strategy", ["Low Hanging Fruit", "In The Game", "Competitive"])
 st.markdown(f"""
-<div style='background-color:#e0e7ff; padding:12px; border-left:6px solid #1e3a8a; margin-bottom:10px;'>
-    <strong style='color:#1e3a8a;'>{scoring_mode}</strong><br>
-    <span style='color:#1e293b;'>{strategy_descriptions[scoring_mode]}</span>
+<div style='background: linear-gradient(to right, #3b82f6, #60a5fa); padding:16px; border-radius:8px; margin-bottom:16px;'>
+    <strong style='color:#ffffff; font-size:18px;'>{scoring_mode}</strong><br>
+    <span style='color:#f8fafc; font-size:15px;'>{strategy_descriptions[scoring_mode]}</span>
 </div>
 """, unsafe_allow_html=True)
 
