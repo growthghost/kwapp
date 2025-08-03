@@ -120,13 +120,17 @@ if uploaded is not None:
         scored = scored[ordered + remaining]
         st.success("Scoring complete.")
 
-        def style_row(row):
-            return [f"background-color: {row['Color']}" if col in ["Score", "Tier"] else "" for col in row.index]
+        def highlight_scores(row):
+            style = []
+            for col in row.index:
+                if col == "Score" or col == "Tier":
+                    style.append(f"background-color: {row['Color']}; color: black;")
+                else:
+                    style.append("")
+            return style
 
-        st.dataframe(
-            scored.style.apply(style_row, axis=1),
-            use_container_width=True
-        )
+        styled_df = scored.style.apply(highlight_scores, axis=1)
+        st.markdown(styled_df.to_html(escape=False, index=False), unsafe_allow_html=True)
 
         buff = io.BytesIO()
         scored.to_csv(buff, index=False)
