@@ -1,11 +1,11 @@
-import io
+""import io
 import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="OutrankIQ", page_icon="🔎", layout="centered")
 
 st.title("OutrankIQ")
-st.caption("Score keywords by Search Volume (A) and Keyword Difficulty (B) — now with 6 equal scoring levels.")
+st.caption("Score keywords by Search Volume (A) and Keyword Difficulty (B) — with selectable scoring strategies.")
 
 def find_column(df: pd.DataFrame, candidates) -> str | None:
     cols_lower = {c.lower(): c for c in df.columns}
@@ -37,23 +37,54 @@ COLOR_MAP = {
     0: "#9ca3af",   # Gray
 }
 
+strategy_descriptions = {
+    "Low Hanging Fruit": "Focus on easy-to-rank keywords with low difficulty and moderate volume.",
+    "In The Game": "Target mid-range keywords that require some authority and effort.",
+    "Competitive": "Aim for high-volume, high-difficulty terms used by top-tier competitors."
+}
+
+scoring_mode = st.selectbox("Choose Scoring Strategy", ["Low Hanging Fruit", "In The Game", "Competitive"])
+st.markdown(f"<div style='background-color:#f1f5f9; padding:10px; border-left:6px solid #1e3a8a; margin-bottom:10px;'>• <strong>{scoring_mode}</strong>: {strategy_descriptions[scoring_mode]}</div>", unsafe_allow_html=True)
+
 with st.expander("⚙️ Settings", expanded=False):
-    MIN_VALID_VOLUME = st.number_input("Minimum valid Volume (A must be ≥ this to score)", min_value=0, value=100, step=50)
-    KD_MIN = st.number_input("KD minimum", min_value=0, value=0, step=1)
-    KD_MAX = st.number_input("KD maximum", min_value=1, value=100, step=1)
-    LEVELS = 6
-    total_span = max(1, KD_MAX - KD_MIN + 1)
-    base = total_span // LEVELS
-    remainder = total_span % LEVELS
-    KD_BUCKETS = []
-    start = KD_MIN
-    score_val = LEVELS
-    for i in range(LEVELS):
-        width = base + (1 if i < remainder else 0)
-        end = start + width - 1
-        KD_BUCKETS.append((start, end, score_val))
-        score_val -= 1
-        start = end + 1
+    if scoring_mode == "Low Hanging Fruit":
+        MIN_VALID_VOLUME = st.number_input("Minimum valid Volume (A must be ≥ this to score)", min_value=0, value=100, step=50)
+        KD_MIN = st.number_input("KD minimum", min_value=0, value=0, step=1)
+        KD_MAX = st.number_input("KD maximum", min_value=1, value=100, step=1)
+        LEVELS = 6
+        total_span = max(1, KD_MAX - KD_MIN + 1)
+        base = total_span // LEVELS
+        remainder = total_span % LEVELS
+        KD_BUCKETS = []
+        start = KD_MIN
+        score_val = LEVELS
+        for i in range(LEVELS):
+            width = base + (1 if i < remainder else 0)
+            end = start + width - 1
+            KD_BUCKETS.append((start, end, score_val))
+            score_val -= 1
+            start = end + 1
+    elif scoring_mode == "Competitive":
+        MIN_VALID_VOLUME = 10000
+        KD_BUCKETS = [
+            (83, 100, 6),
+            (67, 82, 5),
+            (51, 66, 4),
+            (35, 50, 3),
+            (18, 34, 2),
+            (0, 17, 1),
+        ]
+    elif scoring_mode == "In The Game":
+        MIN_VALID_VOLUME = 1000
+        KD_BUCKETS = [
+            (70, 100, 6),
+            (55, 69, 5),
+            (40, 54, 4),
+            (25, 39, 3),
+            (10, 24, 2),
+            (0, 9, 1),
+        ]
+
     st.write("KD buckets:")
     st.table(pd.DataFrame(KD_BUCKETS, columns=["KD From", "KD To", "Score"]))
 
@@ -143,4 +174,4 @@ if uploaded is not None:
         st.download_button("Download scored CSV", data=buff.getvalue(), file_name="scored_keywords.csv", mime="text/csv")
 
 st.markdown("---")
-st.caption("© 2025 OutrankIQ • 6-level KD scoring with color-coded visual tiers. Adjust KD min/max and volume threshold in Settings.")
+st.caption("© 2025 OutrankIQ • Select from three scoring strategies to target different types of keyword opportunities.")
