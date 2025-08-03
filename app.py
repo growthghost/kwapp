@@ -38,9 +38,15 @@ COLOR_MAP = {
 }
 
 strategy_descriptions = {
-    "Low Hanging Fruit": "Focus on easy-to-rank keywords with low difficulty and moderate volume.",
-    "In The Game": "Target mid-range keywords that require some authority and effort.",
-    "Competitive": "Aim for high-volume, high-difficulty terms used by top-tier competitors."
+    "Low Hanging Fruit": "Keywords that can be used to rank quickly with minimal effort. Ideal for new content or low-authority sites.
+
+Try targeting long-tail keywords, create quick-win content, and build a few internal links.",
+    "In The Game": "Moderate difficulty keywords that are within reach for growing sites.
+
+Focus on optimizing content, earning backlinks, and matching search intent to climb the ranks.",
+    "Competitive": "High-volume, high-difficulty keywords dominated by authoritative domains.
+
+Requires strong content, domain authority, and strategic SEO to compete. Great for long-term growth."
 }
 
 scoring_mode = st.selectbox("Choose Scoring Strategy", ["Low Hanging Fruit", "In The Game", "Competitive"])
@@ -85,9 +91,7 @@ with st.expander("⚙️ Settings", expanded=False):
             (0, 9, 1),
         ]
 
-    st.write("KD buckets:")
-    st.table(pd.DataFrame(KD_BUCKETS, columns=["KD From", "KD To", "Score"]))
-
+    
 def calculate_score(volume: float, kd: float) -> int:
     try:
         if pd.isna(volume) or pd.isna(kd):
