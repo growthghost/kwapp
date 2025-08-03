@@ -46,7 +46,7 @@ strategy_descriptions = {
 scoring_mode = st.selectbox("Choose Scoring Strategy", ["Low Hanging Fruit", "In The Game", "Competitive"])
 
 if scoring_mode == "Low Hanging Fruit":
-    MIN_VALID_VOLUME = 100
+    MIN_VALID_VOLUME = 10
     KD_BUCKETS = [
         (0, 20, 6),
         (21, 30, 5),
@@ -56,7 +56,7 @@ if scoring_mode == "Low Hanging Fruit":
         (61, 100, 1),
     ]
 elif scoring_mode == "In The Game":
-    MIN_VALID_VOLUME = 500
+    MIN_VALID_VOLUME = 1500
     KD_BUCKETS = [
         (0, 30, 6),
         (31, 45, 5),
@@ -66,7 +66,7 @@ elif scoring_mode == "In The Game":
         (81, 100, 1),
     ]
 elif scoring_mode == "Competitive":
-    MIN_VALID_VOLUME = 1000
+    MIN_VALID_VOLUME = 1501
     KD_BUCKETS = [
         (0, 40, 6),
         (41, 60, 5),
