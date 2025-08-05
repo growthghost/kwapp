@@ -138,8 +138,7 @@ with st.expander("See example CSV format"):
 
 if uploaded is not None:
     try:
-        try:
-        df = pd.read_csv(uploaded)
+            df = pd.read_csv(uploaded)
     except UnicodeDecodeError:
         try:
             df = pd.read_csv(uploaded, encoding="ISO-8859-1")
