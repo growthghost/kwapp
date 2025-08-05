@@ -138,7 +138,14 @@ with st.expander("See example CSV format"):
 
 if uploaded is not None:
     try:
-        df = pd.read_csv(uploaded, encoding="ISO-8859-1")
+        try:
+        df = pd.read_csv(uploaded)
+    except UnicodeDecodeError:
+        try:
+            df = pd.read_csv(uploaded, encoding="ISO-8859-1")
+        except Exception:
+            st.error("Could not read the file. Please upload a valid CSV.")
+            st.stop()
     except Exception:
         st.error("Could not read the file. Please upload a valid CSV.")
         st.stop()
@@ -155,7 +162,13 @@ if uploaded is not None:
         ordered = ([kw_col] if kw_col else []) + [vol_col, kd_col, "Score", "Tier"]
         remaining = [c for c in scored.columns if c not in ordered]
         scored = scored[ordered + remaining]
-        st.success("Scoring complete.")
+        st.success("Scoring complete 🎉")
+st.balloons()
+
+        with st.expander("Email the scored results"):
+            email = st.text_input("Enter your email address")
+            if st.button("Send CSV to Email"):
+                st.info("This feature is coming soon! For now, please download using the button below.")
 
         def highlight_scores(row):
             style = []
@@ -167,7 +180,7 @@ if uploaded is not None:
             return style
 
         styled_df = scored.style.apply(highlight_scores, axis=1)
-        st.markdown(styled_df.to_html(escape=False, index=False), unsafe_allow_html=True)
+        # st.markdown(styled_df.to_html(escape=False, index=False), unsafe_allow_html=True)
 
         buff = io.BytesIO()
         scored.to_csv(buff, index=False)
