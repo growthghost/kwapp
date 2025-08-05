@@ -165,10 +165,7 @@ if uploaded is not None:
         st.success("Scoring complete 🎉")
 st.balloons()
 
-        with st.expander("Email the scored results"):
-            email = st.text_input("Enter your email address")
-            if st.button("Send CSV to Email"):
-                st.info("This feature is coming soon! For now, please download using the button below.")
+        
 
         def highlight_scores(row):
             style = []
