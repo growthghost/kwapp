@@ -164,9 +164,7 @@ if uploaded is not None:
         st.success("Scoring complete 🎉")
 st.balloons()
 
-        
-
-        def highlight_scores(row):
+def highlight_scores(row):
             style = []
             for col in row.index:
                 if col == "Score" or col == "Tier":
