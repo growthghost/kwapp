@@ -138,7 +138,7 @@ with st.expander("See example CSV format"):
 
 if uploaded is not None:
     try:
-        df = pd.read_csv(uploaded)
+        df = pd.read_csv(uploaded, encoding="ISO-8859-1")
     except Exception:
         st.error("Could not read the file. Please upload a valid CSV.")
         st.stop()
