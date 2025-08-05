@@ -161,8 +161,8 @@ if uploaded is not None:
         ordered = ([kw_col] if kw_col else []) + [vol_col, kd_col, "Score", "Tier"]
         remaining = [c for c in scored.columns if c not in ordered]
         scored = scored[ordered + remaining]
-        st.success("Scoring complete 🎉")
-st.balloons()
+        st.success("Scoring complete")
+
 
 def highlight_scores(row):
     style = []
