@@ -171,7 +171,12 @@ if uploaded is not None:
             return style
 
         styled_df = scored.style.apply(highlight_scores, axis=1)
-        st.dataframe(styled_df, use_container_width=True)
+                st.download_button(
+            label="Download Scored CSV",
+            data=scored.to_csv(index=False).encode("utf-8"),
+            file_name="scored_keywords.csv",
+            mime="text/csv"
+        )
 
 st.markdown("---")
 st.caption("© 2025 OutrankIQ • Select from three scoring strategies to target different types of keyword opportunities.")
