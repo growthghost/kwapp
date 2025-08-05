@@ -134,7 +134,7 @@ uploaded = st.file_uploader("Upload CSV", type=["csv"])
 example = pd.DataFrame({"Keyword": ["best running shoes", "seo tools", "crm software"], "Volume": [5400, 880, 12000], "KD": [38, 72, 18]})
 with st.expander("See example CSV format"):
     st.dataframe(example, use_container_width=True)
-    st.download_button("Download example.csv", data=example.to_csv(index=False).encode("utf-8"), file_name="example.csv", mime="text/csv")
+        st.download_button("Download example.csv", data=example.to_csv(index=False).encode("utf-8"), file_name="example.csv", mime="text/csv")
 
 if uploaded is not None:
     try:
@@ -165,19 +165,19 @@ if uploaded is not None:
 st.balloons()
 
 def highlight_scores(row):
-            style = []
-            for col in row.index:
-                if col == "Score" or col == "Tier":
-                    style.append(f"background-color: {row['Color']}; color: black;")
-                else:
-                    style.append("")
-            return style
+    style = []
+    for col in row.index:
+        if col == "Score" or col == "Tier":
+            style.append(f"background-color: {row['Color']}; color: black;")
+        else:
+            style.append("")
+    return style
 
-        styled_df = scored.style.apply(highlight_scores, axis=1)
+            styled_df = scored.style.apply(highlight_scores, axis=1)
         # st.markdown(styled_df.to_html(escape=False, index=False), unsafe_allow_html=True)
 
-        buff = io.BytesIO()
-        scored.to_csv(buff, index=False)
+            buff = io.BytesIO()
+            scored.to_csv(buff, index=False)
         st.download_button("Download scored CSV", data=buff.getvalue(), file_name="scored_keywords.csv", mime="text/csv")
 
 st.markdown("---")
