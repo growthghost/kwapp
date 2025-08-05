@@ -75,6 +75,7 @@ elif scoring_mode == "Competitive":
         (86, 95, 2),
         (96, 100, 1),
     ]
+
 st.markdown(f"""
 <div style='background: linear-gradient(to right, #3b82f6, #60a5fa); padding:16px; border-radius:8px; margin-bottom:16px;'>
     <div style='margin-bottom:6px; font-size:13px; color:#f0f9ff;'>Minimum Search Volume Required: <strong>{MIN_VALID_VOLUME}</strong></div>
@@ -84,8 +85,6 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 
-
-    
 def calculate_score(volume: float, kd: float) -> int:
     try:
         if pd.isna(volume) or pd.isna(kd):
@@ -134,11 +133,10 @@ uploaded = st.file_uploader("Upload CSV", type=["csv"])
 example = pd.DataFrame({"Keyword": ["best running shoes", "seo tools", "crm software"], "Volume": [5400, 880, 12000], "KD": [38, 72, 18]})
 with st.expander("See example CSV format"):
     st.dataframe(example, use_container_width=True)
-                            st.download_button("Download example.csv", data=example.to_csv(index=False).encode("utf-8"), file_name="example.csv", mime="text/csv").encode("utf-8"), file_name="example.csv", mime="text/csv").encode("utf-8"), file_name="example.csv", mime="text/csv").encode("utf-8"), file_name="example.csv", mime="text/csv")
 
 if uploaded is not None:
     try:
-            df = pd.read_csv(uploaded)
+        df = pd.read_csv(uploaded)
     except UnicodeDecodeError:
         try:
             df = pd.read_csv(uploaded, encoding="ISO-8859-1")
@@ -163,22 +161,17 @@ if uploaded is not None:
         scored = scored[ordered + remaining]
         st.success("Scoring complete")
 
+        def highlight_scores(row):
+            style = []
+            for col in row.index:
+                if col == "Score" or col == "Tier":
+                    style.append(f"background-color: {row['Color']}; color: black;")
+                else:
+                    style.append("")
+            return style
 
-def highlight_scores(row):
-    style = []
-    for col in row.index:
-        if col == "Score" or col == "Tier":
-            style.append(f"background-color: {row['Color']}; color: black;")
-        else:
-            style.append("")
-    return style
-
-                                    styled_df = scored.style.apply(highlight_scores, axis=1)
-        # st.markdown(styled_df.to_html(escape=False, index=False), unsafe_allow_html=True)
-
-                                    buff = io.BytesIO()
-                                    scored.to_csv(buff, index=False)
-                                st.download_button("Download scored CSV", data=buff.getvalue(), file_name="scored_keywords.csv", mime="text/csv"), file_name="scored_keywords.csv", mime="text/csv"), file_name="scored_keywords.csv", mime="text/csv"), file_name="scored_keywords.csv", mime="text/csv")
+        styled_df = scored.style.apply(highlight_scores, axis=1)
+        st.dataframe(styled_df, use_container_width=True)
 
 st.markdown("---")
 st.caption("© 2025 OutrankIQ • Select from three scoring strategies to target different types of keyword opportunities.")
