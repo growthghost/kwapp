@@ -28,13 +28,13 @@ LABEL_MAP = {
 }
 
 COLOR_MAP = {
-    6: "#2ecc71",   # Bright Green
-    5: "#a3e635",   # Lime
-    4: "#facc15",   # Yellow
-    3: "#fb923c",   # Orange
-    2: "#f87171",   # Tomato
-    1: "#ef4444",   # Red
-    0: "#9ca3af",   # Gray
+    6: "#2ecc71",
+    5: "#a3e635",
+    4: "#facc15",
+    3: "#fb923c",
+    2: "#f87171",
+    1: "#ef4444",
+    0: "#9ca3af",
 }
 
 strategy_descriptions = {
@@ -47,34 +47,13 @@ scoring_mode = st.selectbox("Choose Scoring Strategy", ["Low Hanging Fruit", "In
 
 if scoring_mode == "Low Hanging Fruit":
     MIN_VALID_VOLUME = 10
-    KD_BUCKETS = [
-        (0, 15, 6),
-        (16, 20, 5),
-        (21, 25, 4),
-        (26, 50, 3),
-        (51, 75, 2),
-        (76, 100, 1),
-    ]
+    KD_BUCKETS = [(0, 15, 6), (16, 20, 5), (21, 25, 4), (26, 50, 3), (51, 75, 2), (76, 100, 1)]
 elif scoring_mode == "In The Game":
     MIN_VALID_VOLUME = 1500
-    KD_BUCKETS = [
-        (0, 30, 6),
-        (31, 45, 5),
-        (46, 60, 4),
-        (61, 70, 3),
-        (71, 80, 2),
-        (81, 100, 1),
-    ]
+    KD_BUCKETS = [(0, 30, 6), (31, 45, 5), (46, 60, 4), (61, 70, 3), (71, 80, 2), (81, 100, 1)]
 elif scoring_mode == "Competitive":
     MIN_VALID_VOLUME = 1501
-    KD_BUCKETS = [
-        (0, 40, 6),
-        (41, 60, 5),
-        (61, 75, 4),
-        (76, 85, 3),
-        (86, 95, 2),
-        (96, 100, 1),
-    ]
+    KD_BUCKETS = [(0, 40, 6), (41, 60, 5), (61, 75, 4), (76, 85, 3), (86, 95, 2), (96, 100, 1)]
 
 st.markdown(f"""
 <div style='background: linear-gradient(to right, #3b82f6, #60a5fa); padding:16px; border-radius:8px; margin-bottom:16px;'>
@@ -83,7 +62,6 @@ st.markdown(f"""
     <span style='color:#f8fafc; font-size:15px;'>{strategy_descriptions[scoring_mode]}</span>
 </div>
 """, unsafe_allow_html=True)
-
 
 def calculate_score(volume: float, kd: float) -> int:
     try:
@@ -171,12 +149,7 @@ if uploaded is not None:
             return style
 
         styled_df = scored.style.apply(highlight_scores, axis=1)
-                st.download_button(
-            label="Download Scored CSV",
-            data=scored.to_csv(index=False).encode("utf-8"),
-            file_name="scored_keywords.csv",
-            mime="text/csv"
-        )
+        st.dataframe(styled_df, use_container_width=True)
 
 st.markdown("---")
 st.caption("© 2025 OutrankIQ • Select from three scoring strategies to target different types of keyword opportunities.")
