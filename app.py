@@ -1,7 +1,6 @@
 import io
 import pandas as pd
 import streamlit as st
-import chardet
 
 st.set_page_config(page_title="OutrankIQ", page_icon="🔎", layout="centered")
 
@@ -114,15 +113,17 @@ with st.expander("See example CSV format"):
     st.dataframe(example, use_container_width=True)
 
 if uploaded is not None:
-    raw_bytes = uploaded.read()
-    detected = chardet.detect(raw_bytes)
-    encoding = detected.get("encoding", "utf-8")
     try:
-        df = pd.read_csv(io.BytesIO(raw_bytes), encoding=encoding)
+        df = pd.read_csv(uploaded)
+    except UnicodeDecodeError:
+        try:
+            df = pd.read_csv(uploaded, encoding="ISO-8859-1")
+        except Exception:
+            st.error("Could not read the file. Please upload a valid CSV.")
+            st.stop()
     except Exception:
         st.error("Could not read the file. Please upload a valid CSV.")
         st.stop()
-
     vol_col = find_column(df, ["volume", "search volume", "sv"])
     kd_col = find_column(df, ["kd", "difficulty", "keyword difficulty"])
     kw_col = find_column(df, ["keyword", "query", "term"])
