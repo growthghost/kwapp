@@ -1,6 +1,7 @@
 import io
 import pandas as pd
 import streamlit as st
+from datetime import datetime
 
 st.set_page_config(page_title="OutrankIQ", page_icon="🔎", layout="centered")
 
@@ -152,62 +153,3 @@ if uploaded is not None:
         trials = [
             {"encoding": None, "sep": None, "engine": "python"},     # let pandas infer
             {"encoding": "utf-8", "sep": None, "engine": "python"},
-            {"encoding": "utf-8-sig", "sep": None, "engine": "python"},
-            {"encoding": "ISO-8859-1", "sep": None, "engine": "python"},
-            {"encoding": "cp1252", "sep": None, "engine": "python"},
-            {"encoding": "utf-16", "sep": None, "engine": "python"},
-            {"encoding": None, "sep": ",", "engine": "python"},      # force comma
-            {"encoding": None, "sep": "\t", "engine": "python"},     # TSV fallback
-        ]
-        last_err = None
-        for t in trials:
-            try:
-                kwargs = {k: v for k, v in t.items() if v is not None}
-                return pd.read_csv(io.BytesIO(bytes_data), **kwargs)
-            except Exception as e:
-                last_err = e
-        raise last_err
-
-    try:
-        df = try_read(raw)
-    except Exception:
-        st.error("Could not read the file. Please ensure it's a CSV (or TSV) exported from Excel/Sheets and try again.")
-        st.stop()
-
-    # Try to find relevant columns with flexible names
-    vol_col = find_column(df, ["volume", "search volume", "sv"])
-    kd_col = find_column(df, ["kd", "difficulty", "keyword difficulty"])
-    kw_col = find_column(df, ["keyword", "query", "term"])
-
-    missing = []
-    if vol_col is None:
-        missing.append("Volume")
-    if kd_col is None:
-        missing.append("Keyword Difficulty")
-
-    if missing:
-        st.error("Missing required column(s): " + ", ".join(missing))
-    else:
-        scored = add_score_columns(df, vol_col, kd_col)
-
-        # Reorder: Keyword (if present), Volume, KD, Score, Tier, then any remaining columns
-        ordered = ([kw_col] if kw_col else []) + [vol_col, kd_col, "Score", "Tier"]
-        remaining = [c for c in scored.columns if c not in ordered]
-        scored = scored[ordered + remaining]
-
-        st.success("Scoring complete")
-
-        def highlight_scores(row):
-            style = []
-            for col in row.index:
-                if col == "Score" or col == "Tier":
-                    style.append(f"background-color: {row['Color']}; color: black;")
-                else:
-                    style.append("")
-            return style
-
-        styled_df = scored.style.apply(highlight_scores, axis=1)
-        st.dataframe(styled_df, use_container_width=True)
-
-st.markdown("---")
-st.caption("© 2025 OutrankIQ • Select from three scoring strategies to target different types of keyword opportunities.")
