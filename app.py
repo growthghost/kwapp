@@ -7,6 +7,8 @@ st.set_page_config(page_title="OutrankIQ", page_icon="🔎", layout="centered")
 st.title("OutrankIQ")
 st.caption("Score keywords by Search Volume (A) and Keyword Difficulty (B) — with selectable scoring strategies.")
 
+
+# ---------- Helpers ----------
 def find_column(df: pd.DataFrame, candidates) -> str | None:
     cols_lower = {c.lower(): c for c in df.columns}
     for cand in candidates:
@@ -16,6 +18,7 @@ def find_column(df: pd.DataFrame, candidates) -> str | None:
         if any(k in c.lower() for k in candidates):
             return c
     return None
+
 
 LABEL_MAP = {
     6: "Elite",
@@ -28,21 +31,23 @@ LABEL_MAP = {
 }
 
 COLOR_MAP = {
-    6: "#2ecc71",
-    5: "#a3e635",
-    4: "#facc15",
-    3: "#fb923c",
-    2: "#f87171",
-    1: "#ef4444",
-    0: "#9ca3af",
+    6: "#2ecc71",  # bright green
+    5: "#a3e635",  # lime
+    4: "#facc15",  # yellow
+    3: "#fb923c",  # orange
+    2: "#f87171",  # tomato
+    1: "#ef4444",  # red
+    0: "#9ca3af",  # gray
 }
 
 strategy_descriptions = {
     "Low Hanging Fruit": "Keywords that can be used to rank quickly with minimal effort. Ideal for new content or low-authority sites. Try targeting long-tail keywords, create quick-win content, and build a few internal links.",
     "In The Game": "Moderate difficulty keywords that are within reach for growing sites. Focus on optimizing content, earning backlinks, and matching search intent to climb the ranks.",
-    "Competitive": "High-volume, high-difficulty keywords dominated by authoritative domains. Requires strong content, domain authority, and strategic SEO to compete. Great for long-term growth."
+    "Competitive": "High-volume, high-difficulty keywords dominated by authoritative domains. Requires strong content, domain authority, and strategic SEO to compete. Great for long-term growth.",
 }
 
+
+# ---------- Strategy selector ----------
 scoring_mode = st.selectbox("Choose Scoring Strategy", ["Low Hanging Fruit", "In The Game", "Competitive"])
 
 if scoring_mode == "Low Hanging Fruit":
@@ -55,14 +60,21 @@ elif scoring_mode == "Competitive":
     MIN_VALID_VOLUME = 1501
     KD_BUCKETS = [(0, 40, 6), (41, 60, 5), (61, 75, 4), (76, 85, 3), (86, 95, 2), (96, 100, 1)]
 
-st.markdown(f"""
+st.markdown(
+    f"""
 <div style='background: linear-gradient(to right, #3b82f6, #60a5fa); padding:16px; border-radius:8px; margin-bottom:16px;'>
-    <div style='margin-bottom:6px; font-size:13px; color:#f0f9ff;'>Minimum Search Volume Required: <strong>{MIN_VALID_VOLUME}</strong></div>
+    <div style='margin-bottom:6px; font-size:13px; color:#f0f9ff;'>
+        Minimum Search Volume Required: <strong>{MIN_VALID_VOLUME}</strong>
+    </div>
     <strong style='color:#ffffff; font-size:18px;'>{scoring_mode}</strong><br>
     <span style='color:#f8fafc; font-size:15px;'>{strategy_descriptions[scoring_mode]}</span>
 </div>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
+
+# ---------- Scoring ----------
 def calculate_score(volume: float, kd: float) -> int:
     try:
         if pd.isna(volume) or pd.isna(kd):
@@ -71,12 +83,15 @@ def calculate_score(volume: float, kd: float) -> int:
         kd = float(kd)
     except Exception:
         return 0
+
     if volume < MIN_VALID_VOLUME:
         return 0
+
     for low, high, score in KD_BUCKETS:
         if low <= kd <= high:
             return score
     return 0
+
 
 def add_score_columns(df: pd.DataFrame, volume_col: str, kd_col: str) -> pd.DataFrame:
     out = df.copy()
@@ -85,6 +100,8 @@ def add_score_columns(df: pd.DataFrame, volume_col: str, kd_col: str) -> pd.Data
     out["Color"] = out["Score"].map(COLOR_MAP).fillna("#9ca3af")
     return out
 
+
+# ---------- Single keyword ----------
 st.subheader("Single Keyword Score")
 with st.form("single"):
     col1, col2 = st.columns(2)
@@ -92,51 +109,92 @@ with st.form("single"):
         vol_val = st.number_input("Search Volume (A)", min_value=0, step=10, value=0)
     with col2:
         kd_val = st.number_input("Keyword Difficulty (B)", min_value=0, step=1, value=0)
+
     if st.form_submit_button("Calculate Score"):
         if vol_val < MIN_VALID_VOLUME:
-            st.warning(f"The selected strategy requires a minimum search volume of {MIN_VALID_VOLUME}. Please enter a volume that meets the threshold.")
+            st.warning(
+                f"The selected strategy requires a minimum search volume of {MIN_VALID_VOLUME}. "
+                f"Please enter a volume that meets the threshold."
+            )
         sc = calculate_score(vol_val, kd_val)
         label = LABEL_MAP.get(sc, "Not rated")
         color = COLOR_MAP.get(sc, "#9ca3af")
-        st.markdown(f"""
+        st.markdown(
+            f"""
             <div style='background-color:{color}; padding:16px; border-radius:8px; text-align:center;'>
                 <span style='font-size:22px; font-weight:bold; color:#000;'>Score: {sc} • Tier: {label}</span>
             </div>
-        """, unsafe_allow_html=True)
+            """,
+            unsafe_allow_html=True,
+        )
+
 
 st.markdown("---")
 st.subheader("Bulk Scoring (CSV Upload)")
 
 uploaded = st.file_uploader("Upload CSV", type=["csv"])
-example = pd.DataFrame({"Keyword": ["best running shoes", "seo tools", "crm software"], "Volume": [5400, 880, 12000], "KD": [38, 72, 18]})
+example = pd.DataFrame(
+    {
+        "Keyword": ["best running shoes", "seo tools", "crm software"],
+        "Volume": [5400, 880, 12000],
+        "KD": [38, 72, 18],
+    }
+)
 with st.expander("See example CSV format"):
     st.dataframe(example, use_container_width=True)
 
+
+# ---------- Robust CSV reader for many encodings/delimiters ----------
 if uploaded is not None:
+    raw = uploaded.getvalue()
+
+    def try_read(bytes_data: bytes) -> pd.DataFrame:
+        trials = [
+            {"encoding": None, "sep": None, "engine": "python"},     # let pandas infer
+            {"encoding": "utf-8", "sep": None, "engine": "python"},
+            {"encoding": "utf-8-sig", "sep": None, "engine": "python"},
+            {"encoding": "ISO-8859-1", "sep": None, "engine": "python"},
+            {"encoding": "cp1252", "sep": None, "engine": "python"},
+            {"encoding": "utf-16", "sep": None, "engine": "python"},
+            {"encoding": None, "sep": ",", "engine": "python"},      # force comma
+            {"encoding": None, "sep": "\t", "engine": "python"},     # TSV fallback
+        ]
+        last_err = None
+        for t in trials:
+            try:
+                kwargs = {k: v for k, v in t.items() if v is not None}
+                return pd.read_csv(io.BytesIO(bytes_data), **kwargs)
+            except Exception as e:
+                last_err = e
+        raise last_err
+
     try:
-        df = pd.read_csv(uploaded)
-    except UnicodeDecodeError:
-        try:
-            df = pd.read_csv(uploaded, encoding="ISO-8859-1")
-        except Exception:
-            st.error("Could not read the file. Please upload a valid CSV.")
-            st.stop()
+        df = try_read(raw)
     except Exception:
-        st.error("Could not read the file. Please upload a valid CSV.")
+        st.error("Could not read the file. Please ensure it's a CSV (or TSV) exported from Excel/Sheets and try again.")
         st.stop()
+
+    # Try to find relevant columns with flexible names
     vol_col = find_column(df, ["volume", "search volume", "sv"])
     kd_col = find_column(df, ["kd", "difficulty", "keyword difficulty"])
     kw_col = find_column(df, ["keyword", "query", "term"])
+
     missing = []
-    if vol_col is None: missing.append("Volume")
-    if kd_col is None: missing.append("Keyword Difficulty")
+    if vol_col is None:
+        missing.append("Volume")
+    if kd_col is None:
+        missing.append("Keyword Difficulty")
+
     if missing:
         st.error("Missing required column(s): " + ", ".join(missing))
     else:
         scored = add_score_columns(df, vol_col, kd_col)
+
+        # Reorder: Keyword (if present), Volume, KD, Score, Tier, then any remaining columns
         ordered = ([kw_col] if kw_col else []) + [vol_col, kd_col, "Score", "Tier"]
         remaining = [c for c in scored.columns if c not in ordered]
         scored = scored[ordered + remaining]
+
         st.success("Scoring complete")
 
         def highlight_scores(row):
