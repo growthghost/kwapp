@@ -29,7 +29,7 @@ LABEL_MAP = {
     0: "Not rated",
 }
 
-# For preview styling only (NOT exported)
+# For preview & single-keyword styling only (NOT exported)
 COLOR_MAP = {
     6: "#2ecc71",  # bright green
     5: "#a3e635",  # lime
@@ -100,7 +100,7 @@ def add_scoring_columns(df: pd.DataFrame, volume_col: str, kd_col: str, kw_col: 
     out["Eligible"], out["Reason"] = zip(*[ _eligibility_reason(v, k) for v, k in zip(out[volume_col], out[kd_col]) ])
     out["Score"] = [calculate_score(v, k) for v, k in zip(out[volume_col], out[kd_col])]
     out["Tier"] = out["Score"].map(LABEL_MAP).fillna("Not rated")
-    out["Color"] = out["Score"].map(COLOR_MAP).fillna("#9ca3af")  # for preview styling only
+    out["Color"] = out["Score"].map(COLOR_MAP).fillna("#9ca3af")  # for preview styling & single-keyword card
 
     # Order columns for output/export
     ordered = ([kw_col] if kw_col else []) + [volume_col, kd_col, "Score", "Tier", "Eligible", "Reason"]
@@ -120,13 +120,14 @@ with st.form("single"):
 
     if st.form_submit_button("Calculate Score"):
         sc = calculate_score(vol_val, kd_val)
+        label = LABEL_MAP.get(sc, "Not rated")
+        color = COLOR_MAP.get(sc, "#9ca3af")
         if vol_val < MIN_VALID_VOLUME:
             st.warning(f"The selected strategy requires a minimum search volume of {MIN_VALID_VOLUME}. Please enter a volume that meets the threshold.")
-        label = LABEL_MAP.get(sc, "Not rated")
         st.markdown(
             f"""
-            <div style='background-color:#f3f4f6; padding:16px; border-radius:8px; text-align:center;'>
-                <span style='font-size:22px; font-weight:bold;'>Score: {sc} • Tier: {label}</span>
+            <div style='background-color:{color}; padding:16px; border-radius:8px; text-align:center;'>
+                <span style='font-size:22px; font-weight:bold; color:#000;'>Score: {sc} • Tier: {label}</span>
             </div>
             """,
             unsafe_allow_html=True,
@@ -224,7 +225,7 @@ if uploaded is not None:
             help="CSV with Score, Tier, and eligibility info"
         )
 
-        # Optional tiny preview with color coding (no hex column shown)
+        # Optional tiny preview with color coding (no hex column shown in table)
         if st.checkbox("Preview first 10 rows (optional)", value=False):
             def _row_style(row):
                 style = []
