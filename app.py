@@ -91,5 +91,109 @@ with st.form("single"):
     if st.form_submit_button("Calculate Score"):
         sc = calculate_score(vol_val, kd_val)
         if vol_val < MIN_VALID_VOLUME:
-            st.warning(
-                f"The selected strategy requires a minimum
+            st.warning(f"The selected strategy requires a minimum search volume of {MIN_VALID_VOLUME}. Please enter a volume that meets the threshold.")
+        label = LABEL_MAP.get(sc, "Not rated")
+        st.markdown(
+            f"""
+            <div style='background-color:#f3f4f6; padding:16px; border-radius:8px; text-align:center;'>
+                <span style='font-size:22px; font-weight:bold;'>Score: {sc} • Tier: {label}</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+st.markdown("---")
+st.subheader("Bulk Scoring (CSV Upload)")
+
+uploaded = st.file_uploader("Upload CSV", type=["csv"])
+example = pd.DataFrame(
+    {
+        "Keyword": ["best running shoes", "seo tools", "crm software"],
+        "Volume": [5400, 880, 12000],
+        "KD": [38, 72, 18],
+    }
+)
+with st.expander("See example CSV format"):
+    st.dataframe(example, use_container_width=True)
+
+# ---------- Robust CSV reader + numeric cleaning ----------
+if uploaded is not None:
+    raw = uploaded.getvalue()
+
+    def try_read(bytes_data: bytes) -> pd.DataFrame:
+        trials = [
+            {"encoding": None, "sep": None, "engine": "python"},
+            {"encoding": "utf-8", "sep": None, "engine": "python"},
+            {"encoding": "utf-8-sig", "sep": None, "engine": "python"},
+            {"encoding": "ISO-8859-1", "sep": None, "engine": "python"},
+            {"encoding": "cp1252", "sep": None, "engine": "python"},
+            {"encoding": "utf-16", "sep": None, "engine": "python"},
+            {"encoding": None, "sep": ",", "engine": "python"},
+            {"encoding": None, "sep": "\t", "engine": "python"},
+        ]
+        last_err = None
+        for t in trials:
+            try:
+                kwargs = {k: v for k, v in t.items() if v is not None}
+                return pd.read_csv(io.BytesIO(bytes_data), **kwargs)
+            except Exception as e:
+                last_err = e
+        raise last_err
+
+    try:
+        df = try_read(raw)
+    except Exception:
+        st.error("Could not read the file. Please ensure it's a CSV (or TSV) exported from Excel/Sheets and try again.")
+        st.stop()
+
+    # Find relevant columns
+    vol_col = find_column(df, ["volume", "search volume", "sv"])
+    kd_col = find_column(df, ["kd", "difficulty", "keyword difficulty"])
+    kw_col = find_column(df, ["keyword", "query", "term"])
+
+    missing = []
+    if vol_col is None:
+        missing.append("Volume")
+    if kd_col is None:
+        missing.append("Keyword Difficulty")
+
+    if missing:
+        st.error("Missing required column(s): " + ", ".join(missing))
+    else:
+        # Clean numbers
+        df[vol_col] = df[vol_col].astype(str).str.replace(r"[,\s]", "", regex=True).str.replace("%", "", regex=False)
+        df[kd_col] = df[kd_col].astype(str).str.replace(r"[,\s]", "", regex=True).str.replace("%", "", regex=False)
+        df[vol_col] = pd.to_numeric(df[vol_col], errors="coerce")
+        df[kd_col] = pd.to_numeric(df[kd_col], errors="coerce").clip(lower=0, upper=100)
+
+        scored = add_score_columns(df, vol_col, kd_col)
+
+        # Reorder: Keyword, Volume, KD, Score, Tier
+        ordered = ([kw_col] if kw_col else []) + [vol_col, kd_col, "Score", "Tier"]
+        remaining = [c for c in scored.columns if c not in ordered]
+        scored = scored[ordered + remaining]
+
+        below_min = (df[vol_col] < MIN_VALID_VOLUME).sum()
+        if below_min:
+            st.info(f"{below_min} row(s) are below the minimum search volume for '{scoring_mode}' ({MIN_VALID_VOLUME}). Those rows are 'Not rated' by design.")
+
+        st.success("Scoring complete")
+
+        # CSV DOWNLOAD
+        filename_base = f"outrankiq_{scoring_mode.lower().replace(' ', '_')}_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
+        export_cols = ([kw_col] if kw_col else []) + [vol_col, kd_col, "Score", "Tier"]
+        export_df = scored[export_cols]
+
+        csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")
+        st.download_button(
+            label="⬇️ Download scored CSV",
+            data=csv_bytes,
+            file_name=f"{filename_base}.csv",
+            mime="text/csv"
+        )
+
+        if st.checkbox("Preview first 10 rows (optional)", value=False):
+            st.dataframe(export_df.head(10), use_container_width=True)
+
+st.markdown("---")
+st.caption("© 2025 OutrankIQ • Select from three scoring strategies to target different types of keyword opportunities.")
