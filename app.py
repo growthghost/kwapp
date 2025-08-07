@@ -29,6 +29,17 @@ LABEL_MAP = {
     0: "Not rated",
 }
 
+# For preview styling only (NOT exported)
+COLOR_MAP = {
+    6: "#2ecc71",  # bright green
+    5: "#a3e635",  # lime
+    4: "#facc15",  # yellow
+    3: "#fb923c",  # orange
+    2: "#f87171",  # tomato
+    1: "#ef4444",  # red
+    0: "#9ca3af",  # gray
+}
+
 strategy_descriptions = {
     "Low Hanging Fruit": "Keywords that can be used to rank quickly with minimal effort. Ideal for new content or low-authority sites. Try targeting long-tail keywords, create quick-win content, and build a few internal links.",
     "In The Game": "Moderate difficulty keywords that are within reach for growing sites. Focus on optimizing content, earning backlinks, and matching search intent to climb the ranks.",
@@ -45,7 +56,7 @@ elif scoring_mode == "In The Game":
     MIN_VALID_VOLUME = 1500
     KD_BUCKETS = [(0, 30, 6), (31, 45, 5), (46, 60, 4), (61, 70, 3), (71, 80, 2), (81, 100, 1)]
 elif scoring_mode == "Competitive":
-    MIN_VALID_VOLUME = 1501
+    MIN_VALID_VOLUME = 3000  # updated per your instruction
     KD_BUCKETS = [(0, 40, 6), (41, 60, 5), (61, 75, 4), (76, 85, 3), (86, 95, 2), (96, 100, 1)]
 
 st.markdown(
@@ -63,6 +74,7 @@ st.markdown(
 
 # ---------- Scoring ----------
 def calculate_score(volume: float, kd: float) -> int:
+    """Return score 0-6, but ONLY if eligible (volume >= min)."""
     if pd.isna(volume) or pd.isna(kd):
         return 0
     if volume < MIN_VALID_VOLUME:
@@ -73,10 +85,28 @@ def calculate_score(volume: float, kd: float) -> int:
             return score
     return 0
 
-def add_score_columns(df: pd.DataFrame, volume_col: str, kd_col: str) -> pd.DataFrame:
+def add_scoring_columns(df: pd.DataFrame, volume_col: str, kd_col: str, kw_col: str | None) -> pd.DataFrame:
     out = df.copy()
+
+    # Eligibility + Reason (Option A)
+    def _eligibility_reason(vol, kd):
+        if pd.isna(vol) or pd.isna(kd):
+            return "No", "Invalid Volume/KD"
+        if vol < MIN_VALID_VOLUME:
+            return "No", f"Below min volume for {scoring_mode} ({MIN_VALID_VOLUME})"
+        return "Yes", ""
+
+    # Compute columns
+    out["Eligible"], out["Reason"] = zip(*[ _eligibility_reason(v, k) for v, k in zip(out[volume_col], out[kd_col]) ])
     out["Score"] = [calculate_score(v, k) for v, k in zip(out[volume_col], out[kd_col])]
     out["Tier"] = out["Score"].map(LABEL_MAP).fillna("Not rated")
+    out["Color"] = out["Score"].map(COLOR_MAP).fillna("#9ca3af")  # for preview styling only
+
+    # Order columns for output/export
+    ordered = ([kw_col] if kw_col else []) + [volume_col, kd_col, "Score", "Tier", "Eligible", "Reason"]
+    remaining = [c for c in out.columns if c not in ordered]
+    out = out[ordered + remaining]
+
     return out
 
 # ---------- Single keyword ----------
@@ -122,14 +152,14 @@ if uploaded is not None:
 
     def try_read(bytes_data: bytes) -> pd.DataFrame:
         trials = [
-            {"encoding": None, "sep": None, "engine": "python"},
+            {"encoding": None, "sep": None, "engine": "python"},     # let pandas infer
             {"encoding": "utf-8", "sep": None, "engine": "python"},
             {"encoding": "utf-8-sig", "sep": None, "engine": "python"},
             {"encoding": "ISO-8859-1", "sep": None, "engine": "python"},
             {"encoding": "cp1252", "sep": None, "engine": "python"},
             {"encoding": "utf-16", "sep": None, "engine": "python"},
-            {"encoding": None, "sep": ",", "engine": "python"},
-            {"encoding": None, "sep": "\t", "engine": "python"},
+            {"encoding": None, "sep": ",", "engine": "python"},      # force comma
+            {"encoding": None, "sep": "\t", "engine": "python"},     # TSV fallback
         ]
         last_err = None
         for t in trials:
@@ -160,40 +190,54 @@ if uploaded is not None:
     if missing:
         st.error("Missing required column(s): " + ", ".join(missing))
     else:
-        # Clean numbers
+        # Clean numbers (commas, spaces, percents)
         df[vol_col] = df[vol_col].astype(str).str.replace(r"[,\s]", "", regex=True).str.replace("%", "", regex=False)
         df[kd_col] = df[kd_col].astype(str).str.replace(r"[,\s]", "", regex=True).str.replace("%", "", regex=False)
         df[vol_col] = pd.to_numeric(df[vol_col], errors="coerce")
         df[kd_col] = pd.to_numeric(df[kd_col], errors="coerce").clip(lower=0, upper=100)
 
-        scored = add_score_columns(df, vol_col, kd_col)
+        scored = add_scoring_columns(df, vol_col, kd_col, kw_col)
 
-        # Reorder: Keyword, Volume, KD, Score, Tier
-        ordered = ([kw_col] if kw_col else []) + [vol_col, kd_col, "Score", "Tier"]
-        remaining = [c for c in scored.columns if c not in ordered]
-        scored = scored[ordered + remaining]
-
-        below_min = (df[vol_col] < MIN_VALID_VOLUME).sum()
-        if below_min:
-            st.info(f"{below_min} row(s) are below the minimum search volume for '{scoring_mode}' ({MIN_VALID_VOLUME}). Those rows are 'Not rated' by design.")
+        # Info banners
+        invalid_rows = scored["Reason"].eq("Invalid Volume/KD").sum()
+        below_min_rows = scored["Reason"].str.startswith("Below min volume").sum()
+        if invalid_rows or below_min_rows:
+            msgs = []
+            if below_min_rows:
+                msgs.append(f"{below_min_rows} below minimum volume for '{scoring_mode}' ({MIN_VALID_VOLUME}).")
+            if invalid_rows:
+                msgs.append(f"{invalid_rows} with invalid Volume/KD.")
+            st.info("Some rows were not eligible: " + " ".join(msgs))
 
         st.success("Scoring complete")
 
-        # CSV DOWNLOAD
+        # ---------- CSV DOWNLOAD (no Color column) ----------
         filename_base = f"outrankiq_{scoring_mode.lower().replace(' ', '_')}_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
-        export_cols = ([kw_col] if kw_col else []) + [vol_col, kd_col, "Score", "Tier"]
+        export_cols = ([kw_col] if kw_col else []) + [vol_col, kd_col, "Score", "Tier", "Eligible", "Reason"]
         export_df = scored[export_cols]
-
         csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")
         st.download_button(
             label="⬇️ Download scored CSV",
             data=csv_bytes,
             file_name=f"{filename_base}.csv",
-            mime="text/csv"
+            mime="text/csv",
+            help="CSV with Score, Tier, and eligibility info"
         )
 
+        # Optional tiny preview with color coding (no hex column shown)
         if st.checkbox("Preview first 10 rows (optional)", value=False):
-            st.dataframe(export_df.head(10), use_container_width=True)
+            def _row_style(row):
+                style = []
+                for col in row.index:
+                    if col in ("Score", "Tier"):
+                        style.append(f"background-color: {row.get('Color', '#9ca3af')}; color: black;")
+                    else:
+                        style.append("")
+                return style
+
+            preview_cols = export_cols + (["Color"] if "Color" in scored.columns else [])
+            styled = scored[preview_cols].head(10).style.apply(_row_style, axis=1).hide(axis="columns", subset=["Color"])
+            st.dataframe(styled, use_container_width=True)
 
 st.markdown("---")
 st.caption("© 2025 OutrankIQ • Select from three scoring strategies to target different types of keyword opportunities.")
