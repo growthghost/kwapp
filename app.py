@@ -8,7 +8,6 @@ st.set_page_config(page_title="OutrankIQ", page_icon="🔎", layout="centered")
 st.title("OutrankIQ")
 st.caption("Score keywords by Search Volume (A) and Keyword Difficulty (B) — with selectable scoring strategies.")
 
-
 # ---------- Helpers ----------
 def find_column(df: pd.DataFrame, candidates) -> str | None:
     cols_lower = {c.lower(): c for c in df.columns}
@@ -19,7 +18,6 @@ def find_column(df: pd.DataFrame, candidates) -> str | None:
         if any(k in c.lower() for k in candidates):
             return c
     return None
-
 
 LABEL_MAP = {
     6: "Elite",
@@ -47,7 +45,6 @@ strategy_descriptions = {
     "Competitive": "High-volume, high-difficulty keywords dominated by authoritative domains. Requires strong content, domain authority, and strategic SEO to compete. Great for long-term growth.",
 }
 
-
 # ---------- Strategy selector ----------
 scoring_mode = st.selectbox("Choose Scoring Strategy", ["Low Hanging Fruit", "In The Game", "Competitive"])
 
@@ -74,25 +71,23 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-
 # ---------- Scoring ----------
 def calculate_score(volume: float, kd: float) -> int:
-    try:
-        if pd.isna(volume) or pd.isna(kd):
-            return 0
-        volume = float(volume)
-        kd = float(kd)
-    except Exception:
+    # Both values are expected to be numeric already (cleaned below)
+    if pd.isna(volume) or pd.isna(kd):
         return 0
 
+    # Enforce thresholds / bounds
     if volume < MIN_VALID_VOLUME:
         return 0
+
+    # Clamp KD to 0–100 to avoid out-of-range values breaking buckets
+    kd = max(0.0, min(100.0, float(kd)))
 
     for low, high, score in KD_BUCKETS:
         if low <= kd <= high:
             return score
     return 0
-
 
 def add_score_columns(df: pd.DataFrame, volume_col: str, kd_col: str) -> pd.DataFrame:
     out = df.copy()
@@ -100,7 +95,6 @@ def add_score_columns(df: pd.DataFrame, volume_col: str, kd_col: str) -> pd.Data
     out["Tier"] = out["Score"].map(LABEL_MAP).fillna("Not rated")
     out["Color"] = out["Score"].map(COLOR_MAP).fillna("#9ca3af")
     return out
-
 
 # ---------- Single keyword ----------
 st.subheader("Single Keyword Score")
@@ -112,12 +106,12 @@ with st.form("single"):
         kd_val = st.number_input("Keyword Difficulty (B)", min_value=0, step=1, value=0)
 
     if st.form_submit_button("Calculate Score"):
+        sc = calculate_score(vol_val, kd_val)
         if vol_val < MIN_VALID_VOLUME:
             st.warning(
                 f"The selected strategy requires a minimum search volume of {MIN_VALID_VOLUME}. "
                 f"Please enter a volume that meets the threshold."
             )
-        sc = calculate_score(vol_val, kd_val)
         label = LABEL_MAP.get(sc, "Not rated")
         color = COLOR_MAP.get(sc, "#9ca3af")
         st.markdown(
@@ -128,7 +122,6 @@ with st.form("single"):
             """,
             unsafe_allow_html=True,
         )
-
 
 st.markdown("---")
 st.subheader("Bulk Scoring (CSV Upload)")
@@ -144,8 +137,7 @@ example = pd.DataFrame(
 with st.expander("See example CSV format"):
     st.dataframe(example, use_container_width=True)
 
-
-# ---------- Robust CSV reader for many encodings/delimiters ----------
+# ---------- Robust CSV reader + numeric cleaning ----------
 if uploaded is not None:
     raw = uploaded.getvalue()
 
@@ -189,12 +181,36 @@ if uploaded is not None:
     if missing:
         st.error("Missing required column(s): " + ", ".join(missing))
     else:
+        # ---- CLEAN NUMBERS so scoring is reliable ----
+        # Handle commas, spaces, and percent signs (e.g., "1,500", "38%")
+        df[vol_col] = (
+            df[vol_col]
+            .astype(str)
+            .str.replace(r"[,\s]", "", regex=True)
+            .str.replace("%", "", regex=False)
+        )
+        df[kd_col] = (
+            df[kd_col]
+            .astype(str)
+            .str.replace(r"[,\s]", "", regex=True)
+            .str.replace("%", "", regex=False)
+        )
+
+        # Convert to numeric; invalid parse -> NaN (becomes Not rated)
+        df[vol_col] = pd.to_numeric(df[vol_col], errors="coerce")
+        df[kd_col] = pd.to_numeric(df[kd_col], errors="coerce").clip(lower=0, upper=100)
+
+        # Show a small info if some rows couldn't be parsed
+        invalid_count = df[vol_col].isna().sum() + df[kd_col].isna().sum()
+        if invalid_count:
+            st.info("Some rows had non-numeric Volume/KD (commas/percents are okay). Unreadable values will be 'Not rated'.")
+
         scored = add_score_columns(df, vol_col, kd_col)
 
         # Reorder: Keyword (if present), Volume, KD, Score, Tier, then any remaining columns
         ordered = ([kw_col] if kw_col else []) + [vol_col, kd_col, "Score", "Tier"]
-        remaining = [c for c in scored.columns if c not in ordered]
-        scored = scored[ordered + remaining]
+        remaining = [c for c in scored.columns if c not in ordered + ["Color"]]
+        scored = scored[ordered + remaining + ["Color"]]  # keep Color at end for preview styling
 
         st.success("Scoring complete")
 
@@ -214,7 +230,20 @@ if uploaded is not None:
 
         # Optional tiny preview (off by default) so you don’t leak full data on screen
         if st.checkbox("Preview first 10 rows (optional)", value=False):
-            st.dataframe(export_df.head(10), use_container_width=True)
+            def _row_style(row):
+                # color Score/Tier cells based on computed Color
+                style = []
+                for col in row.index:
+                    if col in ("Score", "Tier"):
+                        style.append(f"background-color: {row.get('Color', '#9ca3af')}; color: black;")
+                    else:
+                        style.append("")
+                return style
+
+            st.dataframe(
+                scored.head(10).style.apply(_row_style, axis=1).hide(axis="columns", subset=["Color"]),
+                use_container_width=True
+            )
 
 st.markdown("---")
 st.caption("© 2025 OutrankIQ • Select from three scoring strategies to target different types of keyword opportunities.")
