@@ -198,15 +198,11 @@ if uploaded is not None:
 
         st.success("Scoring complete")
 
-        # ---------- DOWNLOADS (no table shown by default) ----------
-        # Build a filename with the strategy and timestamp
+        # ---------- CSV DOWNLOAD ONLY (no table shown by default) ----------
         filename_base = f"outrankiq_{scoring_mode.lower().replace(' ', '_')}_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
-
-        # Exclude the helper Color column from export (keeps things tidy)
         export_cols = [c for c in scored.columns if c != "Color"]
         export_df = scored[export_cols]
 
-        # --- CSV download ---
         csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")  # BOM helps Excel open UTF-8 cleanly
         st.download_button(
             label="⬇️ Download scored CSV",
@@ -215,36 +211,6 @@ if uploaded is not None:
             mime="text/csv",
             help="CSV with Score and Tier added"
         )
-
-        # --- Excel download (engine-agnostic) ---
-        # Tries xlsxwriter first; falls back to openpyxl if needed.
-        excel_bytes = None
-        try:
-            with io.BytesIO() as xbuf:
-                with pd.ExcelWriter(xbuf, engine="xlsxwriter") as writer:
-                    export_df.to_excel(writer, index=False, sheet_name="Scores")
-                xbuf.seek(0)
-                excel_bytes = xbuf.getvalue()
-        except Exception:
-            try:
-                with io.BytesIO() as xbuf:
-                    with pd.ExcelWriter(xbuf, engine="openpyxl") as writer:
-                        export_df.to_excel(writer, index=False, sheet_name="Scores")
-                    xbuf.seek(0)
-                    excel_bytes = xbuf.getvalue()
-            except Exception:
-                excel_bytes = None
-
-        if excel_bytes:
-            st.download_button(
-                label="⬇️ Download scored Excel",
-                data=excel_bytes,
-                file_name=f"{filename_base}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                help="Excel with Score and Tier added"
-            )
-        else:
-            st.info("Excel export unavailable (writer engine not installed). CSV download still works.")
 
         # Optional tiny preview (off by default) so you don’t leak full data on screen
         if st.checkbox("Preview first 10 rows (optional)", value=False):
