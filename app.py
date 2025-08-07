@@ -29,7 +29,7 @@ LABEL_MAP = {
     0: "Not rated",
 }
 
-# For preview & single-keyword styling only (NOT exported)
+# Used for card + preview styling only (NOT exported)
 COLOR_MAP = {
     6: "#2ecc71",  # bright green
     5: "#a3e635",  # lime
@@ -56,7 +56,7 @@ elif scoring_mode == "In The Game":
     MIN_VALID_VOLUME = 1500
     KD_BUCKETS = [(0, 30, 6), (31, 45, 5), (46, 60, 4), (61, 70, 3), (71, 80, 2), (81, 100, 1)]
 elif scoring_mode == "Competitive":
-    MIN_VALID_VOLUME = 3000  # updated per your instruction
+    MIN_VALID_VOLUME = 3000  # as requested
     KD_BUCKETS = [(0, 40, 6), (41, 60, 5), (61, 75, 4), (76, 85, 3), (86, 95, 2), (96, 100, 1)]
 
 st.markdown(
@@ -97,16 +97,16 @@ def add_scoring_columns(df: pd.DataFrame, volume_col: str, kd_col: str, kw_col: 
         return "Yes", ""
 
     # Compute columns
-    out["Eligible"], out["Reason"] = zip(*[ _eligibility_reason(v, k) for v, k in zip(out[volume_col], out[kd_col]) ])
+    eligible, reason = zip(*(_eligibility_reason(v, k) for v, k in zip(out[volume_col], out[kd_col])))
+    out["Eligible"] = list(eligible)
+    out["Reason"] = list(reason)
     out["Score"] = [calculate_score(v, k) for v, k in zip(out[volume_col], out[kd_col])]
     out["Tier"] = out["Score"].map(LABEL_MAP).fillna("Not rated")
-    out["Color"] = out["Score"].map(COLOR_MAP).fillna("#9ca3af")  # for preview styling & single-keyword card
 
     # Order columns for output/export
     ordered = ([kw_col] if kw_col else []) + [volume_col, kd_col, "Score", "Tier", "Eligible", "Reason"]
     remaining = [c for c in out.columns if c not in ordered]
     out = out[ordered + remaining]
-
     return out
 
 # ---------- Single keyword ----------
@@ -212,22 +212,22 @@ if uploaded is not None:
 
         st.success("Scoring complete")
 
-        # ---------- CSV DOWNLOAD (sorted; adds Strategy; no Color column) ----------
+        # ---------- CSV DOWNLOAD (sorted: Yes first, then lowest KD) ----------
         filename_base = f"outrankiq_{scoring_mode.lower().replace(' ', '_')}_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
         base_cols = ([kw_col] if kw_col else []) + [vol_col, kd_col, "Score", "Tier", "Eligible", "Reason"]
         export_df = scored[base_cols].copy()
-        export_df["Strategy"] = scoring_mode  # <-- add strategy to CSV
-        export_cols = base_cols + ["Strategy"]
+        export_df["Strategy"] = scoring_mode  # include chosen strategy
 
-        # Sort: Eligible (Yes first) → Score ↓ → Volume ↓ → KD ↑
+        # Sort: Eligible (Yes first) → KD ↑
         export_df["_EligibleSort"] = export_df["Eligible"].map({"Yes": 1, "No": 0}).fillna(0)
         export_df = export_df.sort_values(
-            by=["_EligibleSort", "Score", vol_col, kd_col],
-            ascending=[False, False, False, True],
+            by=["_EligibleSort", kd_col],
+            ascending=[False, True],
             kind="mergesort"
         ).drop(columns=["_EligibleSort"])
 
-        # Reorder to desired column order including Strategy
+        # Reorder to final order
+        export_cols = base_cols + ["Strategy"]
         export_df = export_df[export_cols]
 
         csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")
@@ -236,31 +236,31 @@ if uploaded is not None:
             data=csv_bytes,
             file_name=f"{filename_base}.csv",
             mime="text/csv",
-            help="CSV with Score, Tier, eligibility info, and strategy (sorted)"
+            help="Sorted by eligibility (Yes first) and lowest KD"
         )
 
-        # Optional tiny preview with same sorting + color coding (includes Strategy for consistency)
+        # Optional preview (same sorting; NO Color column; still colored cells via Score→color)
         if st.checkbox("Preview first 10 rows (optional)", value=False):
             preview_df = scored.copy()
             preview_df["Strategy"] = scoring_mode
             preview_df["_EligibleSort"] = preview_df["Eligible"].map({"Yes": 1, "No": 0}).fillna(0)
             preview_df = preview_df.sort_values(
-                by=["_EligibleSort", "Score", vol_col, kd_col],
-                ascending=[False, False, False, True],
+                by=["_EligibleSort", kd_col],
+                ascending=[False, True],
                 kind="mergesort"
             ).drop(columns=["_EligibleSort"])
 
             def _row_style(row):
-                style = []
-                for col in row.index:
-                    if col in ("Score", "Tier"):
-                        style.append(f"background-color: {row.get('Color', '#9ca3af')}; color: black;")
-                    else:
-                        style.append("")
-                return style
+                # Color-code Score and Tier cells based on Score (no Color column needed)
+                color = COLOR_MAP.get(int(row.get("Score", 0)) if pd.notna(row.get("Score", 0)) else 0, "#9ca3af")
+                return [
+                    f"background-color: {color}; color: black;" if c in ("Score", "Tier") else ""
+                    for c in row.index
+                ]
 
-            preview_cols = export_cols + (["Color"] if "Color" in preview_df.columns else [])
-            styled = preview_df[preview_cols].head(10).style.apply(_row_style, axis=1).hide(axis="columns", subset=["Color"])
+            # show exactly the same columns as in the CSV preview
+            preview_cols = export_cols  # already excludes any Color
+            styled = preview_df[preview_cols].head(10).style.apply(_row_style, axis=1)
             st.dataframe(styled, use_container_width=True)
 
 st.markdown("---")
