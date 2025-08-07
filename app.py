@@ -96,14 +96,12 @@ def add_scoring_columns(df: pd.DataFrame, volume_col: str, kd_col: str, kw_col: 
             return "No", f"Below min volume for {scoring_mode} ({MIN_VALID_VOLUME})"
         return "Yes", ""
 
-    # Compute columns
     eligible, reason = zip(*(_eligibility_reason(v, k) for v, k in zip(out[volume_col], out[kd_col])))
     out["Eligible"] = list(eligible)
     out["Reason"] = list(reason)
     out["Score"] = [calculate_score(v, k) for v, k in zip(out[volume_col], out[kd_col])]
     out["Tier"] = out["Score"].map(LABEL_MAP).fillna("Not rated")
 
-    # Order columns for output/export
     ordered = ([kw_col] if kw_col else []) + [volume_col, kd_col, "Score", "Tier", "Eligible", "Reason"]
     remaining = [c for c in out.columns if c not in ordered]
     out = out[ordered + remaining]
@@ -138,11 +136,7 @@ st.subheader("Bulk Scoring (CSV Upload)")
 
 uploaded = st.file_uploader("Upload CSV", type=["csv"])
 example = pd.DataFrame(
-    {
-        "Keyword": ["best running shoes", "seo tools", "crm software"],
-        "Volume": [5400, 880, 12000],
-        "KD": [38, 72, 18],
-    }
+    {"Keyword": ["best running shoes", "seo tools", "crm software"], "Volume": [5400, 880, 12000], "KD": [38, 72, 18]}
 )
 with st.expander("See example CSV format"):
     st.dataframe(example, use_container_width=True)
@@ -153,14 +147,14 @@ if uploaded is not None:
 
     def try_read(bytes_data: bytes) -> pd.DataFrame:
         trials = [
-            {"encoding": None, "sep": None, "engine": "python"},     # let pandas infer
+            {"encoding": None, "sep": None, "engine": "python"},
             {"encoding": "utf-8", "sep": None, "engine": "python"},
             {"encoding": "utf-8-sig", "sep": None, "engine": "python"},
             {"encoding": "ISO-8859-1", "sep": None, "engine": "python"},
             {"encoding": "cp1252", "sep": None, "engine": "python"},
             {"encoding": "utf-16", "sep": None, "engine": "python"},
-            {"encoding": None, "sep": ",", "engine": "python"},      # force comma
-            {"encoding": None, "sep": "\t", "engine": "python"},     # TSV fallback
+            {"encoding": None, "sep": ",", "engine": "python"},
+            {"encoding": None, "sep": "\t", "engine": "python"},
         ]
         last_err = None
         for t in trials:
@@ -212,21 +206,20 @@ if uploaded is not None:
 
         st.success("Scoring complete")
 
-        # ---------- CSV DOWNLOAD (sorted: Yes first, then lowest KD) ----------
+        # ---------- CSV DOWNLOAD (sorted: Yes first, KD ↑ then Volume ↓) ----------
         filename_base = f"outrankiq_{scoring_mode.lower().replace(' ', '_')}_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
         base_cols = ([kw_col] if kw_col else []) + [vol_col, kd_col, "Score", "Tier", "Eligible", "Reason"]
         export_df = scored[base_cols].copy()
-        export_df["Strategy"] = scoring_mode  # include chosen strategy
+        export_df["Strategy"] = scoring_mode
 
-        # Sort: Eligible (Yes first) → KD ↑
+        # Sort: Eligible (Yes first) → KD ↑ → Volume ↓
         export_df["_EligibleSort"] = export_df["Eligible"].map({"Yes": 1, "No": 0}).fillna(0)
         export_df = export_df.sort_values(
-            by=["_EligibleSort", kd_col],
-            ascending=[False, True],
+            by=["_EligibleSort", kd_col, vol_col],
+            ascending=[False, True, False],
             kind="mergesort"
         ).drop(columns=["_EligibleSort"])
 
-        # Reorder to final order
         export_cols = base_cols + ["Strategy"]
         export_df = export_df[export_cols]
 
@@ -236,30 +229,25 @@ if uploaded is not None:
             data=csv_bytes,
             file_name=f"{filename_base}.csv",
             mime="text/csv",
-            help="Sorted by eligibility (Yes first) and lowest KD"
+            help="Sorted by eligibility (Yes first), KD ascending, Volume descending"
         )
 
-        # Optional preview (same sorting; NO Color column; still colored cells via Score→color)
+        # Optional preview (same sorting; colorized Score/Tier cells only)
         if st.checkbox("Preview first 10 rows (optional)", value=False):
             preview_df = scored.copy()
             preview_df["Strategy"] = scoring_mode
             preview_df["_EligibleSort"] = preview_df["Eligible"].map({"Yes": 1, "No": 0}).fillna(0)
             preview_df = preview_df.sort_values(
-                by=["_EligibleSort", kd_col],
-                ascending=[False, True],
+                by=["_EligibleSort", kd_col, vol_col],
+                ascending=[False, True, False],
                 kind="mergesort"
             ).drop(columns=["_EligibleSort"])
 
             def _row_style(row):
-                # Color-code Score and Tier cells based on Score (no Color column needed)
                 color = COLOR_MAP.get(int(row.get("Score", 0)) if pd.notna(row.get("Score", 0)) else 0, "#9ca3af")
-                return [
-                    f"background-color: {color}; color: black;" if c in ("Score", "Tier") else ""
-                    for c in row.index
-                ]
+                return [("background-color: " + color + "; color: black;") if c in ("Score", "Tier") else "" for c in row.index]
 
-            # show exactly the same columns as in the CSV preview
-            preview_cols = export_cols  # already excludes any Color
+            preview_cols = export_cols  # same columns as CSV
             styled = preview_df[preview_cols].head(10).style.apply(_row_style, axis=1)
             st.dataframe(styled, use_container_width=True)
 
