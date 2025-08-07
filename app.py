@@ -212,21 +212,44 @@ if uploaded is not None:
 
         st.success("Scoring complete")
 
-        # ---------- CSV DOWNLOAD (no Color column) ----------
+        # ---------- CSV DOWNLOAD (sorted; adds Strategy; no Color column) ----------
         filename_base = f"outrankiq_{scoring_mode.lower().replace(' ', '_')}_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
-        export_cols = ([kw_col] if kw_col else []) + [vol_col, kd_col, "Score", "Tier", "Eligible", "Reason"]
-        export_df = scored[export_cols]
+        base_cols = ([kw_col] if kw_col else []) + [vol_col, kd_col, "Score", "Tier", "Eligible", "Reason"]
+        export_df = scored[base_cols].copy()
+        export_df["Strategy"] = scoring_mode  # <-- add strategy to CSV
+        export_cols = base_cols + ["Strategy"]
+
+        # Sort: Eligible (Yes first) → Score ↓ → Volume ↓ → KD ↑
+        export_df["_EligibleSort"] = export_df["Eligible"].map({"Yes": 1, "No": 0}).fillna(0)
+        export_df = export_df.sort_values(
+            by=["_EligibleSort", "Score", vol_col, kd_col],
+            ascending=[False, False, False, True],
+            kind="mergesort"
+        ).drop(columns=["_EligibleSort"])
+
+        # Reorder to desired column order including Strategy
+        export_df = export_df[export_cols]
+
         csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")
         st.download_button(
             label="⬇️ Download scored CSV",
             data=csv_bytes,
             file_name=f"{filename_base}.csv",
             mime="text/csv",
-            help="CSV with Score, Tier, and eligibility info"
+            help="CSV with Score, Tier, eligibility info, and strategy (sorted)"
         )
 
-        # Optional tiny preview with color coding (no hex column shown in table)
+        # Optional tiny preview with same sorting + color coding (includes Strategy for consistency)
         if st.checkbox("Preview first 10 rows (optional)", value=False):
+            preview_df = scored.copy()
+            preview_df["Strategy"] = scoring_mode
+            preview_df["_EligibleSort"] = preview_df["Eligible"].map({"Yes": 1, "No": 0}).fillna(0)
+            preview_df = preview_df.sort_values(
+                by=["_EligibleSort", "Score", vol_col, kd_col],
+                ascending=[False, False, False, True],
+                kind="mergesort"
+            ).drop(columns=["_EligibleSort"])
+
             def _row_style(row):
                 style = []
                 for col in row.index:
@@ -236,8 +259,8 @@ if uploaded is not None:
                         style.append("")
                 return style
 
-            preview_cols = export_cols + (["Color"] if "Color" in scored.columns else [])
-            styled = scored[preview_cols].head(10).style.apply(_row_style, axis=1).hide(axis="columns", subset=["Color"])
+            preview_cols = export_cols + (["Color"] if "Color" in preview_df.columns else [])
+            styled = preview_df[preview_cols].head(10).style.apply(_row_style, axis=1).hide(axis="columns", subset=["Color"])
             st.dataframe(styled, use_container_width=True)
 
 st.markdown("---")
