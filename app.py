@@ -66,11 +66,11 @@ elif scoring_mode == "Competitive":
 st.markdown(
     f"""
 <div style='background: linear-gradient(to right, #3b82f6, #60a5fa); padding:16px; border-radius:8px; margin-bottom:16px;'>
-    <div style='margin-bottom:6px; font-size:13px; color:#f0f9ff;'>
+    <div style='margin-bottom:6px; font-size:13px; color:#0b1220;'>
         Minimum Search Volume Required: <strong>{MIN_VALID_VOLUME}</strong>
     </div>
-    <strong style='color:#ffffff; font-size:18px;'>{scoring_mode}</strong><br>
-    <span style='color:#f8fafc; font-size:15px;'>{strategy_descriptions[scoring_mode]}</span>
+    <strong style='color:#0b1220; font-size:18px;'>{scoring_mode}</strong><br>
+    <span style='color:#0b1220; font-size:15px;'>{strategy_descriptions[scoring_mode]}</span>
 </div>
 """,
     unsafe_allow_html=True,
@@ -145,19 +145,15 @@ def jaccard(a: set[str], b: set[str]) -> float:
     union = len(a | b)
     return inter / union if union else 0.0
 
-def score_keyword_to_page(keyword: str, categories: list[str], page_tokens: set[str]) -> tuple[float, str]:
+def score_keyword_to_page(keyword: str, categories: list[str], page_tokens: set[str]) -> float:
     kw_tokens = tokenize(keyword)
     base = jaccard(kw_tokens, page_tokens)
     boost = 0.0
-    applied = []
     for c in categories:
         terms = CATEGORY_BOOST_TERMS.get(c, set())
         if terms and (terms & page_tokens):
             boost += 0.05  # small, stackable boosts
-            applied.append(c)
-    score = min(base + boost, 1.0)
-    # We don't export 'method' anymore, but keep it for debugging if needed
-    return score, ("Jaccard" + (f" + Boost({'/'.join(applied)})" if applied else ""))
+    return min(base + boost, 1.0)
 
 def prepare_menu_pages_from_list(urls: list[str]) -> list[dict]:
     pages = []
@@ -172,37 +168,7 @@ def prepare_menu_pages_from_list(urls: list[str]) -> list[dict]:
         })
     return pages
 
-def prepare_menu_pages(menu_df: pd.DataFrame | None, menu_text: str) -> list[dict]:
-    pages = []
-    if menu_df is not None and not menu_df.empty:
-        url_col = find_column(menu_df, ["url", "link", "href"])
-        title_col = find_column(menu_df, ["title", "name", "label", "text"])
-        if url_col is None:
-            return pages
-        for _, r in menu_df.iterrows():
-            url = str(r[url_col]).strip()
-            if not url:
-                continue
-            title = str(r[title_col]).strip() if title_col else None
-            pages.append({
-                "url": url,
-                "title": title or url_to_title(url),
-                "tokens": extract_page_tokens(url, title)
-            })
-    # Fallback to textarea list (one URL per line)
-    if not pages:
-        for line in (menu_text or "").splitlines():
-            url = line.strip()
-            if not url:
-                continue
-            pages.append({
-                "url": url,
-                "title": url_to_title(url),
-                "tokens": extract_page_tokens(url, None)
-            })
-    return pages
-
-# ----- Domain-based sitemap discovery (Option 1) -----
+# ----- Domain-based sitemap discovery (always includes common subdomains) -----
 COMMON_SUBDOMAINS = ["www", "blog", "docs", "help", "support", "learn", "resources"]
 
 def normalize_domain(d: str) -> str:
@@ -226,44 +192,38 @@ def parse_sitemap(content: bytes) -> tuple[list[str], list[str]]:
     except Exception:
         return [], []
     ns = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
-    urls = []
-    children = []
+    urls, children = [], []
 
-    # urlset
     for url in tree.findall(".//sm:url/sm:loc", ns):
         loc = (url.text or "").strip()
         if loc:
             urls.append(loc)
-    # sitemapindex
+
     for loc in tree.findall(".//sm:sitemap/sm:loc", ns):
         child = (loc.text or "").strip()
         if child:
             children.append(child)
     return urls, children
 
-def discover_urls_from_sitemaps(domain: str, include_common: bool, extra_subs: list[str], per_sub_cap: int = 500) -> list[str]:
+def discover_urls_from_sitemaps(domain: str, extra_subs: list[str], per_sub_cap: int = 500) -> list[str]:
     root = normalize_domain(domain)
     if not root:
         return []
 
-    subs = set()
-    subs.add("")  # bare domain
-    if include_common:
-        subs.update(COMMON_SUBDOMAINS)
+    subs = set([""])  # bare domain
+    subs.update(COMMON_SUBDOMAINS)  # always include common subdomains
     for s in extra_subs:
         s = s.strip()
         if s:
             subs.add(s)
 
-    discovered = []
-    seen = set()
+    discovered, seen = [], set()
 
-    def add_urls(subdomain_prefix: str, urls: list[str]):
+    def add_urls(urls: list[str]):
         count = 0
         for u in urls:
             if u in seen:
                 continue
-            # keep only same registrable domain (+ subdomains)
             try:
                 p = urlparse(u)
                 host = (p.netloc or "").lower()
@@ -281,21 +241,19 @@ def discover_urls_from_sitemaps(domain: str, include_common: bool, extra_subs: l
         base = f"https://{sub+'.' if sub else ''}{root}/sitemap.xml"
         content = fetch(base)
         if not content:
-            # try http
             content = fetch(base.replace("https://", "http://"))
             if not content:
                 continue
         urls, children = parse_sitemap(content)
         if urls:
-            add_urls(sub, urls)
-        # follow child sitemaps (index)
+            add_urls(urls)
         for child in children:
             data = fetch(child)
             if not data:
                 continue
-            u2, _c2 = parse_sitemap(data)
+            u2, _ = parse_sitemap(data)
             if u2:
-                add_urls(sub, u2)
+                add_urls(u2)
 
     return discovered
 
@@ -310,7 +268,6 @@ def suggest_urls_for_keywords(df: pd.DataFrame, kw_col: str | None, only_eligibl
     mask = df["Eligible"].eq("Yes") if only_eligible and "Eligible" in df.columns else pd.Series([True]*len(df), index=df.index)
 
     suggested, scores = [], []
-
     for idx, row in df.iterrows():
         if not mask.loc[idx]:
             suggested.append("")
@@ -325,7 +282,7 @@ def suggest_urls_for_keywords(df: pd.DataFrame, kw_col: str | None, only_eligibl
 
         best_url, best_score = "", 0.0
         for p in pages:
-            s, _ = score_keyword_to_page(kw, categories, p["tokens"])
+            s = score_keyword_to_page(kw, categories, p["tokens"])
             if s > best_score:
                 best_url, best_score = p["url"], s
 
@@ -414,48 +371,33 @@ example = pd.DataFrame(
 with st.expander("See example CSV format"):
     st.dataframe(example, use_container_width=True)
 
-# ---------- Site mapping ----------
-with st.expander("Site mapping (optional): map keywords to main menu & sitemap URLs"):
-    mapping_mode = st.radio(
-        "Choose mapping mode",
-        ["Manual list/CSV", "Discover from domain (sitemap)"],
-        horizontal=True
+# ---------- Site mapping (sitemap discovery only) ----------
+with st.expander("Site mapping (optional): map keywords to URLs discovered from sitemap(s)"):
+    st.markdown(
+        "<div style='background:#FEF9C3;border:1px solid #FDE68A;padding:10px;border-radius:8px;color:#000;'>"
+        "<strong>Heads up:</strong> We discover URLs from sitemap(s) across common subdomains and "
+        "<strong>cap at 500 pages per subdomain</strong>. Need more? Contact <em>OutrankIQ</em>."
+        "</div>",
+        unsafe_allow_html=True
     )
-
+    domain = st.text_input("Domain (e.g., example.com)", "")
+    extra_subs_raw = st.text_input("Extra subdomains (optional, comma-separated)", "")
+    extra_subs = [s.strip() for s in extra_subs_raw.split(",")] if extra_subs_raw else []
     only_eligible = st.checkbox("Only assign eligible keywords", value=True)
-    MIN_MATCH_SCORE = 0.75  # fixed per your request
+    MIN_MATCH_SCORE = 0.75  # fixed
 
     discovered_urls = []
-    if mapping_mode == "Manual list/CSV":
-        menu_csv = st.file_uploader("Upload menu CSV (columns: URL, Title optional)", type=["csv"], key="menu_csv")
-        menu_text = st.text_area(
-            "Or paste URLs (one per line)",
-            height=120,
-            placeholder="https://example.com/\nhttps://example.com/pricing\nhttps://example.com/blog\n..."
-        )
+    if domain.strip():
+        with st.spinner("Discovering URLs from sitemap(s)..."):
+            try:
+                discovered_urls = discover_urls_from_sitemaps(
+                    domain=domain, extra_subs=extra_subs, per_sub_cap=500
+                )
+            except Exception:
+                discovered_urls = []
+        st.success(f"Discovered {len(discovered_urls)} URL(s) from sitemap(s).")
     else:
-        st.markdown(
-            "<div style='background:#FEF3C7;border:1px solid #F59E0B;padding:10px;border-radius:8px;'>"
-            "<strong>Heads up:</strong> We discover URLs from sitemaps across subdomains and "
-            "<strong>cap at 500 pages per subdomain</strong>. Need more? Contact <em>OutrankIQ</em> for a higher limit."
-            "</div>",
-            unsafe_allow_html=True
-        )
-        domain = st.text_input("Domain (e.g., example.com)", "")
-        include_common = st.checkbox("Include common subdomains (www, blog, docs, help, support, learn, resources)", value=True)
-        extra_subs_raw = st.text_input("Extra subdomains (optional, comma-separated)", "")
-        extra_subs = [s.strip() for s in extra_subs_raw.split(",")] if extra_subs_raw else []
-        if domain.strip():
-            with st.spinner("Discovering URLs from sitemap(s)..."):
-                try:
-                    discovered_urls = discover_urls_from_sitemaps(
-                        domain=domain, include_common=include_common, extra_subs=extra_subs, per_sub_cap=500
-                    )
-                except Exception:
-                    discovered_urls = []
-            st.success(f"Discovered {len(discovered_urls)} URL(s) from sitemap(s).")
-        else:
-            st.info("Enter a domain to begin discovery.")
+        st.info("Enter a domain to begin discovery.")
 
 # ---------- Robust CSV reader + numeric cleaning ----------
 if uploaded is not None:
@@ -509,20 +451,8 @@ if uploaded is not None:
 
         scored = add_scoring_columns(df, vol_col, kd_col, kw_col)
 
-        # Build pages list
-        if 'mapping_mode' in locals() and mapping_mode == "Discover from domain (sitemap)" and discovered_urls:
-            pages = prepare_menu_pages_from_list(discovered_urls)
-        else:
-            # Manual mode
-            menu_df = None
-            if 'menu_csv' in locals() and menu_csv is not None:
-                try:
-                    menu_df = try_read(menu_csv.getvalue())
-                except Exception:
-                    st.warning("Could not read menu CSV; falling back to pasted URLs.")
-                    menu_df = None
-            menu_text = locals().get('menu_text', "")
-            pages = prepare_menu_pages(menu_df, menu_text)
+        # Build pages from discovery
+        pages = prepare_menu_pages_from_list(discovered_urls) if discovered_urls else []
 
         # Apply URL suggestions (fixed min score 0.75)
         scored = suggest_urls_for_keywords(
