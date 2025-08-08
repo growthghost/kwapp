@@ -154,7 +154,8 @@ def score_keyword_to_page(keyword: str, categories: list[str], page_tokens: set[
             boost += 0.05  # small, stackable boosts
             applied.append(c)
     score = min(base + boost, 1.0)
-    method = f"Jaccard{f' + Boost({\"/\".join(applied)})' if applied else ''}"
+    boost_text = f" + Boost({'/'.join(applied)})" if applied else ""
+    method = f"Jaccard{boost_text}"
     return score, method
 
 def prepare_menu_pages(menu_df: pd.DataFrame | None, menu_text: str) -> list[dict]:
