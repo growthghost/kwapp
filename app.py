@@ -3,6 +3,7 @@ import re
 import pandas as pd
 import streamlit as st
 from datetime import datetime
+from urllib.parse import urlparse
 
 st.set_page_config(page_title="OutrankIQ", page_icon="🔎", layout="centered")
 
@@ -74,29 +75,18 @@ st.markdown(
 )
 
 # ---------- Category tagging (multi-label) ----------
-# Fixed output order for multi-labels
 CATEGORY_ORDER = ["SEO", "AIO", "VEO", "GEO", "AEO", "SXO", "LLM"]
-
-# Precompiled regex patterns/keyword triggers (tune anytime)
-# These heuristics reflect the definitions you provided; overlaps are allowed (multi-label).
 AIO_PAT    = re.compile(r"\b(what is|what's|define|definition|how to|step[- ]?by[- ]?step|tutorial|guide)\b", re.I)
 AEO_PAT    = re.compile(r"^\s*(who|what|when|where|why|how|which|can|should)\b", re.I)
 VEO_PAT    = re.compile(r"\b(near me|open now|closest|call now|directions|ok google|alexa|siri|hey google)\b", re.I)
-# GEO here = "generative engine" style: instructional/answerable phrasing without strong voice/local cues
 GEO_PAT    = re.compile(r"\b(how to|best way to|steps? to|examples? of|checklist|framework|template)\b", re.I)
 SXO_PAT    = re.compile(r"\b(best|top|compare|comparison|vs\.?|review|pricing|cost|cheap|free download|template|examples?)\b", re.I)
 LLM_PAT    = re.compile(r"\b(prompt|prompting|prompt[- ]?engineering|chatgpt|gpt[- ]?\d|llm|rag|embedding|vector|few[- ]?shot|zero[- ]?shot)\b", re.I)
 
 def categorize_keyword(kw: str) -> list[str]:
-    """
-    Return a list of categories (multi-label) for a given keyword.
-    If nothing matches, default to SEO.
-    """
     if not isinstance(kw, str) or not kw.strip():
-        return ["SEO"]  # safe default
-
+        return ["SEO"]
     text = kw.strip().lower()
-
     cats = set()
     if AIO_PAT.search(text): cats.add("AIO")
     if AEO_PAT.search(text): cats.add("AEO")
@@ -104,17 +94,155 @@ def categorize_keyword(kw: str) -> list[str]:
     if GEO_PAT.search(text): cats.add("GEO")
     if SXO_PAT.search(text): cats.add("SXO")
     if LLM_PAT.search(text): cats.add("LLM")
-
-    # If nothing matched, treat as standard SEO keyword
     if not cats:
         cats.add("SEO")
     else:
-        # Many AIO/AEO/GEO/VEO phrases are still valid SEO; include SEO as a base unless it's pure LLM prompt
         if "LLM" not in cats:
             cats.add("SEO")
-
-    # Return in fixed order
     return [c for c in CATEGORY_ORDER if c in cats]
+
+# ---------- URL mapping helpers ----------
+TOKEN_RE = re.compile(r"[a-z0-9]+")
+
+def tokenize(s: str) -> set[str]:
+    if not isinstance(s, str):
+        return set()
+    return set(TOKEN_RE.findall(s.lower()))
+
+def url_to_title(url: str) -> str:
+    try:
+        p = urlparse(url)
+        last = p.path.strip("/").split("/")[-1] if p.path else ""
+        last = last.replace("-", " ").replace("_", " ").strip()
+        return last.title() if last else (p.netloc or url)
+    except Exception:
+        return url
+
+def extract_page_tokens(url: str, title: str | None) -> set[str]:
+    p = urlparse(url)
+    path_tokens = tokenize(p.path.replace("/", " "))
+    host_tokens = tokenize(p.netloc)
+    title_tokens = tokenize(title or url_to_title(url))
+    return path_tokens.union(host_tokens).union(title_tokens)
+
+# Category-aware boosts for URL mapping
+CATEGORY_BOOST_TERMS = {
+    "AIO": {"guide", "tutorial", "how", "learn", "blog", "faq"},
+    "AEO": {"faq", "questions", "what", "how", "who", "why"},
+    "VEO": {"locations", "near", "store", "contact", "phone", "hours"},
+    "GEO": {"guide", "how", "steps", "template", "framework"},
+    "SXO": {"pricing", "compare", "comparison", "best", "review", "vs"},
+    "LLM": {"ai", "docs", "developers", "api", "prompt", "gpt", "llm"},
+    "SEO": set(),  # baseline
+}
+
+def jaccard(a: set[str], b: set[str]) -> float:
+    if not a or not b:
+        return 0.0
+    inter = len(a & b)
+    union = len(a | b)
+    return inter / union if union else 0.0
+
+def score_keyword_to_page(keyword: str, categories: list[str], page_tokens: set[str]) -> tuple[float, str]:
+    kw_tokens = tokenize(keyword)
+    base = jaccard(kw_tokens, page_tokens)
+    boost = 0.0
+    applied = []
+    for c in categories:
+        terms = CATEGORY_BOOST_TERMS.get(c, set())
+        if terms and (terms & page_tokens):
+            boost += 0.05  # small, stackable boosts
+            applied.append(c)
+    score = min(base + boost, 1.0)
+    method = f"Jaccard{f' + Boost({\"/\".join(applied)})' if applied else ''}"
+    return score, method
+
+def prepare_menu_pages(menu_df: pd.DataFrame | None, menu_text: str) -> list[dict]:
+    pages = []
+    if menu_df is not None and not menu_df.empty:
+        url_col = find_column(menu_df, ["url", "link", "href"])
+        title_col = find_column(menu_df, ["title", "name", "label", "text"])
+        if url_col is None:
+            return pages
+        for _, r in menu_df.iterrows():
+            url = str(r[url_col]).strip()
+            if not url:
+                continue
+            title = str(r[title_col]).strip() if title_col else None
+            pages.append({
+                "url": url,
+                "title": title or url_to_title(url),
+                "tokens": extract_page_tokens(url, title)
+            })
+    # Fallback to textarea list (one URL per line)
+    if not pages:
+        for line in (menu_text or "").splitlines():
+            url = line.strip()
+            if not url:
+                continue
+            pages.append({
+                "url": url,
+                "title": url_to_title(url),
+                "tokens": extract_page_tokens(url, None)
+            })
+    return pages
+
+def suggest_urls_for_keywords(df: pd.DataFrame, kw_col: str | None, only_eligible: bool,
+                              min_score: float, max_per_url: int, pages: list[dict]) -> pd.DataFrame:
+    if not pages or kw_col is None:
+        df["Suggested URL"] = ""
+        df["URL Match Score"] = ""
+        df["URL Match Method"] = ""
+        return df
+
+    # Precompute category lists per row
+    cat_lists = df["Category"].fillna("").apply(lambda s: [c.strip() for c in str(s).split(",") if c.strip()] if s else ["SEO"])
+
+    # Optional: filter to eligible rows
+    mask = df["Eligible"].eq("Yes") if only_eligible and "Eligible" in df.columns else pd.Series([True]*len(df), index=df.index)
+
+    # Greedy assignment with per-URL cap
+    counts = {p["url"]: 0 for p in pages}
+    suggested = []
+    scores = []
+    methods = []
+
+    for idx, row in df.iterrows():
+        if not mask.loc[idx]:
+            suggested.append("")
+            scores.append("")
+            methods.append("")
+            continue
+        kw = str(row.get(kw_col, "")).strip()
+        if not kw:
+            suggested.append("")
+            scores.append("")
+            methods.append("")
+            continue
+        categories = cat_lists.loc[idx] if isinstance(cat_lists.loc[idx], list) else ["SEO"]
+
+        # Score against all pages
+        best_url, best_score, best_method = "", 0.0, ""
+        for p in pages:
+            s, m = score_keyword_to_page(kw, categories, p["tokens"])
+            if s > best_score:
+                best_url, best_score, best_method = p["url"], s, m
+
+        # Apply threshold and per-URL cap
+        if best_score >= min_score and counts.get(best_url, 0) < max_per_url:
+            counts[best_url] = counts.get(best_url, 0) + 1
+            suggested.append(best_url)
+            scores.append(round(float(best_score), 3))
+            methods.append(best_method)
+        else:
+            suggested.append("")
+            scores.append("")
+            methods.append("")
+
+    df["Suggested URL"] = suggested
+    df["URL Match Score"] = scores
+    df["URL Match Method"] = methods
+    return df
 
 # ---------- Scoring ----------
 def calculate_score(volume: float, kd: float) -> int:
@@ -146,11 +274,11 @@ def add_scoring_columns(df: pd.DataFrame, volume_col: str, kd_col: str, kw_col: 
     out["Score"] = [calculate_score(v, k) for v, k in zip(out[volume_col], out[kd_col])]
     out["Tier"] = out["Score"].map(LABEL_MAP).fillna("Not rated")
 
-    # Category (multi-label) — join as comma-separated in fixed order
+    # Category (multi-label)
     kw_series = out[kw_col] if kw_col else pd.Series([""] * len(out))
     out["Category"] = [", ".join(categorize_keyword(str(k))) for k in kw_series]
 
-    # Order columns for output/export
+    # Order columns
     ordered = ([kw_col] if kw_col else []) + [volume_col, kd_col, "Score", "Tier", "Eligible", "Reason", "Category"]
     remaining = [c for c in out.columns if c not in ordered]
     out = out[ordered + remaining]
@@ -189,6 +317,18 @@ example = pd.DataFrame(
 )
 with st.expander("See example CSV format"):
     st.dataframe(example, use_container_width=True)
+
+# ---------- Site mapping (Option A) ----------
+with st.expander("Site mapping (optional): map keywords to main menu URLs"):
+    st.markdown("Provide your main menu URLs to associate each keyword with the best page.")
+    colm1, colm2 = st.columns(2)
+    with colm1:
+        menu_csv = st.file_uploader("Upload menu CSV (columns: URL, Title optional)", type=["csv"], key="menu_csv")
+    with colm2:
+        max_per_url = st.number_input("Max keywords per URL", min_value=1, max_value=1000, value=50, step=1)
+    menu_text = st.text_area("Or paste URLs (one per line)", height=120, placeholder="https://example.com/\nhttps://example.com/pricing\nhttps://example.com/blog\n...")
+    only_eligible = st.checkbox("Only assign eligible keywords", value=True)
+    min_match_score = st.slider("Minimum match score to assign", min_value=0.0, max_value=1.0, value=0.15, step=0.01)
 
 # ---------- Robust CSV reader + numeric cleaning ----------
 if uploaded is not None:
@@ -242,6 +382,22 @@ if uploaded is not None:
 
         scored = add_scoring_columns(df, vol_col, kd_col, kw_col)
 
+        # Prepare menu pages (CSV takes precedence; otherwise textarea)
+        menu_df = None
+        if menu_csv is not None:
+            try:
+                menu_df = try_read(menu_csv.getvalue())
+            except Exception:
+                st.warning("Could not read menu CSV; falling back to pasted URLs.")
+                menu_df = None
+        pages = prepare_menu_pages(menu_df, menu_text)
+
+        # Apply URL suggestions
+        scored = suggest_urls_for_keywords(
+            scored, kw_col=kw_col, only_eligible=only_eligible,
+            min_score=min_match_score, max_per_url=max_per_url, pages=pages
+        )
+
         # Info banners
         invalid_rows = scored["Reason"].eq("Invalid Volume/KD").sum()
         below_min_rows = scored["Reason"].str.startswith("Below min volume").sum()
@@ -252,12 +408,16 @@ if uploaded is not None:
             if invalid_rows:
                 msgs.append(f"{invalid_rows} with invalid Volume/KD.")
             st.info("Some rows were not eligible: " + " ".join(msgs))
-
-        st.success("Scoring complete")
+        if pages:
+            assigned = scored["Suggested URL"].ne("").sum()
+            st.success(f"URL mapping done. {assigned} keyword(s) received a Suggested URL.")
 
         # ---------- CSV DOWNLOAD (sorted: Yes first, KD ↑ then Volume ↓) ----------
         filename_base = f"outrankiq_{scoring_mode.lower().replace(' ', '_')}_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
-        base_cols = ([kw_col] if kw_col else []) + [vol_col, kd_col, "Score", "Tier", "Eligible", "Reason", "Category"]
+        base_cols = ([kw_col] if kw_col else []) + [
+            vol_col, kd_col, "Score", "Tier", "Eligible", "Reason", "Category",
+            "Suggested URL", "URL Match Score", "URL Match Method"
+        ]
         export_df = scored[base_cols].copy()
         export_df["Strategy"] = scoring_mode
 
@@ -294,7 +454,10 @@ if uploaded is not None:
 
             def _row_style(row):
                 color = COLOR_MAP.get(int(row.get("Score", 0)) if pd.notna(row.get("Score", 0)) else 0, "#9ca3af")
-                return [("background-color: " + color + "; color: black;") if c in ("Score", "Tier") else "" for c in row.index]
+                return [
+                    ("background-color: " + color + "; color: black;") if c in ("Score", "Tier") else ""
+                    for c in row.index
+                ]
 
             preview_cols = export_cols  # same columns as CSV
             styled = preview_df[preview_cols].head(10).style.apply(_row_style, axis=1)
