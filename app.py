@@ -1,4 +1,5 @@
 import io
+import re
 import pandas as pd
 import streamlit as st
 from datetime import datetime
@@ -72,6 +73,49 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# ---------- Category tagging (multi-label) ----------
+# Fixed output order for multi-labels
+CATEGORY_ORDER = ["SEO", "AIO", "VEO", "GEO", "AEO", "SXO", "LLM"]
+
+# Precompiled regex patterns/keyword triggers (tune anytime)
+# These heuristics reflect the definitions you provided; overlaps are allowed (multi-label).
+AIO_PAT    = re.compile(r"\b(what is|what's|define|definition|how to|step[- ]?by[- ]?step|tutorial|guide)\b", re.I)
+AEO_PAT    = re.compile(r"^\s*(who|what|when|where|why|how|which|can|should)\b", re.I)
+VEO_PAT    = re.compile(r"\b(near me|open now|closest|call now|directions|ok google|alexa|siri|hey google)\b", re.I)
+# GEO here = "generative engine" style: instructional/answerable phrasing without strong voice/local cues
+GEO_PAT    = re.compile(r"\b(how to|best way to|steps? to|examples? of|checklist|framework|template)\b", re.I)
+SXO_PAT    = re.compile(r"\b(best|top|compare|comparison|vs\.?|review|pricing|cost|cheap|free download|template|examples?)\b", re.I)
+LLM_PAT    = re.compile(r"\b(prompt|prompting|prompt[- ]?engineering|chatgpt|gpt[- ]?\d|llm|rag|embedding|vector|few[- ]?shot|zero[- ]?shot)\b", re.I)
+
+def categorize_keyword(kw: str) -> list[str]:
+    """
+    Return a list of categories (multi-label) for a given keyword.
+    If nothing matches, default to SEO.
+    """
+    if not isinstance(kw, str) or not kw.strip():
+        return ["SEO"]  # safe default
+
+    text = kw.strip().lower()
+
+    cats = set()
+    if AIO_PAT.search(text): cats.add("AIO")
+    if AEO_PAT.search(text): cats.add("AEO")
+    if VEO_PAT.search(text): cats.add("VEO")
+    if GEO_PAT.search(text): cats.add("GEO")
+    if SXO_PAT.search(text): cats.add("SXO")
+    if LLM_PAT.search(text): cats.add("LLM")
+
+    # If nothing matched, treat as standard SEO keyword
+    if not cats:
+        cats.add("SEO")
+    else:
+        # Many AIO/AEO/GEO/VEO phrases are still valid SEO; include SEO as a base unless it's pure LLM prompt
+        if "LLM" not in cats:
+            cats.add("SEO")
+
+    # Return in fixed order
+    return [c for c in CATEGORY_ORDER if c in cats]
+
 # ---------- Scoring ----------
 def calculate_score(volume: float, kd: float) -> int:
     """Return score 0-6, but ONLY if eligible (volume >= min)."""
@@ -102,7 +146,12 @@ def add_scoring_columns(df: pd.DataFrame, volume_col: str, kd_col: str, kw_col: 
     out["Score"] = [calculate_score(v, k) for v, k in zip(out[volume_col], out[kd_col])]
     out["Tier"] = out["Score"].map(LABEL_MAP).fillna("Not rated")
 
-    ordered = ([kw_col] if kw_col else []) + [volume_col, kd_col, "Score", "Tier", "Eligible", "Reason"]
+    # Category (multi-label) — join as comma-separated in fixed order
+    kw_series = out[kw_col] if kw_col else pd.Series([""] * len(out))
+    out["Category"] = [", ".join(categorize_keyword(str(k))) for k in kw_series]
+
+    # Order columns for output/export
+    ordered = ([kw_col] if kw_col else []) + [volume_col, kd_col, "Score", "Tier", "Eligible", "Reason", "Category"]
     remaining = [c for c in out.columns if c not in ordered]
     out = out[ordered + remaining]
     return out
@@ -208,7 +257,7 @@ if uploaded is not None:
 
         # ---------- CSV DOWNLOAD (sorted: Yes first, KD ↑ then Volume ↓) ----------
         filename_base = f"outrankiq_{scoring_mode.lower().replace(' ', '_')}_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
-        base_cols = ([kw_col] if kw_col else []) + [vol_col, kd_col, "Score", "Tier", "Eligible", "Reason"]
+        base_cols = ([kw_col] if kw_col else []) + [vol_col, kd_col, "Score", "Tier", "Eligible", "Reason", "Category"]
         export_df = scored[base_cols].copy()
         export_df["Strategy"] = scoring_mode
 
@@ -232,7 +281,7 @@ if uploaded is not None:
             help="Sorted by eligibility (Yes first), KD ascending, Volume descending"
         )
 
-        # Optional preview (same sorting; colorized Score/Tier cells only)
+        # Optional preview (same sorting; colorized Score/Tier cells only; NO Color column shown)
         if st.checkbox("Preview first 10 rows (optional)", value=False):
             preview_df = scored.copy()
             preview_df["Strategy"] = scoring_mode
