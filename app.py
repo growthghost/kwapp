@@ -4,6 +4,8 @@ import pandas as pd
 import streamlit as st
 from datetime import datetime
 from urllib.parse import urlparse
+import requests
+import xml.etree.ElementTree as ET
 
 st.set_page_config(page_title="OutrankIQ", page_icon="🔎", layout="centered")
 
@@ -154,9 +156,21 @@ def score_keyword_to_page(keyword: str, categories: list[str], page_tokens: set[
             boost += 0.05  # small, stackable boosts
             applied.append(c)
     score = min(base + boost, 1.0)
-    boost_text = f" + Boost({'/'.join(applied)})" if applied else ""
-    method = f"Jaccard{boost_text}"
-    return score, method
+    # We don't export 'method' anymore, but keep it for debugging if needed
+    return score, ("Jaccard" + (f" + Boost({'/'.join(applied)})" if applied else ""))
+
+def prepare_menu_pages_from_list(urls: list[str]) -> list[dict]:
+    pages = []
+    for url in urls:
+        u = str(url).strip()
+        if not u:
+            continue
+        pages.append({
+            "url": u,
+            "title": url_to_title(u),
+            "tokens": extract_page_tokens(u, None)
+        })
+    return pages
 
 def prepare_menu_pages(menu_df: pd.DataFrame | None, menu_text: str) -> list[dict]:
     pages = []
@@ -188,18 +202,111 @@ def prepare_menu_pages(menu_df: pd.DataFrame | None, menu_text: str) -> list[dic
             })
     return pages
 
+# ----- Domain-based sitemap discovery (Option 1) -----
+COMMON_SUBDOMAINS = ["www", "blog", "docs", "help", "support", "learn", "resources"]
+
+def normalize_domain(d: str) -> str:
+    d = d.strip().lower()
+    d = d.replace("http://", "").replace("https://", "").strip("/")
+    return d
+
+def fetch(url: str, timeout: float = 10.0):
+    try:
+        resp = requests.get(url, timeout=timeout, headers={"User-Agent": "OutrankIQ/1.0"})
+        if resp.status_code == 200 and resp.content:
+            return resp.content
+    except Exception:
+        return None
+    return None
+
+def parse_sitemap(content: bytes) -> tuple[list[str], list[str]]:
+    """Return (urlset_urls, child_sitemaps)."""
+    try:
+        tree = ET.fromstring(content)
+    except Exception:
+        return [], []
+    ns = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
+    urls = []
+    children = []
+
+    # urlset
+    for url in tree.findall(".//sm:url/sm:loc", ns):
+        loc = (url.text or "").strip()
+        if loc:
+            urls.append(loc)
+    # sitemapindex
+    for loc in tree.findall(".//sm:sitemap/sm:loc", ns):
+        child = (loc.text or "").strip()
+        if child:
+            children.append(child)
+    return urls, children
+
+def discover_urls_from_sitemaps(domain: str, include_common: bool, extra_subs: list[str], per_sub_cap: int = 500) -> list[str]:
+    root = normalize_domain(domain)
+    if not root:
+        return []
+
+    subs = set()
+    subs.add("")  # bare domain
+    if include_common:
+        subs.update(COMMON_SUBDOMAINS)
+    for s in extra_subs:
+        s = s.strip()
+        if s:
+            subs.add(s)
+
+    discovered = []
+    seen = set()
+
+    def add_urls(subdomain_prefix: str, urls: list[str]):
+        count = 0
+        for u in urls:
+            if u in seen:
+                continue
+            # keep only same registrable domain (+ subdomains)
+            try:
+                p = urlparse(u)
+                host = (p.netloc or "").lower()
+                if not host.endswith(root):
+                    continue
+            except Exception:
+                continue
+            seen.add(u)
+            discovered.append(u)
+            count += 1
+            if count >= per_sub_cap:
+                break
+
+    for sub in subs:
+        base = f"https://{sub+'.' if sub else ''}{root}/sitemap.xml"
+        content = fetch(base)
+        if not content:
+            # try http
+            content = fetch(base.replace("https://", "http://"))
+            if not content:
+                continue
+        urls, children = parse_sitemap(content)
+        if urls:
+            add_urls(sub, urls)
+        # follow child sitemaps (index)
+        for child in children:
+            data = fetch(child)
+            if not data:
+                continue
+            u2, _c2 = parse_sitemap(data)
+            if u2:
+                add_urls(sub, u2)
+
+    return discovered
+
 def suggest_urls_for_keywords(df: pd.DataFrame, kw_col: str | None, only_eligible: bool,
                               min_score: float, pages: list[dict]) -> pd.DataFrame:
     if not pages or kw_col is None:
         df["Suggested URL"] = ""
         df["URL Match Score"] = ""
-        # We still compute method internally, but do not export it
         return df
 
-    # Precompute category lists per row
     cat_lists = df["Category"].fillna("").apply(lambda s: [c.strip() for c in str(s).split(",") if c.strip()] if s else ["SEO"])
-
-    # Optional: filter to eligible rows
     mask = df["Eligible"].eq("Yes") if only_eligible and "Eligible" in df.columns else pd.Series([True]*len(df), index=df.index)
 
     suggested, scores = [], []
@@ -216,14 +323,12 @@ def suggest_urls_for_keywords(df: pd.DataFrame, kw_col: str | None, only_eligibl
             continue
         categories = cat_lists.loc[idx] if isinstance(cat_lists.loc[idx], list) else ["SEO"]
 
-        # Score against all pages
         best_url, best_score = "", 0.0
         for p in pages:
-            s, _m = score_keyword_to_page(kw, categories, p["tokens"])
+            s, _ = score_keyword_to_page(kw, categories, p["tokens"])
             if s > best_score:
                 best_url, best_score = p["url"], s
 
-        # Apply threshold
         if best_score >= min_score:
             suggested.append(best_url)
             scores.append(round(float(best_score), 3))
@@ -309,14 +414,48 @@ example = pd.DataFrame(
 with st.expander("See example CSV format"):
     st.dataframe(example, use_container_width=True)
 
-# ---------- Site mapping (Option A) ----------
-with st.expander("Site mapping (optional): map keywords to main menu URLs"):
-    st.markdown("Provide your main menu URLs to associate each keyword with the best page.")
-    menu_csv = st.file_uploader("Upload menu CSV (columns: URL, Title optional)", type=["csv"], key="menu_csv")
-    menu_text = st.text_area("Or paste URLs (one per line)", height=120, placeholder="https://example.com/\nhttps://example.com/pricing\nhttps://example.com/blog\n...")
+# ---------- Site mapping ----------
+with st.expander("Site mapping (optional): map keywords to main menu & sitemap URLs"):
+    mapping_mode = st.radio(
+        "Choose mapping mode",
+        ["Manual list/CSV", "Discover from domain (sitemap)"],
+        horizontal=True
+    )
+
     only_eligible = st.checkbox("Only assign eligible keywords", value=True)
-    # Fixed minimum match score per your request
-    MIN_MATCH_SCORE = 0.75
+    MIN_MATCH_SCORE = 0.75  # fixed per your request
+
+    discovered_urls = []
+    if mapping_mode == "Manual list/CSV":
+        menu_csv = st.file_uploader("Upload menu CSV (columns: URL, Title optional)", type=["csv"], key="menu_csv")
+        menu_text = st.text_area(
+            "Or paste URLs (one per line)",
+            height=120,
+            placeholder="https://example.com/\nhttps://example.com/pricing\nhttps://example.com/blog\n..."
+        )
+    else:
+        st.markdown(
+            "<div style='background:#FEF3C7;border:1px solid #F59E0B;padding:10px;border-radius:8px;'>"
+            "<strong>Heads up:</strong> We discover URLs from sitemaps across subdomains and "
+            "<strong>cap at 500 pages per subdomain</strong>. Need more? Contact <em>OutrankIQ</em> for a higher limit."
+            "</div>",
+            unsafe_allow_html=True
+        )
+        domain = st.text_input("Domain (e.g., example.com)", "")
+        include_common = st.checkbox("Include common subdomains (www, blog, docs, help, support, learn, resources)", value=True)
+        extra_subs_raw = st.text_input("Extra subdomains (optional, comma-separated)", "")
+        extra_subs = [s.strip() for s in extra_subs_raw.split(",")] if extra_subs_raw else []
+        if domain.strip():
+            with st.spinner("Discovering URLs from sitemap(s)..."):
+                try:
+                    discovered_urls = discover_urls_from_sitemaps(
+                        domain=domain, include_common=include_common, extra_subs=extra_subs, per_sub_cap=500
+                    )
+                except Exception:
+                    discovered_urls = []
+            st.success(f"Discovered {len(discovered_urls)} URL(s) from sitemap(s).")
+        else:
+            st.info("Enter a domain to begin discovery.")
 
 # ---------- Robust CSV reader + numeric cleaning ----------
 if uploaded is not None:
@@ -370,17 +509,22 @@ if uploaded is not None:
 
         scored = add_scoring_columns(df, vol_col, kd_col, kw_col)
 
-        # Prepare menu pages (CSV takes precedence; otherwise textarea)
-        menu_df = None
-        if menu_csv is not None:
-            try:
-                menu_df = try_read(menu_csv.getvalue())
-            except Exception:
-                st.warning("Could not read menu CSV; falling back to pasted URLs.")
-                menu_df = None
-        pages = prepare_menu_pages(menu_df, menu_text)
+        # Build pages list
+        if 'mapping_mode' in locals() and mapping_mode == "Discover from domain (sitemap)" and discovered_urls:
+            pages = prepare_menu_pages_from_list(discovered_urls)
+        else:
+            # Manual mode
+            menu_df = None
+            if 'menu_csv' in locals() and menu_csv is not None:
+                try:
+                    menu_df = try_read(menu_csv.getvalue())
+                except Exception:
+                    st.warning("Could not read menu CSV; falling back to pasted URLs.")
+                    menu_df = None
+            menu_text = locals().get('menu_text', "")
+            pages = prepare_menu_pages(menu_df, menu_text)
 
-        # Apply URL suggestions (fixed minimum score; no max-per-URL cap)
+        # Apply URL suggestions (fixed min score 0.75)
         scored = suggest_urls_for_keywords(
             scored, kw_col=kw_col, only_eligible=only_eligible,
             min_score=MIN_MATCH_SCORE, pages=pages
@@ -398,7 +542,7 @@ if uploaded is not None:
             st.info("Some rows were not eligible: " + " ".join(msgs))
         if pages:
             assigned = scored["Suggested URL"].ne("").sum()
-            st.success(f"URL mapping done. {assigned} keyword(s) received a Suggested URL (min score {MIN_MATCH_SCORE}).")
+            st.success(f"URL mapping done. {assigned} keyword(s) received a Suggested URL. (Min match score {MIN_MATCH_SCORE})")
 
         # ---------- CSV DOWNLOAD (sorted: Yes first, KD ↑ then Volume ↓) ----------
         filename_base = f"outrankiq_{scoring_mode.lower().replace(' ', '_')}_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
@@ -429,7 +573,7 @@ if uploaded is not None:
             help="Sorted by eligibility (Yes first), KD ascending, Volume descending"
         )
 
-        # Optional preview (same sorting; colorized Score/Tier cells only)
+        # Optional preview (same sorting; colorized Score/Tier cells only; NO Color column shown)
         if st.checkbox("Preview first 10 rows (optional)", value=False):
             preview_df = scored.copy()
             preview_df["Strategy"] = scoring_mode
