@@ -189,11 +189,11 @@ def prepare_menu_pages(menu_df: pd.DataFrame | None, menu_text: str) -> list[dic
     return pages
 
 def suggest_urls_for_keywords(df: pd.DataFrame, kw_col: str | None, only_eligible: bool,
-                              min_score: float, max_per_url: int, pages: list[dict]) -> pd.DataFrame:
+                              min_score: float, pages: list[dict]) -> pd.DataFrame:
     if not pages or kw_col is None:
         df["Suggested URL"] = ""
         df["URL Match Score"] = ""
-        df["URL Match Method"] = ""
+        # We still compute method internally, but do not export it
         return df
 
     # Precompute category lists per row
@@ -202,47 +202,37 @@ def suggest_urls_for_keywords(df: pd.DataFrame, kw_col: str | None, only_eligibl
     # Optional: filter to eligible rows
     mask = df["Eligible"].eq("Yes") if only_eligible and "Eligible" in df.columns else pd.Series([True]*len(df), index=df.index)
 
-    # Greedy assignment with per-URL cap
-    counts = {p["url"]: 0 for p in pages}
-    suggested = []
-    scores = []
-    methods = []
+    suggested, scores = [], []
 
     for idx, row in df.iterrows():
         if not mask.loc[idx]:
             suggested.append("")
             scores.append("")
-            methods.append("")
             continue
         kw = str(row.get(kw_col, "")).strip()
         if not kw:
             suggested.append("")
             scores.append("")
-            methods.append("")
             continue
         categories = cat_lists.loc[idx] if isinstance(cat_lists.loc[idx], list) else ["SEO"]
 
         # Score against all pages
-        best_url, best_score, best_method = "", 0.0, ""
+        best_url, best_score = "", 0.0
         for p in pages:
-            s, m = score_keyword_to_page(kw, categories, p["tokens"])
+            s, _m = score_keyword_to_page(kw, categories, p["tokens"])
             if s > best_score:
-                best_url, best_score, best_method = p["url"], s, m
+                best_url, best_score = p["url"], s
 
-        # Apply threshold and per-URL cap
-        if best_score >= min_score and counts.get(best_url, 0) < max_per_url:
-            counts[best_url] = counts.get(best_url, 0) + 1
+        # Apply threshold
+        if best_score >= min_score:
             suggested.append(best_url)
             scores.append(round(float(best_score), 3))
-            methods.append(best_method)
         else:
             suggested.append("")
             scores.append("")
-            methods.append("")
 
     df["Suggested URL"] = suggested
     df["URL Match Score"] = scores
-    df["URL Match Method"] = methods
     return df
 
 # ---------- Scoring ----------
@@ -322,14 +312,11 @@ with st.expander("See example CSV format"):
 # ---------- Site mapping (Option A) ----------
 with st.expander("Site mapping (optional): map keywords to main menu URLs"):
     st.markdown("Provide your main menu URLs to associate each keyword with the best page.")
-    colm1, colm2 = st.columns(2)
-    with colm1:
-        menu_csv = st.file_uploader("Upload menu CSV (columns: URL, Title optional)", type=["csv"], key="menu_csv")
-    with colm2:
-        max_per_url = st.number_input("Max keywords per URL", min_value=1, max_value=1000, value=50, step=1)
+    menu_csv = st.file_uploader("Upload menu CSV (columns: URL, Title optional)", type=["csv"], key="menu_csv")
     menu_text = st.text_area("Or paste URLs (one per line)", height=120, placeholder="https://example.com/\nhttps://example.com/pricing\nhttps://example.com/blog\n...")
     only_eligible = st.checkbox("Only assign eligible keywords", value=True)
-    min_match_score = st.slider("Minimum match score to assign", min_value=0.0, max_value=1.0, value=0.15, step=0.01)
+    # Fixed minimum match score per your request
+    MIN_MATCH_SCORE = 0.75
 
 # ---------- Robust CSV reader + numeric cleaning ----------
 if uploaded is not None:
@@ -393,10 +380,10 @@ if uploaded is not None:
                 menu_df = None
         pages = prepare_menu_pages(menu_df, menu_text)
 
-        # Apply URL suggestions
+        # Apply URL suggestions (fixed minimum score; no max-per-URL cap)
         scored = suggest_urls_for_keywords(
             scored, kw_col=kw_col, only_eligible=only_eligible,
-            min_score=min_match_score, max_per_url=max_per_url, pages=pages
+            min_score=MIN_MATCH_SCORE, pages=pages
         )
 
         # Info banners
@@ -411,13 +398,13 @@ if uploaded is not None:
             st.info("Some rows were not eligible: " + " ".join(msgs))
         if pages:
             assigned = scored["Suggested URL"].ne("").sum()
-            st.success(f"URL mapping done. {assigned} keyword(s) received a Suggested URL.")
+            st.success(f"URL mapping done. {assigned} keyword(s) received a Suggested URL (min score {MIN_MATCH_SCORE}).")
 
         # ---------- CSV DOWNLOAD (sorted: Yes first, KD ↑ then Volume ↓) ----------
         filename_base = f"outrankiq_{scoring_mode.lower().replace(' ', '_')}_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
         base_cols = ([kw_col] if kw_col else []) + [
             vol_col, kd_col, "Score", "Tier", "Eligible", "Reason", "Category",
-            "Suggested URL", "URL Match Score", "URL Match Method"
+            "Suggested URL", "URL Match Score"
         ]
         export_df = scored[base_cols].copy()
         export_df["Strategy"] = scoring_mode
@@ -442,7 +429,7 @@ if uploaded is not None:
             help="Sorted by eligibility (Yes first), KD ascending, Volume descending"
         )
 
-        # Optional preview (same sorting; colorized Score/Tier cells only; NO Color column shown)
+        # Optional preview (same sorting; colorized Score/Tier cells only)
         if st.checkbox("Preview first 10 rows (optional)", value=False):
             preview_df = scored.copy()
             preview_df["Strategy"] = scoring_mode
