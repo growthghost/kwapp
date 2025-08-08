@@ -7,6 +7,13 @@ from urllib.parse import urlparse
 import requests
 import xml.etree.ElementTree as ET
 
+# Try to use BeautifulSoup if available; otherwise fallback to simple parsing
+try:
+    from bs4 import BeautifulSoup
+    HAVE_BS4 = True
+except Exception:
+    HAVE_BS4 = False
+
 st.set_page_config(page_title="OutrankIQ", page_icon="🔎", layout="centered")
 
 st.title("OutrankIQ")
@@ -145,28 +152,145 @@ def jaccard(a: set[str], b: set[str]) -> float:
     union = len(a | b)
     return inter / union if union else 0.0
 
-def score_keyword_to_page(keyword: str, categories: list[str], page_tokens: set[str]) -> float:
+# --------- Page fetching & signal extraction ---------
+USER_AGENT = "OutrankIQ/1.0"
+FETCH_TIMEOUT = 3.0          # seconds
+CONTENT_MAX_BYTES = 200_000  # 200KB per page
+BODY_WORDS_LIMIT = 700       # first ~700 words from visible text
+
+@st.cache_data(show_spinner=False)
+def fetch_page_html(url: str) -> bytes | None:
+    try:
+        r = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=FETCH_TIMEOUT, stream=True)
+        r.raise_for_status()
+        # cap size
+        content = b""
+        for chunk in r.iter_content(chunk_size=8192):
+            content += chunk
+            if len(content) > CONTENT_MAX_BYTES:
+                break
+        return content
+    except Exception:
+        return None
+
+def simple_extract_signals_from_html(html_bytes: bytes) -> dict:
+    """Fallback parsing without BeautifulSoup."""
+    try:
+        text = html_bytes.decode("utf-8", errors="ignore")
+    except Exception:
+        return {}
+    title_match = re.search(r"<title[^>]*>(.*?)</title>", text, re.I | re.S)
+    meta_desc_match = re.search(r'<meta[^>]+name=["\']description["\'][^>]+content=["\'](.*?)["\']', text, re.I | re.S)
+    # very rough body text strip
+    body_match = re.search(r"<body[^>]*>(.*?)</body>", text, re.I | re.S)
+    body_text = re.sub(r"<[^>]+>", " ", body_match.group(1)) if body_match else ""
+    return {
+        "title": (title_match.group(1).strip() if title_match else ""),
+        "meta": (meta_desc_match.group(1).strip() if meta_desc_match else ""),
+        "h1": "",
+        "h2h3": "",
+        "body": " ".join(body_text.split())  # collapse whitespace
+    }
+
+def bs4_extract_signals_from_html(html_bytes: bytes) -> dict:
+    soup = BeautifulSoup(html_bytes, "html.parser")
+    # Title + OpenGraph fallbacks
+    title = (soup.title.string.strip() if soup.title and soup.title.string else "") or \
+            (soup.find("meta", property="og:title") or {}).get("content", "") or ""
+    meta =  (soup.find("meta", attrs={"name": "description"}) or {}).get("content", "") or \
+            (soup.find("meta", property="og:description") or {}).get("content", "") or ""
+    # H1, H2, H3
+    h1_el = soup.find("h1")
+    h1 = h1_el.get_text(" ", strip=True) if h1_el else ""
+    h2h3_parts = []
+    for tag in soup.find_all(["h2", "h3"]):
+        t = tag.get_text(" ", strip=True)
+        if t:
+            h2h3_parts.append(t)
+    h2h3 = " | ".join(h2h3_parts[:8])  # cap number of headings
+    # Visible body text (very light)
+    for s in soup(["script", "style", "noscript"]):
+        s.decompose()
+    body_text = soup.get_text(" ", strip=True)
+    words = body_text.split()
+    if len(words) > BODY_WORDS_LIMIT:
+        body_text = " ".join(words[:BODY_WORDS_LIMIT])
+    return {
+        "title": title,
+        "meta": meta,
+        "h1": h1,
+        "h2h3": h2h3,
+        "body": body_text
+    }
+
+def extract_page_signals(url: str) -> dict:
+    html = fetch_page_html(url)
+    if not html:
+        return {}
+    if HAVE_BS4:
+        try:
+            return bs4_extract_signals_from_html(html)
+        except Exception:
+            pass
+    # fallback
+    return simple_extract_signals_from_html(html)
+
+def page_tokens_bundle(url: str, title: str | None, signals: dict) -> dict:
+    """Return token sets for each signal + combined set."""
+    slug_tokens = extract_page_tokens(url, title)  # includes host/path/title slug
+    # tokenize signals
+    def tok(s): return tokenize(s or "")
+    sig = {
+        "slug": slug_tokens,
+        "title": tok(signals.get("title", "")),
+        "meta": tok(signals.get("meta", "")),
+        "h1": tok(signals.get("h1", "")),
+        "h2h3": tok(signals.get("h2h3", "")),
+        "body": tok(signals.get("body", "")),
+    }
+    all_tokens = set().union(*sig.values())
+    sig["all"] = all_tokens
+    return sig
+
+# Weighted scoring across signals
+SIGNAL_WEIGHTS = {
+    "title": 3.0,
+    "h1": 2.0,
+    "h2h3": 1.5,
+    "meta": 1.5,
+    "slug": 1.5,
+    "body": 1.0,
+}
+
+def weighted_similarity(kw_tokens: set[str], token_bundle: dict) -> float:
+    num, den = 0.0, 0.0
+    for key, w in SIGNAL_WEIGHTS.items():
+        s = jaccard(kw_tokens, token_bundle.get(key, set()))
+        num += w * s
+        den += w
+    return num / den if den else 0.0
+
+def score_keyword_to_page(keyword: str, categories: list[str], token_bundle: dict) -> float:
     kw_tokens = tokenize(keyword)
-    base = jaccard(kw_tokens, page_tokens)
+    base = weighted_similarity(kw_tokens, token_bundle)
+    # category boosts if any boost term appears in the page ALL tokens
     boost = 0.0
+    all_tokens = token_bundle.get("all", set())
     for c in categories:
         terms = CATEGORY_BOOST_TERMS.get(c, set())
-        if terms and (terms & page_tokens):
-            boost += 0.05  # small, stackable boosts
+        if terms and (terms & all_tokens):
+            boost += 0.05
     return min(base + boost, 1.0)
 
-def prepare_menu_pages_from_list(urls: list[str]) -> list[dict]:
-    pages = []
-    for url in urls:
-        u = str(url).strip()
-        if not u:
-            continue
-        pages.append({
-            "url": u,
-            "title": url_to_title(u),
-            "tokens": extract_page_tokens(u, None)
-        })
-    return pages
+# Build page list objects
+def make_page_obj(url: str, title: str | None) -> dict:
+    signals = extract_page_signals(url)  # may be {}
+    tokens = page_tokens_bundle(url, title, signals)
+    return {
+        "url": url,
+        "title": title or url_to_title(url),
+        "tokens": tokens
+    }
 
 # ----- Domain-based sitemap discovery (always includes common subdomains) -----
 COMMON_SUBDOMAINS = ["www", "blog", "docs", "help", "support", "learn", "resources"]
@@ -257,6 +381,7 @@ def discover_urls_from_sitemaps(domain: str, extra_subs: list[str], per_sub_cap:
 
     return discovered
 
+# ---------- Suggest URLs to keywords ----------
 def suggest_urls_for_keywords(df: pd.DataFrame, kw_col: str | None, only_eligible: bool,
                               min_score: float, pages: list[dict]) -> pd.DataFrame:
     if not pages or kw_col is None:
@@ -384,7 +509,7 @@ with st.expander("Site mapping (optional): map keywords to URLs discovered from 
     extra_subs_raw = st.text_input("Extra subdomains (optional, comma-separated)", "")
     extra_subs = [s.strip() for s in extra_subs_raw.split(",")] if extra_subs_raw else []
     only_eligible = st.checkbox("Only assign eligible keywords", value=True)
-    MIN_MATCH_SCORE = 0.75  # fixed
+    MIN_MATCH_SCORE = 0.25  # fixed threshold per your request
 
     discovered_urls = []
     if domain.strip():
@@ -451,10 +576,14 @@ if uploaded is not None:
 
         scored = add_scoring_columns(df, vol_col, kd_col, kw_col)
 
-        # Build pages from discovery
-        pages = prepare_menu_pages_from_list(discovered_urls) if discovered_urls else []
+        # Build pages from discovery (with crawling & signals)
+        if discovered_urls:
+            with st.spinner("Fetching page content & extracting signals..."):
+                pages = [make_page_obj(u, None) for u in discovered_urls]
+        else:
+            pages = []
 
-        # Apply URL suggestions (fixed min score 0.75)
+        # Apply URL suggestions (threshold 0.25)
         scored = suggest_urls_for_keywords(
             scored, kw_col=kw_col, only_eligible=only_eligible,
             min_score=MIN_MATCH_SCORE, pages=pages
