@@ -6,6 +6,9 @@ from datetime import datetime
 from urllib.parse import urlparse
 import requests
 import xml.etree.ElementTree as ET
+import concurrent.futures
+import math
+import os
 
 # Try to use BeautifulSoup if available; otherwise fallback to simple parsing
 try:
@@ -73,11 +76,11 @@ elif scoring_mode == "Competitive":
 st.markdown(
     f"""
 <div style='background: linear-gradient(to right, #3b82f6, #60a5fa); padding:16px; border-radius:8px; margin-bottom:16px;'>
-    <div style='margin-bottom:6px; font-size:13px; color:#0b1220;'>
+    <div style='margin-bottom:6px; font-size:13px; color:#ffffff;'>
         Minimum Search Volume Required: <strong>{MIN_VALID_VOLUME}</strong>
     </div>
-    <strong style='color:#0b1220; font-size:18px;'>{scoring_mode}</strong><br>
-    <span style='color:#0b1220; font-size:15px;'>{strategy_descriptions[scoring_mode]}</span>
+    <strong style='color:#ffffff; font-size:18px;'>{scoring_mode}</strong><br>
+    <span style='color:#ffffff; font-size:15px;'>{strategy_descriptions[scoring_mode]}</span>
 </div>
 """,
     unsafe_allow_html=True,
@@ -110,7 +113,7 @@ def categorize_keyword(kw: str) -> list[str]:
             cats.add("SEO")
     return [c for c in CATEGORY_ORDER if c in cats]
 
-# ---------- URL mapping helpers ----------
+# ---------- URL mapping & scoring helpers ----------
 TOKEN_RE = re.compile(r"[a-z0-9]+")
 
 def tokenize(s: str) -> set[str]:
@@ -152,24 +155,34 @@ def jaccard(a: set[str], b: set[str]) -> float:
     union = len(a | b)
     return inter / union if union else 0.0
 
-# --------- Page fetching & signal extraction ---------
+# --------- Faster networking & parsing ---------
 USER_AGENT = "OutrankIQ/1.0"
-FETCH_TIMEOUT = 3.0          # seconds
-CONTENT_MAX_BYTES = 200_000  # 200KB per page
-BODY_WORDS_LIMIT = 700       # first ~700 words from visible text
+FETCH_TIMEOUT = 2.5           # tighter timeout for speed
+CONTENT_MAX_BYTES = 120_000   # ~120KB/page cap
+BODY_WORDS_LIMIT = 700        # first ~700 words
+
+@st.cache_resource(show_spinner=False)
+def get_http_session():
+    """Shared requests.Session with connection pooling."""
+    sess = requests.Session()
+    adapter = requests.adapters.HTTPAdapter(pool_connections=64, pool_maxsize=64)
+    sess.mount("http://", adapter)
+    sess.mount("https://", adapter)
+    sess.headers.update({"User-Agent": USER_AGENT})
+    return sess
 
 @st.cache_data(show_spinner=False)
 def fetch_page_html(url: str) -> bytes | None:
     try:
-        r = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=FETCH_TIMEOUT, stream=True)
-        r.raise_for_status()
-        # cap size
-        content = b""
-        for chunk in r.iter_content(chunk_size=8192):
-            content += chunk
-            if len(content) > CONTENT_MAX_BYTES:
-                break
-        return content
+        sess = get_http_session()
+        with sess.get(url, timeout=FETCH_TIMEOUT, stream=True) as r:
+            r.raise_for_status()
+            content = b""
+            for chunk in r.iter_content(chunk_size=8192):
+                content += chunk
+                if len(content) > CONTENT_MAX_BYTES:
+                    break
+            return content
     except Exception:
         return None
 
@@ -181,7 +194,6 @@ def simple_extract_signals_from_html(html_bytes: bytes) -> dict:
         return {}
     title_match = re.search(r"<title[^>]*>(.*?)</title>", text, re.I | re.S)
     meta_desc_match = re.search(r'<meta[^>]+name=["\']description["\'][^>]+content=["\'](.*?)["\']', text, re.I | re.S)
-    # very rough body text strip
     body_match = re.search(r"<body[^>]*>(.*?)</body>", text, re.I | re.S)
     body_text = re.sub(r"<[^>]+>", " ", body_match.group(1)) if body_match else ""
     return {
@@ -189,17 +201,18 @@ def simple_extract_signals_from_html(html_bytes: bytes) -> dict:
         "meta": (meta_desc_match.group(1).strip() if meta_desc_match else ""),
         "h1": "",
         "h2h3": "",
-        "body": " ".join(body_text.split())  # collapse whitespace
+        "body": " ".join(body_text.split())
     }
 
 def bs4_extract_signals_from_html(html_bytes: bytes) -> dict:
-    soup = BeautifulSoup(html_bytes, "html.parser")
-    # Title + OpenGraph fallbacks
+    parser = "lxml" if HAVE_BS4 else "html.parser"
+    soup = BeautifulSoup(html_bytes, parser) if HAVE_BS4 else None
+    if not soup:
+        return simple_extract_signals_from_html(html_bytes)
     title = (soup.title.string.strip() if soup.title and soup.title.string else "") or \
             (soup.find("meta", property="og:title") or {}).get("content", "") or ""
     meta =  (soup.find("meta", attrs={"name": "description"}) or {}).get("content", "") or \
             (soup.find("meta", property="og:description") or {}).get("content", "") or ""
-    # H1, H2, H3
     h1_el = soup.find("h1")
     h1 = h1_el.get_text(" ", strip=True) if h1_el else ""
     h2h3_parts = []
@@ -207,38 +220,26 @@ def bs4_extract_signals_from_html(html_bytes: bytes) -> dict:
         t = tag.get_text(" ", strip=True)
         if t:
             h2h3_parts.append(t)
-    h2h3 = " | ".join(h2h3_parts[:8])  # cap number of headings
-    # Visible body text (very light)
+    h2h3 = " | ".join(h2h3_parts[:8])
     for s in soup(["script", "style", "noscript"]):
         s.decompose()
     body_text = soup.get_text(" ", strip=True)
     words = body_text.split()
     if len(words) > BODY_WORDS_LIMIT:
         body_text = " ".join(words[:BODY_WORDS_LIMIT])
-    return {
-        "title": title,
-        "meta": meta,
-        "h1": h1,
-        "h2h3": h2h3,
-        "body": body_text
-    }
+    return {"title": title, "meta": meta, "h1": h1, "h2h3": h2h3, "body": body_text}
 
 def extract_page_signals(url: str) -> dict:
     html = fetch_page_html(url)
     if not html:
         return {}
-    if HAVE_BS4:
-        try:
-            return bs4_extract_signals_from_html(html)
-        except Exception:
-            pass
-    # fallback
-    return simple_extract_signals_from_html(html)
+    try:
+        return bs4_extract_signals_from_html(html) if HAVE_BS4 else simple_extract_signals_from_html(html)
+    except Exception:
+        return simple_extract_signals_from_html(html)
 
 def page_tokens_bundle(url: str, title: str | None, signals: dict) -> dict:
-    """Return token sets for each signal + combined set."""
-    slug_tokens = extract_page_tokens(url, title)  # includes host/path/title slug
-    # tokenize signals
+    slug_tokens = extract_page_tokens(url, title)  # host/path/title-slug
     def tok(s): return tokenize(s or "")
     sig = {
         "slug": slug_tokens,
@@ -248,19 +249,10 @@ def page_tokens_bundle(url: str, title: str | None, signals: dict) -> dict:
         "h2h3": tok(signals.get("h2h3", "")),
         "body": tok(signals.get("body", "")),
     }
-    all_tokens = set().union(*sig.values())
-    sig["all"] = all_tokens
+    sig["all"] = set().union(*sig.values())
     return sig
 
-# Weighted scoring across signals
-SIGNAL_WEIGHTS = {
-    "title": 3.0,
-    "h1": 2.0,
-    "h2h3": 1.5,
-    "meta": 1.5,
-    "slug": 1.5,
-    "body": 1.0,
-}
+SIGNAL_WEIGHTS = {"title": 3.0, "h1": 2.0, "h2h3": 1.5, "meta": 1.5, "slug": 1.5, "body": 1.0}
 
 def weighted_similarity(kw_tokens: set[str], token_bundle: dict) -> float:
     num, den = 0.0, 0.0
@@ -273,7 +265,6 @@ def weighted_similarity(kw_tokens: set[str], token_bundle: dict) -> float:
 def score_keyword_to_page(keyword: str, categories: list[str], token_bundle: dict) -> float:
     kw_tokens = tokenize(keyword)
     base = weighted_similarity(kw_tokens, token_bundle)
-    # category boosts if any boost term appears in the page ALL tokens
     boost = 0.0
     all_tokens = token_bundle.get("all", set())
     for c in categories:
@@ -282,29 +273,24 @@ def score_keyword_to_page(keyword: str, categories: list[str], token_bundle: dic
             boost += 0.05
     return min(base + boost, 1.0)
 
-# Build page list objects
 def make_page_obj(url: str, title: str | None) -> dict:
-    signals = extract_page_signals(url)  # may be {}
+    signals = extract_page_signals(url)  # cached + fast
     tokens = page_tokens_bundle(url, title, signals)
-    return {
-        "url": url,
-        "title": title or url_to_title(url),
-        "tokens": tokens
-    }
+    return {"url": url, "title": title or url_to_title(url), "tokens": tokens}
 
 # ----- Domain-based sitemap discovery (always includes common subdomains) -----
 COMMON_SUBDOMAINS = ["www", "blog", "docs", "help", "support", "learn", "resources"]
 
 def normalize_domain(d: str) -> str:
-    d = d.strip().lower()
-    d = d.replace("http://", "").replace("https://", "").strip("/")
+    d = d.strip().lower().replace("http://", "").replace("https://", "").strip("/")
     return d
 
 def fetch(url: str, timeout: float = 10.0):
     try:
-        resp = requests.get(url, timeout=timeout, headers={"User-Agent": "OutrankIQ/1.0"})
-        if resp.status_code == 200 and resp.content:
-            return resp.content
+        sess = get_http_session()
+        r = sess.get(url, timeout=timeout)
+        if r.status_code == 200 and r.content:
+            return r.content
     except Exception:
         return None
     return None
@@ -317,12 +303,10 @@ def parse_sitemap(content: bytes) -> tuple[list[str], list[str]]:
         return [], []
     ns = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
     urls, children = [], []
-
     for url in tree.findall(".//sm:url/sm:loc", ns):
         loc = (url.text or "").strip()
         if loc:
             urls.append(loc)
-
     for loc in tree.findall(".//sm:sitemap/sm:loc", ns):
         child = (loc.text or "").strip()
         if child:
@@ -333,9 +317,8 @@ def discover_urls_from_sitemaps(domain: str, extra_subs: list[str], per_sub_cap:
     root = normalize_domain(domain)
     if not root:
         return []
-
-    subs = set([""])  # bare domain
-    subs.update(COMMON_SUBDOMAINS)  # always include common subdomains
+    subs = set([""])
+    subs.update(COMMON_SUBDOMAINS)
     for s in extra_subs:
         s = s.strip()
         if s:
@@ -378,7 +361,6 @@ def discover_urls_from_sitemaps(domain: str, extra_subs: list[str], per_sub_cap:
             u2, _ = parse_sitemap(data)
             if u2:
                 add_urls(u2)
-
     return discovered
 
 # ---------- Suggest URLs to keywords ----------
@@ -389,7 +371,12 @@ def suggest_urls_for_keywords(df: pd.DataFrame, kw_col: str | None, only_eligibl
         df["URL Match Score"] = ""
         return df
 
-    cat_lists = df["Category"].fillna("").apply(lambda s: [c.strip() for c in str(s).split(",") if c.strip()] if s else ["SEO"])
+    # Precompute category lists & keyword tokens once
+    cat_lists = df["Category"].fillna("").apply(
+        lambda s: [c.strip() for c in str(s).split(",") if c.strip()] if s else ["SEO"]
+    )
+    kw_tokens_series = (df[kw_col] if kw_col else pd.Series([""] * len(df))).astype(str).apply(tokenize)
+
     mask = df["Eligible"].eq("Yes") if only_eligible and "Eligible" in df.columns else pd.Series([True]*len(df), index=df.index)
 
     suggested, scores = [], []
@@ -398,8 +385,9 @@ def suggest_urls_for_keywords(df: pd.DataFrame, kw_col: str | None, only_eligibl
             suggested.append("")
             scores.append("")
             continue
-        kw = str(row.get(kw_col, "")).strip()
-        if not kw:
+        kw_tokens = kw_tokens_series.loc[idx]
+        keyword = str(row.get(kw_col, "")).strip()
+        if not keyword or not kw_tokens:
             suggested.append("")
             scores.append("")
             continue
@@ -407,7 +395,7 @@ def suggest_urls_for_keywords(df: pd.DataFrame, kw_col: str | None, only_eligibl
 
         best_url, best_score = "", 0.0
         for p in pages:
-            s = score_keyword_to_page(kw, categories, p["tokens"])
+            s = score_keyword_to_page(keyword, categories, p["tokens"])
             if s > best_score:
                 best_url, best_score = p["url"], s
 
@@ -429,7 +417,7 @@ def calculate_score(volume: float, kd: float) -> int:
         return 0
     if volume < MIN_VALID_VOLUME:
         return 0
-    kd = max(0.0, min(100.0, float(kd)))  # clamp
+    kd = max(0.0, min(100.0, float(kd)))
     for low, high, score in KD_BUCKETS:
         if low <= kd <= high:
             return score
@@ -509,7 +497,7 @@ with st.expander("Site mapping (optional): map keywords to URLs discovered from 
     extra_subs_raw = st.text_input("Extra subdomains (optional, comma-separated)", "")
     extra_subs = [s.strip() for s in extra_subs_raw.split(",")] if extra_subs_raw else []
     only_eligible = st.checkbox("Only assign eligible keywords", value=True)
-    MIN_MATCH_SCORE = 0.25  # fixed threshold per your request
+    MIN_MATCH_SCORE = 0.25  # fixed threshold (per your last change)
 
     discovered_urls = []
     if domain.strip():
@@ -576,12 +564,19 @@ if uploaded is not None:
 
         scored = add_scoring_columns(df, vol_col, kd_col, kw_col)
 
-        # Build pages from discovery (with crawling & signals)
+        # Build pages from discovery — now with fast parallel fetch+parse
+        pages = []
         if discovered_urls:
-            with st.spinner("Fetching page content & extracting signals..."):
-                pages = [make_page_obj(u, None) for u in discovered_urls]
-        else:
-            pages = []
+            with st.spinner("Fetching page content & extracting signals (parallel)…"):
+                # Parallelize page token building
+                max_workers = min(32, max(4, os.cpu_count() * 2 if os.cpu_count() else 8))
+                with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:
+                    futures = [ex.submit(make_page_obj, u, None) for u in discovered_urls]
+                    for f in concurrent.futures.as_completed(futures):
+                        try:
+                            pages.append(f.result())
+                        except Exception:
+                            pass
 
         # Apply URL suggestions (threshold 0.25)
         scored = suggest_urls_for_keywords(
