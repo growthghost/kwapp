@@ -249,6 +249,7 @@ def page_tokens_bundle(url: str, title: str | None, signals: dict) -> dict:
     sig["all"] = set().union(*sig.values())
     return sig
 
+# ---------- Scoring across signals ----------
 SIGNAL_WEIGHTS = {"title": 3.0, "h1": 2.0, "h2h3": 1.5, "meta": 1.5, "slug": 1.5, "body": 1.0}
 
 def weighted_similarity(kw_tokens: set[str], token_bundle: dict) -> float:
@@ -391,12 +392,9 @@ def discover_urls_from_sitemaps(domain: str, extra_subs: list[str], per_sub_cap:
 
     # 1) Collect sitemap endpoints: robots + alternates
     candidate_sitemaps = []
-    # robots.txt entries
-    candidate_sitemaps += robots_sitemaps(root)
-    # alternates on common/bare subs
-    candidate_sitemaps += alternate_sitemap_paths(root)
-    # dedupe while preserving order
-    candidate_sitemaps = list(dict.fromkeys(candidate_sitemaps))
+    candidate_sitemaps += robots_sitemaps(root)          # robots.txt entries
+    candidate_sitemaps += alternate_sitemap_paths(root)  # alternates on common/bare subs
+    candidate_sitemaps = list(dict.fromkeys(candidate_sitemaps))  # dedupe preserve order
 
     # 2) Fetch & parse, auto-include subdomains discovered inside sitemaps
     discovered = []
@@ -410,14 +408,13 @@ def discover_urls_from_sitemaps(domain: str, extra_subs: list[str], per_sub_cap:
         hostname = (hostname or "").lower()
         return hostname.endswith(root)
 
-    def sub_of(hostname: str) -> str:
+    def sub_of(hostname: str) -> str | None:
         """Return subdomain label ('' for bare root)."""
         hostname = (hostname or "").lower()
         if not hostname.endswith(root):
             return None
         if hostname == root:
             return ""
-        # strip trailing .root
         suffix = "." + root
         label = hostname[:-len(suffix)]
         return label  # e.g., 'www', 'blog', 'docs'
@@ -432,9 +429,9 @@ def discover_urls_from_sitemaps(domain: str, extra_subs: list[str], per_sub_cap:
         if urls or children:
             sitemaps_ok += 1
 
-        # If sitemapindex, follow children (recursive one level here; simple and fast)
+        # If sitemapindex, follow children (one level breadth)
         child_list = children.copy()
-        # also detect if the sitemap itself points to other subdomains; add their root sitemap.xml too
+        # also detect new subdomains mentioned and enqueue their root sitemaps
         for loc in child_list:
             try:
                 h = urlparse(loc).netloc.lower()
@@ -443,7 +440,6 @@ def discover_urls_from_sitemaps(domain: str, extra_subs: list[str], per_sub_cap:
                     if lbl is not None and lbl not in subdomains_seen:
                         subdomains_seen.add(lbl)
                         urls_per_sub.setdefault(lbl, 0)
-                        # also try that subdomain's /sitemap.xml & /sitemap_index.xml
                         for pth in ("/sitemap.xml", "/sitemap_index.xml"):
                             candidate = f"https://{h}{pth}"
                             if candidate not in candidate_sitemaps:
@@ -451,9 +447,8 @@ def discover_urls_from_sitemaps(domain: str, extra_subs: list[str], per_sub_cap:
             except Exception:
                 pass
 
-        # add urls from this sitemap (cap per-subdomain)
+        # add urls from this sitemap (cap per subdomain)
         def add_urls(url_list):
-            local_count_per_sub = {}
             for u in url_list:
                 if u in seen_urls:
                     continue
@@ -474,12 +469,10 @@ def discover_urls_from_sitemaps(domain: str, extra_subs: list[str], per_sub_cap:
                 seen_urls.add(u)
                 discovered.append(u)
                 urls_per_sub[label] = current + 1
-                local_count_per_sub[label] = local_count_per_sub.get(label, 0) + 1
-            return local_count_per_sub
 
         add_urls(urls)
 
-        # Follow each child sitemap (simple breadth)
+        # follow child sitemaps
         for child in child_list:
             child_resp = fetch(child, timeout=8.0)
             if not child_resp:
@@ -497,32 +490,52 @@ def discover_urls_from_sitemaps(domain: str, extra_subs: list[str], per_sub_cap:
     }
     return discovered, stats
 
-# ---------- Suggest URLs to keywords ----------
-SIGNAL_WEIGHTS = {"title": 3.0, "h1": 2.0, "h2h3": 1.5, "meta": 1.5, "slug": 1.5, "body": 1.0}
+# ---------- Suggest URLs to keywords (RESTORED) ----------
+def suggest_urls_for_keywords(df: pd.DataFrame, kw_col: str | None, only_eligible: bool,
+                              min_score: float, pages: list[dict]) -> pd.DataFrame:
+    if not pages or kw_col is None:
+        df["Suggested URL"] = ""
+        df["URL Match Score"] = ""
+        return df
 
-def weighted_similarity(kw_tokens: set[str], token_bundle: dict) -> float:
-    num, den = 0.0, 0.0
-    for key, w in SIGNAL_WEIGHTS.items():
-        s = jaccard(kw_tokens, token_bundle.get(key, set()))
-        num += w * s
-        den += w
-    return num / den if den else 0.0
+    # Precompute category lists & keyword tokens once
+    cat_lists = df["Category"].fillna("").apply(
+        lambda s: [c.strip() for c in str(s).split(",") if c.strip()] if s else ["SEO"]
+    )
+    kw_tokens_series = (df[kw_col] if kw_col else pd.Series([""] * len(df))).astype(str).apply(tokenize)
 
-def score_keyword_to_page(keyword: str, categories: list[str], token_bundle: dict) -> float:
-    kw_tokens = tokenize(keyword)
-    base = weighted_similarity(kw_tokens, token_bundle)
-    boost = 0.0
-    all_tokens = token_bundle.get("all", set())
-    for c in categories:
-        terms = CATEGORY_BOOST_TERMS.get(c, set())
-        if terms and (terms & all_tokens):
-            boost += 0.05
-    return min(base + boost, 1.0)
+    mask = df["Eligible"].eq("Yes") if only_eligible and "Eligible" in df.columns else pd.Series([True]*len(df), index=df.index)
 
-def make_page_obj(url: str, title: str | None) -> dict:
-    signals = extract_page_signals(url)  # cached + fast
-    tokens = page_tokens_bundle(url, title, signals)
-    return {"url": url, "title": title or url_to_title(url), "tokens": tokens}
+    suggested, scores = [], []
+    for idx, row in df.iterrows():
+        if not mask.loc[idx]:
+            suggested.append("")
+            scores.append("")
+            continue
+        kw_tokens = kw_tokens_series.loc[idx]
+        keyword = str(row.get(kw_col, "")).strip()
+        if not keyword or not kw_tokens:
+            suggested.append("")
+            scores.append("")
+            continue
+        categories = cat_lists.loc[idx] if isinstance(cat_lists.loc[idx], list) else ["SEO"]
+
+        best_url, best_score = "", 0.0
+        for p in pages:
+            s = score_keyword_to_page(keyword, categories, p["tokens"])
+            if s > best_score:
+                best_url, best_score = p["url"], s
+
+        if best_score >= min_score:
+            suggested.append(best_url)
+            scores.append(round(float(best_score), 3))
+        else:
+            suggested.append("")
+            scores.append("")
+
+    df["Suggested URL"] = suggested
+    df["URL Match Score"] = scores
+    return df
 
 # ---------- Scoring ----------
 def calculate_score(volume: float, kd: float) -> int:
@@ -706,7 +719,6 @@ if uploaded is not None:
         )
 
         # --------- Diagnostics summary (tiny box) ---------
-        # You can remove this whole block later if desired.
         try:
             total_keywords = len(scored)
             eligible_keywords = int(scored["Eligible"].eq("Yes").sum()) if "Eligible" in scored.columns else total_keywords
@@ -719,7 +731,6 @@ if uploaded is not None:
             total_discovered = discovery_stats.get("total_urls", len(discovered_urls))
 
             subdomains_display = ", ".join(subdomains_list) if subdomains_list else "—"
-            per_sub_counts = ", ".join([f"{k or '(root)'}: {v}" for k, v in urls_per_sub.items()]) if urls_per_sub else "—"
 
             st.markdown(
                 f"""
@@ -761,7 +772,6 @@ if uploaded is not None:
         export_df = scored[base_cols].copy()
         export_df["Strategy"] = scoring_mode
 
-        # Sort: Eligible (Yes first) → KD ↑ → Volume ↓
         export_df["_EligibleSort"] = export_df["Eligible"].map({"Yes": 1, "No": 0}).fillna(0)
         export_df = export_df.sort_values(
             by=["_EligibleSort", kd_col, vol_col],
