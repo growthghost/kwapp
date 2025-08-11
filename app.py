@@ -282,6 +282,11 @@ def normalize_domain(d: str) -> str:
     d = d.strip().lower().replace("http://", "").replace("https://", "").strip("/")
     return d
 
+def apex_from_host(host: str) -> str:
+    """Very simple apex normalizer: strip leading 'www.' if present."""
+    h = (host or "").strip().lower()
+    return h[4:] if h.startswith("www.") else h
+
 @st.cache_resource(show_spinner=False)
 def get_plain_http_session():
     sess = requests.Session()
@@ -407,13 +412,12 @@ def add_urls_capped(url_list, discovered, seen_urls, urls_per_sub, per_sub_cap, 
 
 def discover_from_sitemap_urls(sitemap_urls: list[str], root: str, per_sub_cap: int = 500) -> list[str]:
     """Seed with explicit sitemap URL(s), follow children, cap per subdomain."""
+    # IMPORTANT: normalize root to apex (strip leading 'www.')
+    root = apex_from_host(root)
+
     discovered, seen_urls = [], set()
-    urls_per_sub = {}
+    urls_per_sub = {"": 0}  # init bare
 
-    # Init per-sub map with root/bare
-    urls_per_sub[""] = urls_per_sub.get("", 0)
-
-    # BFS over sitemap urls
     queue = list(dict.fromkeys(sitemap_urls))
     visited = set()
     while queue:
@@ -426,14 +430,13 @@ def discover_from_sitemap_urls(sitemap_urls: list[str], root: str, per_sub_cap: 
             continue
         data = maybe_decompress(resp)
         urls, children = parse_sitemap(data)
-        # add urls
         add_urls_capped(urls, discovered, seen_urls, urls_per_sub, per_sub_cap, root)
-        # enqueue children and also enqueue their root-level sitemaps to pull subdomains in
+        # enqueue children and their host root sitemaps
         for child in children:
             if child not in visited:
                 queue.append(child)
             try:
-                h = urlparse(child).netloc.lower()
+                h = apex_from_host(urlparse(child).netloc.lower())
                 if host_is_within_root(h, root):
                     for pth in ("/sitemap.xml", "/sitemap_index.xml"):
                         cand = f"https://{h}{pth}"
@@ -445,7 +448,7 @@ def discover_from_sitemap_urls(sitemap_urls: list[str], root: str, per_sub_cap: 
 
 def discover_urls_from_domain(domain: str, extra_subs: list[str], per_sub_cap: int = 500) -> list[str]:
     """Robust discovery via robots.txt + common paths; auto-include subdomains from sitemap indexes."""
-    root = normalize_domain(domain)
+    root = apex_from_host(normalize_domain(domain))
     if not root:
         return []
     initial_subs = set([""])
@@ -481,7 +484,7 @@ def discover_urls_from_domain(domain: str, extra_subs: list[str], per_sub_cap: i
             if child not in visited:
                 queue.append(child)
             try:
-                h = urlparse(child).netloc.lower()
+                h = apex_from_host(urlparse(child).netloc.lower())
                 if host_is_within_root(h, root):
                     for pth in ("/sitemap.xml", "/sitemap_index.xml"):
                         cand = f"https://{h}{pth}"
@@ -495,7 +498,6 @@ def looks_like_sitemap_url(s: str) -> bool:
     t = s.strip().lower()
     if not t:
         return False
-    # if it has "sitemap" in path or ends with xml/xml.gz we treat as sitemap URL
     if "sitemap" in t and (t.startswith("http://") or t.startswith("https://") or "/" in t):
         return True
     if t.endswith(".xml") or t.endswith(".xml.gz"):
@@ -649,12 +651,12 @@ with st.expander("Site mapping (optional): map keywords to URLs discovered from 
     discovered_urls = []
 
     if entry.strip():
-        # If it looks like a sitemap URL, accept one or multiple (comma-separated)
         if looks_like_sitemap_url(entry):
             raw_parts = [p for p in re.split(r"[,\s]+", entry) if p]
             sm_urls = [ensure_url(p) for p in raw_parts]
-            # derive root from the first sitemap URL
-            first_root = normalize_domain(urlparse(sm_urls[0]).netloc or "")
+            # derive apex root from the first sitemap URL
+            first = urlparse(sm_urls[0]).netloc or ""
+            first_root = apex_from_host(normalize_domain(first))
             with st.spinner("Reading sitemap(s)..."):
                 try:
                     discovered_urls = discover_from_sitemap_urls(sm_urls, first_root, per_sub_cap=500)
@@ -662,7 +664,6 @@ with st.expander("Site mapping (optional): map keywords to URLs discovered from 
                     discovered_urls = []
             st.success(f"Discovered {len(discovered_urls)} URL(s) from provided sitemap(s).")
         else:
-            # treat as domain, do robust discovery
             with st.spinner("Discovering URLs from domain sitemap(s)..."):
                 try:
                     discovered_urls = discover_urls_from_domain(entry, extra_subs, per_sub_cap=500)
