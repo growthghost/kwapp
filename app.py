@@ -1,6 +1,8 @@
 import io
 import re
 import gzip
+import json
+import time
 import pandas as pd
 import streamlit as st
 from datetime import datetime
@@ -67,10 +69,10 @@ if scoring_mode == "Low Hanging Fruit":
     MIN_VALID_VOLUME = 10
     KD_BUCKETS = [(0, 15, 6), (16, 20, 5), (21, 25, 4), (26, 50, 3), (51, 75, 2), (76, 100, 1)]
 elif scoring_mode == "In The Game":
-    MIN_VALID_VOLUME = 1500
+    MIN_VALID_VOLUME = 1500  # corrected per your note
     KD_BUCKETS = [(0, 30, 6), (31, 45, 5), (46, 60, 4), (61, 70, 3), (71, 80, 2), (81, 100, 1)]
 elif scoring_mode == "Competitive":
-    MIN_VALID_VOLUME = 3000  # as requested
+    MIN_VALID_VOLUME = 3000
     KD_BUCKETS = [(0, 40, 6), (41, 60, 5), (61, 75, 4), (76, 85, 3), (86, 95, 2), (96, 100, 1)]
 
 st.markdown(
@@ -113,13 +115,67 @@ def categorize_keyword(kw: str) -> list[str]:
             cats.add("SEO")
     return [c for c in CATEGORY_ORDER if c in cats]
 
-# ---------- URL mapping & scoring helpers ----------
+# ---------- Tokenization & normalization (C & niche synonyms) ----------
 TOKEN_RE = re.compile(r"[a-z0-9]+")
 
-def tokenize(s: str) -> set[str]:
+STOPWORDS = {
+    "the","a","an","and","or","of","for","to","in","on","at","with","by","from",
+    "is","are","be","can","near","me","now"
+}
+
+# Simple plural-to-singular (very light)
+def singularize(token: str) -> str:
+    if token.endswith("ies") and len(token) > 3:
+        return token[:-3] + "y"
+    if token.endswith("ses") or token.endswith("xes"):
+        return token[:-2]
+    if token.endswith("s") and not token.endswith("ss"):
+        return token[:-1]
+    return token
+
+# Hyphen/punct normalization and synonym expansion
+SYNONYMS = {
+    "pre-roll": {"preroll", "pre", "roll", "prerolls"},
+    "preroll": {"pre-roll", "pre", "roll", "prerolls"},
+    "vape": {"vaporizer", "vaping"},
+    "cart": {"cartridge", "carts", "cartridges"},
+    "weed": {"cannabis", "marijuana"},
+    "rec": {"recreational"},
+    "med": {"medical"},
+    "thc": {"potency", "thcpercent", "thcpercentage"},
+    "dispo": {"dispensary", "dispensaries"},
+}
+
+def normalize_text(s: str) -> str:
     if not isinstance(s, str):
-        return set()
-    return set(TOKEN_RE.findall(s.lower()))
+        return ""
+    # unify hyphen variants: pre-roll/preroll/pre roll -> preroll
+    s = s.lower().replace("pre-roll", "preroll").replace("pre roll", "preroll")
+    s = s.replace("%", " percent ")
+    return s
+
+def base_tokenize(s: str) -> list[str]:
+    s = normalize_text(s)
+    return TOKEN_RE.findall(s)
+
+def expand_tokens(tokens: list[str]) -> set[str]:
+    out = set()
+    for t in tokens:
+        if not t or t in STOPWORDS:
+            continue
+        t1 = singularize(t)
+        out.add(t1)
+        # synonym expansion (bidirectional via dict values)
+        if t1 in SYNONYMS:
+            out.update({singularize(x) for x in SYNONYMS[t1]})
+        # also if t1 appears as a synonym value for another key
+        for k, vals in SYNONYMS.items():
+            if t1 in vals:
+                out.add(singularize(k))
+    return out
+
+def tokenize(s: str) -> set[str]:
+    return expand_tokens(base_tokenize(s))
 
 def url_to_title(url: str) -> str:
     try:
@@ -137,6 +193,7 @@ def extract_page_tokens(url: str, title: str | None) -> set[str]:
     title_tokens = tokenize(title or url_to_title(url))
     return path_tokens.union(host_tokens).union(title_tokens)
 
+# Category-aware boosts for URL mapping
 CATEGORY_BOOST_TERMS = {
     "AIO": {"guide", "tutorial", "how", "learn", "blog", "faq"},
     "AEO": {"faq", "questions", "what", "how", "who", "why"},
@@ -154,11 +211,11 @@ def jaccard(a: set[str], b: set[str]) -> float:
     union = len(a | b)
     return inter / union if union else 0.0
 
-# --------- Faster networking & parsing ---------
+# --------- Faster networking & parsing + resilient signals (B) ---------
 USER_AGENT = "OutrankIQ/1.0"
-FETCH_TIMEOUT = 2.5           # faster timeouts
-CONTENT_MAX_BYTES = 120_000   # ~120KB/page cap
-BODY_WORDS_LIMIT = 700        # first ~700 words
+FETCH_TIMEOUT = 5.0           # a bit higher for JS/age-gates
+CONTENT_MAX_BYTES = 300_000   # allow more headroom
+BODY_WORDS_LIMIT = 900        # first ~900 words
 
 @st.cache_resource(show_spinner=False)
 def get_http_session():
@@ -172,18 +229,67 @@ def get_http_session():
 
 @st.cache_data(show_spinner=False)
 def fetch_page_html(url: str) -> bytes | None:
+    """Small retry for 429/5xx."""
+    sess = get_http_session()
+    tries = 2
+    backoff = 0.5
+    for i in range(tries):
+        try:
+            with sess.get(url, timeout=FETCH_TIMEOUT, stream=True) as r:
+                status = r.status_code
+                if status in (429, 500, 502, 503, 504) and i < tries - 1:
+                    time.sleep(backoff)
+                    backoff *= 2
+                    continue
+                r.raise_for_status()
+                content = b""
+                for chunk in r.iter_content(chunk_size=8192):
+                    content += chunk
+                    if len(content) > CONTENT_MAX_BYTES:
+                        break
+                return content
+        except Exception:
+            if i == tries - 1:
+                return None
+            time.sleep(backoff)
+            backoff *= 2
+    return None
+
+def extract_jsonld_texts(soup) -> str:
+    """Pull text-like fields from JSON-LD to strengthen tokens behind interstitials."""
+    out = []
     try:
-        sess = get_http_session()
-        with sess.get(url, timeout=FETCH_TIMEOUT, stream=True) as r:
-            r.raise_for_status()
-            content = b""
-            for chunk in r.iter_content(chunk_size=8192):
-                content += chunk
-                if len(content) > CONTENT_MAX_BYTES:
-                    break
-            return content
+        scripts = soup.find_all("script", type="application/ld+json")
     except Exception:
-        return None
+        scripts = []
+    for sc in scripts:
+        try:
+            data = json.loads(sc.string or "")
+        except Exception:
+            continue
+        def collect(obj):
+            if isinstance(obj, dict):
+                for k, v in obj.items():
+                    if isinstance(v, (dict, list)):
+                        collect(v)
+                    else:
+                        if k.lower() in ("name","headline","description","about","title"):
+                            if isinstance(v, str) and v.strip():
+                                out.append(v.strip())
+                # BreadcrumbList items
+                if obj.get("@type","").lower() == "breadcrumblist":
+                    items = obj.get("itemListElement", [])
+                    if isinstance(items, list):
+                        for it in items:
+                            if isinstance(it, dict):
+                                nm = it.get("name")
+                                if isinstance(nm, str) and nm.strip():
+                                    out.append(nm.strip())
+            elif isinstance(obj, list):
+                for x in obj:
+                    collect(x)
+        collect(data)
+    return " | ".join(out[:20])  # keep it light
 
 def simple_extract_signals_from_html(html_bytes: bytes) -> dict:
     """Fallback parsing without BeautifulSoup."""
@@ -200,6 +306,7 @@ def simple_extract_signals_from_html(html_bytes: bytes) -> dict:
         "meta": (meta_desc_match.group(1).strip() if meta_desc_match else ""),
         "h1": "",
         "h2h3": "",
+        "jsonld": "",
         "body": " ".join(body_text.split())
     }
 
@@ -223,7 +330,10 @@ def bs4_extract_signals_from_html(html_bytes: bytes) -> dict:
     words = body_text.split()
     if len(words) > BODY_WORDS_LIMIT:
         body_text = " ".join(words[:BODY_WORDS_LIMIT])
-    return {"title": title, "meta": meta, "h1": h1, "h2h3": h2h3, "body": body_text}
+
+    jsonld_text = extract_jsonld_texts(soup)
+
+    return {"title": title, "meta": meta, "h1": h1, "h2h3": h2h3, "jsonld": jsonld_text, "body": body_text}
 
 def extract_page_signals(url: str) -> dict:
     html = fetch_page_html(url)
@@ -243,13 +353,16 @@ def page_tokens_bundle(url: str, title: str | None, signals: dict) -> dict:
         "meta": tok(signals.get("meta", "")),
         "h1": tok(signals.get("h1", "")),
         "h2h3": tok(signals.get("h2h3", "")),
+        "jsonld": tok(signals.get("jsonld", "")),
         "body": tok(signals.get("body", "")),
     }
-    sig["all"] = set().union(*sig.values())
+    # If body is empty (age gate/JS), we still keep strong fields
+    combined = set().union(sig["slug"], sig["title"], sig["meta"], sig["h1"], sig["h2h3"], sig["jsonld"], sig["body"])
+    sig["all"] = combined
     return sig
 
-# ---------- Scoring across signals ----------
-SIGNAL_WEIGHTS = {"title": 3.0, "h1": 2.0, "h2h3": 1.5, "meta": 1.5, "slug": 1.5, "body": 1.0}
+# ---------- Scoring across signals (D) ----------
+SIGNAL_WEIGHTS = {"title": 3.0, "h1": 2.0, "h2h3": 1.5, "meta": 1.5, "slug": 1.5, "jsonld": 1.5, "body": 1.0}
 
 def weighted_similarity(kw_tokens: set[str], token_bundle: dict) -> float:
     num, den = 0.0, 0.0
@@ -258,6 +371,23 @@ def weighted_similarity(kw_tokens: set[str], token_bundle: dict) -> float:
         num += w * s
         den += w
     return num / den if den else 0.0
+
+def exact_phrase_bonus(keyword: str, signals: dict) -> float:
+    k = normalize_text(keyword).strip()
+    if not k:
+        return 0.0
+    # bonus if exact keyword phrase appears in title/h1/meta/h2h3
+    for field in ("title", "h1", "meta", "h2h3"):
+        val = (signals.get(field, "") or "").lower()
+        if k in val:
+            return 0.10
+    return 0.0
+
+def slug_containment_bonus(kw_tokens: set[str], slug_tokens: set[str]) -> float:
+    sig_kw = {t for t in kw_tokens if t not in STOPWORDS}
+    if sig_kw and sig_kw.issubset(slug_tokens):
+        return 0.05
+    return 0.0
 
 def score_keyword_to_page(keyword: str, categories: list[str], token_bundle: dict) -> float:
     kw_tokens = tokenize(keyword)
@@ -268,14 +398,23 @@ def score_keyword_to_page(keyword: str, categories: list[str], token_bundle: dic
         terms = CATEGORY_BOOST_TERMS.get(c, set())
         if terms and (terms & all_tokens):
             boost += 0.05
-    return min(base + boost, 1.0)
+    # Exact phrase + slug containment bonuses
+    phrase_b = exact_phrase_bonus(keyword, {
+        "title": " ".join(token_bundle.get("title", [])),
+        "h1": " ".join(token_bundle.get("h1", [])),
+        "meta": " ".join(token_bundle.get("meta", [])),
+        "h2h3": " ".join(token_bundle.get("h2h3", [])),
+    })
+    slug_b = slug_containment_bonus(kw_tokens, token_bundle.get("slug", set()))
+    total = min(base + boost + phrase_b + slug_b, 1.0)
+    return total
 
 def make_page_obj(url: str, title: str | None) -> dict:
-    signals = extract_page_signals(url)  # cached + fast
+    signals = extract_page_signals(url)  # cached + (retry) fast-ish
     tokens = page_tokens_bundle(url, title, signals)
     return {"url": url, "title": title or url_to_title(url), "tokens": tokens}
 
-# ----- Discovery helpers -----
+# ----- Discovery helpers (domain OR sitemap) -----
 COMMON_SUBDOMAINS = ["www", "blog", "docs", "help", "support", "learn", "resources"]
 
 def normalize_domain(d: str) -> str:
@@ -283,7 +422,6 @@ def normalize_domain(d: str) -> str:
     return d
 
 def apex_from_host(host: str) -> str:
-    """Very simple apex normalizer: strip leading 'www.' if present."""
     h = (host or "").strip().lower()
     return h[4:] if h.startswith("www.") else h
 
@@ -294,7 +432,6 @@ def get_plain_http_session():
     return sess
 
 def fetch(url: str, timeout: float = 8.0):
-    """Simple fetch for sitemaps/robots (no streaming)."""
     try:
         sess = get_plain_http_session()
         r = sess.get(url, timeout=timeout, allow_redirects=True)
@@ -305,25 +442,44 @@ def fetch(url: str, timeout: float = 8.0):
     return None
 
 def parse_sitemap(content_bytes: bytes) -> tuple[list[str], list[str]]:
-    """Return (urlset_urls, child_sitemaps)."""
+    """Namespace-agnostic: treat any *url/loc and *sitemap/loc as valid."""
     try:
         tree = ET.fromstring(content_bytes)
     except Exception:
         return [], []
-    ns = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
     urls, children = [], []
-    for url in tree.findall(".//sm:url/sm:loc", ns):
-        loc = (url.text or "").strip()
-        if loc:
-            urls.append(loc)
-    for loc in tree.findall(".//sm:sitemap/sm:loc", ns):
-        child = (loc.text or "").strip()
-        if child:
-            children.append(child)
+    for elem in tree.iter():
+        tag = elem.tag.lower()
+        if tag.endswith("loc"):
+            parent = elem.getparent() if hasattr(elem, "getparent") else None
+        # fallback: infer by ancestor names via string checks
+        if tag.endswith("url"):
+            # collect loc under it
+            for child in list(elem):
+                if child.tag.lower().endswith("loc") and child.text:
+                    urls.append(child.text.strip())
+        if tag.endswith("sitemap"):
+            for child in list(elem):
+                if child.tag.lower().endswith("loc") and child.text:
+                    children.append(child.text.strip())
+    # If above didn't capture (because stdlib ET lacks getparent), do a second pass using XPath-like
+    if not urls and not children:
+        nsfree = re.sub(rb'\sxmlns(:\w+)?="[^"]+"', b"", content_bytes, flags=re.I)
+        try:
+            tree2 = ET.fromstring(nsfree)
+            for url in tree2.findall(".//url"):
+                loc = url.find("loc")
+                if loc is not None and loc.text:
+                    urls.append(loc.text.strip())
+            for sm in tree2.findall(".//sitemap"):
+                loc = sm.find("loc")
+                if loc is not None and loc.text:
+                    children.append(loc.text.strip())
+        except Exception:
+            pass
     return urls, children
 
 def maybe_decompress(resp) -> bytes:
-    """Handle .gz sitemaps and compressed responses."""
     try:
         content = resp.content
         if resp.headers.get("Content-Type", "").endswith("gzip") or resp.url.lower().endswith(".gz"):
@@ -336,7 +492,6 @@ def maybe_decompress(resp) -> bytes:
             return resp.content or b""
 
 def robots_sitemaps(domain: str) -> list[str]:
-    """Read robots.txt and extract all Sitemap: entries."""
     root = normalize_domain(domain)
     urls = []
     for scheme in ("https://", "http://"):
@@ -354,10 +509,9 @@ def robots_sitemaps(domain: str) -> list[str]:
                     urls.append(loc)
         if urls:
             break
-    return list(dict.fromkeys(urls))  # dedupe, keep order
+    return list(dict.fromkeys(urls))
 
 def alternate_sitemap_paths(domain: str) -> list[str]:
-    """Try common sitemap locations on domain and common subdomains."""
     root = normalize_domain(domain)
     base_paths = [
         "/sitemap.xml",
@@ -371,7 +525,8 @@ def alternate_sitemap_paths(domain: str) -> list[str]:
     for sub in subs:
         host = f"{sub+'.' if sub else ''}{root}"
         for pth in base_paths:
-            urls.append(f"https://{host}{pth}")
+            urls.append(f"https://{h
+ost}{pth}")
     return urls
 
 def host_is_within_root(hostname: str, root: str) -> bool:
@@ -379,7 +534,6 @@ def host_is_within_root(hostname: str, root: str) -> bool:
     return hostname.endswith(root)
 
 def sub_of(hostname: str, root: str) -> str | None:
-    """Return subdomain label ('' for bare root)."""
     hostname = (hostname or "").lower()
     if not hostname.endswith(root):
         return None
@@ -387,7 +541,7 @@ def sub_of(hostname: str, root: str) -> str | None:
         return ""
     suffix = "." + root
     label = hostname[:-len(suffix)]
-    return label  # e.g., 'www', 'blog', 'docs'
+    return label
 
 def add_urls_capped(url_list, discovered, seen_urls, urls_per_sub, per_sub_cap, root):
     for u in url_list:
@@ -410,90 +564,6 @@ def add_urls_capped(url_list, discovered, seen_urls, urls_per_sub, per_sub_cap, 
         discovered.append(u)
         urls_per_sub[label] = current + 1
 
-def discover_from_sitemap_urls(sitemap_urls: list[str], root: str, per_sub_cap: int = 500) -> list[str]:
-    """Seed with explicit sitemap URL(s), follow children, cap per subdomain."""
-    # IMPORTANT: normalize root to apex (strip leading 'www.')
-    root = apex_from_host(root)
-
-    discovered, seen_urls = [], set()
-    urls_per_sub = {"": 0}  # init bare
-
-    queue = list(dict.fromkeys(sitemap_urls))
-    visited = set()
-    while queue:
-        sm_url = queue.pop(0)
-        if sm_url in visited:
-            continue
-        visited.add(sm_url)
-        resp = fetch(sm_url, timeout=8.0)
-        if not resp:
-            continue
-        data = maybe_decompress(resp)
-        urls, children = parse_sitemap(data)
-        add_urls_capped(urls, discovered, seen_urls, urls_per_sub, per_sub_cap, root)
-        # enqueue children and their host root sitemaps
-        for child in children:
-            if child not in visited:
-                queue.append(child)
-            try:
-                h = apex_from_host(urlparse(child).netloc.lower())
-                if host_is_within_root(h, root):
-                    for pth in ("/sitemap.xml", "/sitemap_index.xml"):
-                        cand = f"https://{h}{pth}"
-                        if cand not in visited and cand not in queue:
-                            queue.append(cand)
-            except Exception:
-                pass
-    return discovered
-
-def discover_urls_from_domain(domain: str, extra_subs: list[str], per_sub_cap: int = 500) -> list[str]:
-    """Robust discovery via robots.txt + common paths; auto-include subdomains from sitemap indexes."""
-    root = apex_from_host(normalize_domain(domain))
-    if not root:
-        return []
-    initial_subs = set([""])
-    initial_subs.update(COMMON_SUBDOMAINS)
-    for s in extra_subs:
-        s = s.strip()
-        if s:
-            initial_subs.add(s)
-
-    candidate_sitemaps = []
-    candidate_sitemaps += robots_sitemaps(root)
-    candidate_sitemaps += alternate_sitemap_paths(root)
-    candidate_sitemaps = list(dict.fromkeys(candidate_sitemaps))
-
-    discovered, seen_urls = [], set()
-    urls_per_sub = {s: 0 for s in initial_subs}
-    visited = set()
-
-    queue = list(candidate_sitemaps)
-    while queue:
-        sm_url = queue.pop(0)
-        if sm_url in visited:
-            continue
-        visited.add(sm_url)
-        resp = fetch(sm_url, timeout=8.0)
-        if not resp:
-            continue
-        data = maybe_decompress(resp)
-        urls, children = parse_sitemap(data)
-        add_urls_capped(urls, discovered, seen_urls, urls_per_sub, per_sub_cap, root)
-        # follow children and seed their root sitemaps
-        for child in children:
-            if child not in visited:
-                queue.append(child)
-            try:
-                h = apex_from_host(urlparse(child).netloc.lower())
-                if host_is_within_root(h, root):
-                    for pth in ("/sitemap.xml", "/sitemap_index.xml"):
-                        cand = f"https://{h}{pth}"
-                        if cand not in visited and cand not in queue:
-                            queue.append(cand)
-            except Exception:
-                pass
-    return discovered
-
 def looks_like_sitemap_url(s: str) -> bool:
     t = s.strip().lower()
     if not t:
@@ -511,6 +581,84 @@ def ensure_url(s: str) -> str:
     if not t.startswith("http://") and not t.startswith("https://"):
         return "https://" + t
     return t
+
+def apex_from_url(url: str) -> str:
+    host = urlparse(url).netloc or ""
+    return apex_from_host(normalize_domain(host))
+
+def discover_from_sitemap_urls(sitemap_urls: list[str], root: str, per_sub_cap: int = 500) -> list[str]:
+    root = apex_from_host(root)
+    discovered, seen_urls = [], set()
+    urls_per_sub = {"": 0}
+    queue = list(dict.fromkeys(sitemap_urls))
+    visited = set()
+    while queue:
+        sm_url = queue.pop(0)
+        if sm_url in visited:
+            continue
+        visited.add(sm_url)
+        resp = fetch(sm_url, timeout=8.0)
+        if not resp:
+            continue
+        data = maybe_decompress(resp)
+        urls, children = parse_sitemap(data)
+        add_urls_capped(urls, discovered, seen_urls, urls_per_sub, per_sub_cap, root)
+        for child in children:
+            if child not in visited:
+                queue.append(child)
+            try:
+                h = apex_from_host(urlparse(child).netloc.lower())
+                if host_is_within_root(h, root):
+                    for pth in ("/sitemap.xml", "/sitemap_index.xml"):
+                        cand = f"https://{h}{pth}"
+                        if cand not in visited and cand not in queue:
+                            queue.append(cand)
+            except Exception:
+                pass
+    return discovered
+
+def discover_urls_from_domain(domain: str, extra_subs: list[str], per_sub_cap: int = 500) -> list[str]:
+    root = apex_from_host(normalize_domain(domain))
+    if not root:
+        return []
+    initial_subs = set([""])
+    initial_subs.update(COMMON_SUBDOMAINS)
+    for s in extra_subs:
+        s = s.strip()
+        if s:
+            initial_subs.add(s)
+    candidate_sitemaps = []
+    candidate_sitemaps += robots_sitemaps(root)
+    candidate_sitemaps += alternate_sitemap_paths(root)
+    candidate_sitemaps = list(dict.fromkeys(candidate_sitemaps))
+    discovered, seen_urls = [], set()
+    urls_per_sub = {s: 0 for s in initial_subs}
+    visited = set()
+    queue = list(candidate_sitemaps)
+    while queue:
+        sm_url = queue.pop(0)
+        if sm_url in visited:
+            continue
+        visited.add(sm_url)
+        resp = fetch(sm_url, timeout=8.0)
+        if not resp:
+            continue
+        data = maybe_decompress(resp)
+        urls, children = parse_sitemap(data)
+        add_urls_capped(urls, discovered, seen_urls, urls_per_sub, per_sub_cap, root)
+        for child in children:
+            if child not in visited:
+                queue.append(child)
+            try:
+                h = apex_from_host(urlparse(child).netloc.lower())
+                if host_is_within_root(h, root):
+                    for pth in ("/sitemap.xml", "/sitemap_index.xml"):
+                        cand = f"https://{h}{pth}"
+                        if cand not in visited and cand not in queue:
+                            queue.append(cand)
+            except Exception:
+                pass
+    return discovered
 
 # ---------- Suggest URLs to keywords ----------
 def suggest_urls_for_keywords(df: pd.DataFrame, kw_col: str | None, only_eligible: bool,
@@ -646,17 +794,19 @@ with st.expander("Site mapping (optional): map keywords to URLs discovered from 
     extra_subs_raw = st.text_input("Extra subdomains (optional, comma-separated)", "")
     extra_subs = [s.strip() for s in extra_subs_raw.split(",")] if extra_subs_raw else []
     only_eligible = st.checkbox("Only assign eligible keywords", value=True)
-    MIN_MATCH_SCORE = 0.25  # fixed threshold
+
+    # ADVANCED (E): test different thresholds without changing default
+    with st.expander("Advanced (optional)"):
+        MIN_MATCH_SCORE = st.slider("Temporary match threshold", min_value=0.10, max_value=0.40, step=0.01, value=0.25)
+        st.caption("Default is 0.25. Use this slider to test if borderline matches appear; CSV still uses this chosen value.")
 
     discovered_urls = []
 
     if entry.strip():
-        if looks_like_sitemap_url(entry):
+        if "sitemap" in entry.lower() or entry.lower().endswith((".xml", ".xml.gz")):
             raw_parts = [p for p in re.split(r"[,\s]+", entry) if p]
             sm_urls = [ensure_url(p) for p in raw_parts]
-            # derive apex root from the first sitemap URL
-            first = urlparse(sm_urls[0]).netloc or ""
-            first_root = apex_from_host(normalize_domain(first))
+            first_root = apex_from_url(sm_urls[0])
             with st.spinner("Reading sitemap(s)..."):
                 try:
                     discovered_urls = discover_from_sitemap_urls(sm_urls, first_root, per_sub_cap=500)
