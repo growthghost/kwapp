@@ -137,7 +137,6 @@ def extract_page_tokens(url: str, title: str | None) -> set[str]:
     title_tokens = tokenize(title or url_to_title(url))
     return path_tokens.union(host_tokens).union(title_tokens)
 
-# Category-aware boosts for URL mapping
 CATEGORY_BOOST_TERMS = {
     "AIO": {"guide", "tutorial", "how", "learn", "blog", "faq"},
     "AEO": {"faq", "questions", "what", "how", "who", "why"},
@@ -276,7 +275,7 @@ def make_page_obj(url: str, title: str | None) -> dict:
     tokens = page_tokens_bundle(url, title, signals)
     return {"url": url, "title": title or url_to_title(url), "tokens": tokens}
 
-# ----- Domain-based sitemap discovery (always includes common subdomains) -----
+# ----- Discovery helpers -----
 COMMON_SUBDOMAINS = ["www", "blog", "docs", "help", "support", "learn", "resources"]
 
 def normalize_domain(d: str) -> str:
@@ -301,19 +300,17 @@ def fetch(url: str, timeout: float = 8.0):
     return None
 
 def parse_sitemap(content_bytes: bytes) -> tuple[list[str], list[str]]:
-    """Return (urlset_urls, child_sitemaps). Accepts raw XML bytes."""
+    """Return (urlset_urls, child_sitemaps)."""
     try:
         tree = ET.fromstring(content_bytes)
     except Exception:
         return [], []
     ns = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
     urls, children = [], []
-    # urlset
     for url in tree.findall(".//sm:url/sm:loc", ns):
         loc = (url.text or "").strip()
         if loc:
             urls.append(loc)
-    # sitemapindex
     for loc in tree.findall(".//sm:sitemap/sm:loc", ns):
         child = (loc.text or "").strip()
         if child:
@@ -372,17 +369,85 @@ def alternate_sitemap_paths(domain: str) -> list[str]:
             urls.append(f"https://{host}{pth}")
     return urls
 
-def discover_urls_from_sitemaps(domain: str, extra_subs: list[str], per_sub_cap: int = 500):
-    """
-    Returns:
-      discovered_urls: list[str]
-      stats: dict with discovery diagnostics
-    """
+def host_is_within_root(hostname: str, root: str) -> bool:
+    hostname = (hostname or "").lower()
+    return hostname.endswith(root)
+
+def sub_of(hostname: str, root: str) -> str | None:
+    """Return subdomain label ('' for bare root)."""
+    hostname = (hostname or "").lower()
+    if not hostname.endswith(root):
+        return None
+    if hostname == root:
+        return ""
+    suffix = "." + root
+    label = hostname[:-len(suffix)]
+    return label  # e.g., 'www', 'blog', 'docs'
+
+def add_urls_capped(url_list, discovered, seen_urls, urls_per_sub, per_sub_cap, root):
+    for u in url_list:
+        if u in seen_urls:
+            continue
+        try:
+            p = urlparse(u)
+            host = (p.netloc or "").lower()
+            if not host_is_within_root(host, root):
+                continue
+            label = sub_of(host, root)
+            if label is None:
+                continue
+        except Exception:
+            continue
+        current = urls_per_sub.get(label, 0)
+        if current >= per_sub_cap:
+            continue
+        seen_urls.add(u)
+        discovered.append(u)
+        urls_per_sub[label] = current + 1
+
+def discover_from_sitemap_urls(sitemap_urls: list[str], root: str, per_sub_cap: int = 500) -> list[str]:
+    """Seed with explicit sitemap URL(s), follow children, cap per subdomain."""
+    discovered, seen_urls = [], set()
+    urls_per_sub = {}
+
+    # Init per-sub map with root/bare
+    urls_per_sub[""] = urls_per_sub.get("", 0)
+
+    # BFS over sitemap urls
+    queue = list(dict.fromkeys(sitemap_urls))
+    visited = set()
+    while queue:
+        sm_url = queue.pop(0)
+        if sm_url in visited:
+            continue
+        visited.add(sm_url)
+        resp = fetch(sm_url, timeout=8.0)
+        if not resp:
+            continue
+        data = maybe_decompress(resp)
+        urls, children = parse_sitemap(data)
+        # add urls
+        add_urls_capped(urls, discovered, seen_urls, urls_per_sub, per_sub_cap, root)
+        # enqueue children and also enqueue their root-level sitemaps to pull subdomains in
+        for child in children:
+            if child not in visited:
+                queue.append(child)
+            try:
+                h = urlparse(child).netloc.lower()
+                if host_is_within_root(h, root):
+                    for pth in ("/sitemap.xml", "/sitemap_index.xml"):
+                        cand = f"https://{h}{pth}"
+                        if cand not in visited and cand not in queue:
+                            queue.append(cand)
+            except Exception:
+                pass
+    return discovered
+
+def discover_urls_from_domain(domain: str, extra_subs: list[str], per_sub_cap: int = 500) -> list[str]:
+    """Robust discovery via robots.txt + common paths; auto-include subdomains from sitemap indexes."""
     root = normalize_domain(domain)
     if not root:
-        return [], {"subdomains": [], "urls_per_sub": {}, "sitemaps_tried": 0, "sitemaps_ok": 0}
-
-    # Start with bare + common subdomains + user extras
+        return []
     initial_subs = set([""])
     initial_subs.update(COMMON_SUBDOMAINS)
     for s in extra_subs:
@@ -390,107 +455,62 @@ def discover_urls_from_sitemaps(domain: str, extra_subs: list[str], per_sub_cap:
         if s:
             initial_subs.add(s)
 
-    # 1) Collect sitemap endpoints: robots + alternates
     candidate_sitemaps = []
-    candidate_sitemaps += robots_sitemaps(root)          # robots.txt entries
-    candidate_sitemaps += alternate_sitemap_paths(root)  # alternates on common/bare subs
-    candidate_sitemaps = list(dict.fromkeys(candidate_sitemaps))  # dedupe preserve order
+    candidate_sitemaps += robots_sitemaps(root)
+    candidate_sitemaps += alternate_sitemap_paths(root)
+    candidate_sitemaps = list(dict.fromkeys(candidate_sitemaps))
 
-    # 2) Fetch & parse, auto-include subdomains discovered inside sitemaps
-    discovered = []
-    seen_urls = set()
-    subdomains_seen = set(initial_subs)  # track names like '', 'www', 'blog', ...
+    discovered, seen_urls = [], set()
     urls_per_sub = {s: 0 for s in initial_subs}
-    sitemaps_tried = 0
-    sitemaps_ok = 0
+    visited = set()
 
-    def host_is_within_root(hostname: str) -> bool:
-        hostname = (hostname or "").lower()
-        return hostname.endswith(root)
-
-    def sub_of(hostname: str) -> str | None:
-        """Return subdomain label ('' for bare root)."""
-        hostname = (hostname or "").lower()
-        if not hostname.endswith(root):
-            return None
-        if hostname == root:
-            return ""
-        suffix = "." + root
-        label = hostname[:-len(suffix)]
-        return label  # e.g., 'www', 'blog', 'docs'
-
-    for sm_url in candidate_sitemaps:
-        sitemaps_tried += 1
+    queue = list(candidate_sitemaps)
+    while queue:
+        sm_url = queue.pop(0)
+        if sm_url in visited:
+            continue
+        visited.add(sm_url)
         resp = fetch(sm_url, timeout=8.0)
         if not resp:
             continue
         data = maybe_decompress(resp)
         urls, children = parse_sitemap(data)
-        if urls or children:
-            sitemaps_ok += 1
-
-        # If sitemapindex, follow children (one level breadth)
-        child_list = children.copy()
-        # also detect new subdomains mentioned and enqueue their root sitemaps
-        for loc in child_list:
+        add_urls_capped(urls, discovered, seen_urls, urls_per_sub, per_sub_cap, root)
+        # follow children and seed their root sitemaps
+        for child in children:
+            if child not in visited:
+                queue.append(child)
             try:
-                h = urlparse(loc).netloc.lower()
-                if host_is_within_root(h):
-                    lbl = sub_of(h)
-                    if lbl is not None and lbl not in subdomains_seen:
-                        subdomains_seen.add(lbl)
-                        urls_per_sub.setdefault(lbl, 0)
-                        for pth in ("/sitemap.xml", "/sitemap_index.xml"):
-                            candidate = f"https://{h}{pth}"
-                            if candidate not in candidate_sitemaps:
-                                candidate_sitemaps.append(candidate)
+                h = urlparse(child).netloc.lower()
+                if host_is_within_root(h, root):
+                    for pth in ("/sitemap.xml", "/sitemap_index.xml"):
+                        cand = f"https://{h}{pth}"
+                        if cand not in visited and cand not in queue:
+                            queue.append(cand)
             except Exception:
                 pass
+    return discovered
 
-        # add urls from this sitemap (cap per subdomain)
-        def add_urls(url_list):
-            for u in url_list:
-                if u in seen_urls:
-                    continue
-                try:
-                    p = urlparse(u)
-                    host = (p.netloc or "").lower()
-                    if not host_is_within_root(host):
-                        continue
-                    label = sub_of(host)
-                    if label is None:
-                        continue
-                except Exception:
-                    continue
-                # cap per subdomain
-                current = urls_per_sub.get(label, 0)
-                if current >= per_sub_cap:
-                    continue
-                seen_urls.add(u)
-                discovered.append(u)
-                urls_per_sub[label] = current + 1
+def looks_like_sitemap_url(s: str) -> bool:
+    t = s.strip().lower()
+    if not t:
+        return False
+    # if it has "sitemap" in path or ends with xml/xml.gz we treat as sitemap URL
+    if "sitemap" in t and (t.startswith("http://") or t.startswith("https://") or "/" in t):
+        return True
+    if t.endswith(".xml") or t.endswith(".xml.gz"):
+        return True
+    return False
 
-        add_urls(urls)
+def ensure_url(s: str) -> str:
+    t = s.strip()
+    if not t:
+        return t
+    if not t.startswith("http://") and not t.startswith("https://"):
+        return "https://" + t
+    return t
 
-        # follow child sitemaps
-        for child in child_list:
-            child_resp = fetch(child, timeout=8.0)
-            if not child_resp:
-                continue
-            child_data = maybe_decompress(child_resp)
-            u2, _ = parse_sitemap(child_data)
-            add_urls(u2)
-
-    stats = {
-        "subdomains": sorted([lbl if lbl else "(root)" for lbl in set(urls_per_sub.keys())]),
-        "urls_per_sub": urls_per_sub,
-        "sitemaps_tried": sitemaps_tried,
-        "sitemaps_ok": sitemaps_ok,
-        "total_urls": len(discovered),
-    }
-    return discovered, stats
-
-# ---------- Suggest URLs to keywords (RESTORED) ----------
+# ---------- Suggest URLs to keywords ----------
 def suggest_urls_for_keywords(df: pd.DataFrame, kw_col: str | None, only_eligible: bool,
                               min_score: float, pages: list[dict]) -> pd.DataFrame:
     if not pages or kw_col is None:
@@ -611,7 +631,7 @@ example = pd.DataFrame(
 with st.expander("See example CSV format"):
     st.dataframe(example, use_container_width=True)
 
-# ---------- Site mapping (sitemap discovery only) ----------
+# ---------- Site mapping (domain OR sitemap) ----------
 with st.expander("Site mapping (optional): map keywords to URLs discovered from sitemap(s)"):
     st.markdown(
         "<div style='background:#FEF9C3;border:1px solid #FDE68A;padding:10px;border-radius:8px;color:#000;'>"
@@ -620,25 +640,37 @@ with st.expander("Site mapping (optional): map keywords to URLs discovered from 
         "</div>",
         unsafe_allow_html=True
     )
-    domain = st.text_input("Domain (e.g., example.com)", "")
+    entry = st.text_input("Domain or sitemap URL (e.g., example.com OR https://www.example.com/sitemap.xml)", "")
     extra_subs_raw = st.text_input("Extra subdomains (optional, comma-separated)", "")
     extra_subs = [s.strip() for s in extra_subs_raw.split(",")] if extra_subs_raw else []
     only_eligible = st.checkbox("Only assign eligible keywords", value=True)
     MIN_MATCH_SCORE = 0.25  # fixed threshold
 
     discovered_urls = []
-    discovery_stats = {}
-    if domain.strip():
-        with st.spinner("Discovering URLs from sitemap(s)..."):
-            try:
-                discovered_urls, discovery_stats = discover_urls_from_sitemaps(
-                    domain=domain, extra_subs=extra_subs, per_sub_cap=500
-                )
-            except Exception:
-                discovered_urls, discovery_stats = [], {}
-        st.success(f"Discovered {len(discovered_urls)} URL(s) from sitemap(s).")
+
+    if entry.strip():
+        # If it looks like a sitemap URL, accept one or multiple (comma-separated)
+        if looks_like_sitemap_url(entry):
+            raw_parts = [p for p in re.split(r"[,\s]+", entry) if p]
+            sm_urls = [ensure_url(p) for p in raw_parts]
+            # derive root from the first sitemap URL
+            first_root = normalize_domain(urlparse(sm_urls[0]).netloc or "")
+            with st.spinner("Reading sitemap(s)..."):
+                try:
+                    discovered_urls = discover_from_sitemap_urls(sm_urls, first_root, per_sub_cap=500)
+                except Exception:
+                    discovered_urls = []
+            st.success(f"Discovered {len(discovered_urls)} URL(s) from provided sitemap(s).")
+        else:
+            # treat as domain, do robust discovery
+            with st.spinner("Discovering URLs from domain sitemap(s)..."):
+                try:
+                    discovered_urls = discover_urls_from_domain(entry, extra_subs, per_sub_cap=500)
+                except Exception:
+                    discovered_urls = []
+            st.success(f"Discovered {len(discovered_urls)} URL(s) from sitemap(s).")
     else:
-        st.info("Enter a domain to begin discovery.")
+        st.info("Enter a domain or paste a sitemap URL to begin discovery.")
 
 # ---------- Robust CSV reader + numeric cleaning ----------
 if uploaded is not None:
@@ -694,8 +726,6 @@ if uploaded is not None:
 
         # Build pages from discovery — fast parallel fetch+parse
         pages = []
-        fetch_success = 0
-        usable_pages = 0
         if discovered_urls:
             with st.spinner("Fetching page content & extracting signals (parallel)…"):
                 max_workers = min(32, max(4, os.cpu_count() * 2 if os.cpu_count() else 8))
@@ -705,10 +735,6 @@ if uploaded is not None:
                         try:
                             page = f.result()
                             pages.append(page)
-                            # diagnostics
-                            fetch_success += 1
-                            if page.get("tokens", {}).get("all"):
-                                usable_pages += 1
                         except Exception:
                             pass
 
@@ -717,51 +743,6 @@ if uploaded is not None:
             scored, kw_col=kw_col, only_eligible=only_eligible,
             min_score=MIN_MATCH_SCORE, pages=pages
         )
-
-        # --------- Diagnostics summary (tiny box) ---------
-        try:
-            total_keywords = len(scored)
-            eligible_keywords = int(scored["Eligible"].eq("Yes").sum()) if "Eligible" in scored.columns else total_keywords
-            assigned_keywords = int(scored["Suggested URL"].ne("").sum())
-
-            subdomains_list = discovery_stats.get("subdomains", [])
-            urls_per_sub = discovery_stats.get("urls_per_sub", {})
-            sitemaps_tried = discovery_stats.get("sitemaps_tried", 0)
-            sitemaps_ok = discovery_stats.get("sitemaps_ok", 0)
-            total_discovered = discovery_stats.get("total_urls", len(discovered_urls))
-
-            subdomains_display = ", ".join(subdomains_list) if subdomains_list else "—"
-
-            st.markdown(
-                f"""
-<div style='background:#F3F4F6; border:1px solid #E5E7EB; padding:12px; border-radius:8px; margin-top:8px;'>
-  <strong>🔍 Crawl & Match Summary</strong><br>
-  • Subdomains discovered: <strong>{len(subdomains_list)}</strong> ({subdomains_display})<br>
-  • URLs discovered (capped at 500 per subdomain): <strong>{total_discovered}</strong><br>
-  • Sitemaps tried: <strong>{sitemaps_tried}</strong> &nbsp;|&nbsp; OK: <strong>{sitemaps_ok}</strong><br>
-  • Pages fetched successfully: <strong>{fetch_success}</strong> &nbsp;|&nbsp; Usable content: <strong>{usable_pages}</strong><br>
-  • Keywords eligible for strategy: <strong>{eligible_keywords}</strong> / {total_keywords}<br>
-  • Keywords assigned a Suggested URL: <strong>{assigned_keywords}</strong>
-</div>
-""",
-                unsafe_allow_html=True
-            )
-        except Exception:
-            pass
-
-        # Info banners (existing)
-        invalid_rows = scored["Reason"].eq("Invalid Volume/KD").sum()
-        below_min_rows = scored["Reason"].str.startswith("Below min volume").sum()
-        if invalid_rows or below_min_rows:
-            msgs = []
-            if below_min_rows:
-                msgs.append(f"{below_min_rows} below minimum volume for '{scoring_mode}' ({MIN_VALID_VOLUME}).")
-            if invalid_rows:
-                msgs.append(f"{invalid_rows} with invalid Volume/KD.")
-            st.info("Some rows were not eligible: " + " ".join(msgs))
-        if pages:
-            assigned = scored["Suggested URL"].ne("").sum()
-            st.success(f"URL mapping done. {assigned} keyword(s) received a Suggested URL. (Min match score {MIN_MATCH_SCORE})")
 
         # ---------- CSV DOWNLOAD (sorted: Yes first, KD ↑ then Volume ↓) ----------
         filename_base = f"outrankiq_{scoring_mode.lower().replace(' ', '_')}_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
