@@ -186,7 +186,7 @@ if uploaded is not None:
 
     def try_read(bytes_data: bytes) -> pd.DataFrame:
         trials = [
-            {"encoding": None, "sep": None, "engine": "python"},  # let pandas infer
+            {"encoding": None, "sep": None, "engine": "python"},
             {"encoding": "utf-8", "sep": None, "engine": "python"},
             {"encoding": "utf-8-sig", "sep": None, "engine": "python"},
             {"encoding": "ISO-8859-1", "sep": None, "engine": "python"},
@@ -228,7 +228,7 @@ if uploaded is not None:
         df[vol_col] = pd.to_numeric(df[vol_col], errors="coerce")
         df[kd_col] = pd.to_numeric(df[kd_col], errors="coerce").clip(lower=0, upper=100)
 
-        # Global keyword token sets (raw + normalized)
+        # Build global keyword token sets
         TOKEN_SPLIT_RE = re.compile(r"[^a-z0-9]+")
         _STOPWORDS_G = set("""
         a an the and or of for to in on at by with from as is are be was were this that these those it its it's your our my we you
@@ -237,8 +237,7 @@ if uploaded is not None:
         def _tokens_g(text: str):
             if not text: return []
             return [t for t in TOKEN_SPLIT_RE.split(str(text).lower()) if t and t not in _STOPWORDS_G and len(t) > 1]
-        def _normalize_token(t: str) -> str:
-            # very light stemming
+        def _normalize_token_g(t: str) -> str:
             if len(t) > 4:
                 for suf in ("ing","ers","ies","ment","tion","s","es","ed"):
                     if t.endswith(suf) and len(t) - len(suf) >= 3:
@@ -247,7 +246,7 @@ if uploaded is not None:
         for kw in df[kw_col].astype(str).tolist():
             toks = _tokens_g(kw)
             GLOBAL_KW_TOKENS.update(toks)
-            GLOBAL_KW_TOKENS_NORM.update(_normalize_token(t) for t in toks)
+            GLOBAL_KW_TOKENS_NORM.update(_normalize_token_g(t) for t in toks)
 
 # =========================================================
 # ========== Crawl + Mapping UI (single action) ===========
@@ -263,7 +262,7 @@ CONCURRENCY = 20
 PARTIAL_MAX_BYTES = 200_000
 FETCH_TIMEOUT_SECS = 8
 
-# 🚀 Fun rocket button CSS (reliable selector)
+# 🚀 Rocket button CSS
 st.markdown("""
 <style>
 div[data-testid="stFormSubmitButton"] > button {
@@ -431,7 +430,7 @@ def _extract_canonical(html: str, base_url: str) -> str | None:
     return None
 
 def _page_profile(url: str, html: str):
-    """Return (weights_dict, norm, canonical_url_or_None, token_set, token_set_normed)"""
+    """Return (weights_dict, norm, canonical_url_or_None, token_set, token_set_norm)"""
     title_txts = _extract_text_tag(html, "title")
     h1_txts = _extract_text_tag(html, "h1")
     h2_txts = _extract_text_tag(html, "h2")
@@ -465,7 +464,7 @@ def _cosine_overlap(page_vec: dict[str, float], page_norm: float, kw_tokens: set
 class _Kw:
     __slots__ = ("idx","text","vol","kd","score","eligible","cats","kw_tokens","kw_tokens_norm","vol_norm","kw_norm")
     def __init__(self, idx, text, vol, kd, score, eligible, cats):
-        self.idx = idx
+        self.idx = idx                  # POSitional row id after sorting
         self.text = str(text or "")
         self.vol = float(vol) if pd.notna(vol) else 0.0
         self.kd = float(kd) if pd.notna(kd) else 0.0
@@ -479,15 +478,16 @@ class _Kw:
 
 def _prepare_keywords_for_mapping(export_df: pd.DataFrame, kw_col: str, vol_col: str, kd_col: str) -> list[_Kw]:
     kws = []
-    for i, row in export_df.reset_index(drop=False).iterrows():
+    # Use positional rows to avoid index mismatches
+    for i, row in enumerate(export_df.itertuples(index=False)):
         kws.append(_Kw(
-            idx=row["index"],
-            text=row.get(kw_col, ""),
-            vol=row.get(vol_col, 0),
-            kd=row.get(kd_col, 0),
-            score=row.get("Score", 0),
-            eligible=row.get("Eligible", "No"),
-            cats=row.get("Category", ""),
+            idx=i,
+            text=getattr(row, kw_col) if kw_col else "",
+            vol=getattr(row, vol_col),
+            kd=getattr(row, kd_col),
+            score=getattr(row, "Score"),
+            eligible=getattr(row, "Eligible"),
+            cats=getattr(row, "Category"),
         ))
     vols = [k.vol for k in kws] or [0.0]
     vmin, vmax = min(vols), max(vols)
@@ -503,29 +503,23 @@ def _soft_overlap(page_tokens_norm: set[str], kw_tokens_norm: set[str]) -> int:
     return len(page_tokens_norm & kw_tokens_norm)
 
 def _fallback_rank(soft_olap: int, score: int, vol_norm: float) -> float:
-    # Used when cosine == 0; emphasizes any token overlap, then score/volume
     return 0.5*(soft_olap > 0) + 0.3*(score/6.0) + 0.2*vol_norm
 
-def _pick_roles_from_candidates(cands_sorted, assigned_ids, want_aio, want_veo):
-    """Return [primary, secondary, aio, veo] from cands, ensuring unique picks."""
+def _pick_roles_from_candidates(cands_sorted, assigned_ids):
+    """Return up to 4 picks tagged with roles; roles not exported."""
     picks = []
-
     def next_unassigned(pred=lambda k: True):
         for _, k, _ in cands_sorted:
             if k.idx not in assigned_ids and pred(k):
                 assigned_ids.add(k.idx)
                 return k
         return None
-
-    # Primary, Secondary
     p = next_unassigned()
     if p: picks.append(("Primary", p))
     s = next_unassigned()
     if s: picks.append(("Secondary", s))
-    # AIO pref
     a = next_unassigned(lambda k: ("AIO" in k.cats)) or next_unassigned()
     if a: picks.append(("AIO", a))
-    # VEO pref
     v = next_unassigned(lambda k: ("VEO" in k.cats)) or next_unassigned()
     if v: picks.append(("VEO", v))
     return picks
@@ -533,16 +527,18 @@ def _pick_roles_from_candidates(cands_sorted, assigned_ids, want_aio, want_veo):
 def _assign_keywords_to_pages(pages, keywords, only_assign_eligible: bool):
     """
     pages: list[(url, page_vec, page_norm, token_set, token_set_norm)]
-    returns mapping: keyword_row_index -> (url, role)
-    Ensures up to four keywords per page (Primary, Secondary, AIO, VEO),
-    with robust fallbacks if cosine similarity is zero.
+    returns mapping: keyword_row_position -> mapped_url
     """
-    mapping: dict[int, tuple[str, str]] = {}
+    # Candidate pool
     available = [k for k in keywords if (k.eligible if only_assign_eligible else True)]
+    if not available:
+        # Fallback so we always map something
+        available = list(keywords)
+
+    mapping: dict[int, str] = {}
     assigned_kw_ids: set[int] = set()
 
     for url, page_vec, page_norm, token_set, token_set_norm in pages:
-        # 1) Build candidate list with cosine similarity (fast)
         cands = []
         for k in available:
             if k.idx in assigned_kw_ids or not k.kw_tokens:
@@ -551,7 +547,6 @@ def _assign_keywords_to_pages(pages, keywords, only_assign_eligible: bool):
             if rel > 0:
                 cands.append((_rank_score(rel, k.score, k.vol_norm), k, rel))
 
-        # 2) If no cosine matches, fall back to normalized token overlap
         if not cands:
             fcands = []
             for k in available:
@@ -562,7 +557,6 @@ def _assign_keywords_to_pages(pages, keywords, only_assign_eligible: bool):
                     fcands.append((_fallback_rank(olap, k.score, k.vol_norm), k, float(olap)))
             cands = fcands
 
-        # 3) If STILL nothing, pick highest score/volume keywords to ensure mapping
         if not cands:
             fcands = [((0.15*k.score/6.0 + 0.85*k.vol_norm), k, 0.0) for k in available if k.idx not in assigned_kw_ids]
             cands = fcands
@@ -571,13 +565,9 @@ def _assign_keywords_to_pages(pages, keywords, only_assign_eligible: bool):
             continue
 
         cands.sort(key=lambda x: x[0], reverse=True)
-
-        # 4) Pick roles with category preferences
-        want_aio = True
-        want_veo = True
-        picks = _pick_roles_from_candidates(cands, assigned_kw_ids, want_aio, want_veo)
-        for role, kw in picks:
-            mapping[kw.idx] = (url, role)
+        picks = _pick_roles_from_candidates(cands, assigned_kw_ids)
+        for _, kw in picks:
+            mapping[kw.idx] = url  # store only URL (role not exported)
 
     return mapping
 
@@ -897,7 +887,6 @@ def _collect_pages(site_url: str, include_subdomains: bool, max_pages: int) -> d
 # =========================================================
 # ================= Button Action Handler =================
 # =========================================================
-# Persistent download area
 download_area = st.empty()
 
 if submit:
@@ -929,7 +918,7 @@ if submit:
                 max_pages=int(MAX_PAGES_DEFAULT)
             )
 
-        # ---------- Build page profiles (no pruning; use fallbacks later) ----------
+        # ---------- Build page profiles ----------
         pages_profiles = []
         seen_urls = set()
         for u, html in html_map.items():
@@ -942,36 +931,23 @@ if submit:
             seen_urls.add(rep_url)
             pages_profiles.append((rep_url, vec, norm, tset, tset_norm))
 
-        # If nothing crawled/profiled, still offer CSV (unassigned)
+        # ---------- Prepare keywords + assign (position-based) ----------
         if not pages_profiles:
             export_df["Mapped URL"] = ""
-            export_df["Mapped Role"] = "Unassigned"
         else:
-            # ---------- Prepare keywords + assign ----------
             kw_objs = _prepare_keywords_for_mapping(export_df, kw_col, vol_col, kd_col)
             mapping = _assign_keywords_to_pages(
                 pages_profiles, kw_objs, only_assign_eligible=only_assign_eligible
             )
-
-            # ---------- Merge mapping back to export ----------
-            mapped_urls, mapped_roles = [], []
-            for idx in export_df.index.tolist():
-                if idx in mapping:
-                    url, role = mapping[idx]
-                    mapped_urls.append(url)
-                    mapped_roles.append(role)
-                else:
-                    mapped_urls.append("")
-                    mapped_roles.append("Unassigned")
+            mapped_urls = [mapping.get(i, "") for i in range(len(export_df))]
             export_df["Mapped URL"] = mapped_urls
-            export_df["Mapped Role"] = mapped_roles
 
-        # ---------- Persist CSV so it doesn't disappear ----------
+        # ---------- Persist CSV ----------
         csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")
         st.session_state["last_csv_bytes"] = csv_bytes
         st.session_state["last_csv_name"] = f"{filename_base}.csv"
 
-# Persistent download button (survives reruns)
+# Persistent download button
 if "last_csv_bytes" in st.session_state and "last_csv_name" in st.session_state:
     with download_area:
         st.download_button(
@@ -979,7 +955,7 @@ if "last_csv_bytes" in st.session_state and "last_csv_name" in st.session_state:
             data=st.session_state["last_csv_bytes"],
             file_name=st.session_state["last_csv_name"],
             mime="text/csv",
-            help="Includes per-keyword URL mapping (Primary, Secondary, AIO, VEO).",
+            help="Includes per-keyword URL mapping (Primary/Secondary/AIO/VEO used internally).",
             key="dl_persist"
         )
 
