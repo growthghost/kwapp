@@ -260,15 +260,14 @@ if uploaded is not None:
 st.markdown("---")
 st.subheader("Site Crawl & Keyword Mapping")
 
+# Hidden defaults (always include subdomains; cap pages internally)
+MAX_PAGES_DEFAULT = 500
+INCLUDE_SUBDOMAINS_ALWAYS = True
+
 with st.form("crawlmap"):
     site_url = st.text_input("Site to crawl (domain or full URL)", placeholder="https://example.com")
-    include_subdomains = st.checkbox("Include subdomains", value=True)
-    max_pages = st.number_input("Max pages", min_value=1, max_value=10000, value=500, step=50)
     only_assign_eligible = st.checkbox("Only assign eligible keywords", value=True)
-    submit = st.form_submit_button(
-        "Score, Crawl, and Map",
-        disabled=(df is None or not (site_url or "").strip())
-    )
+    submit = st.form_submit_button("Score, Crawl, and Map")  # always enabled
 
 # =========================================================
 # ============== Crawl + Mapping Implementation ===========
@@ -726,87 +725,99 @@ def _collect_pages(site_url: str, include_subdomains: bool, max_pages: int) -> d
 # =========================================================
 # ================= Button Action Handler =================
 # =========================================================
-if submit and df is not None:
-    # ---------- Score/Categorize ----------
-    scored = add_scoring_columns(df, vol_col, kd_col, kw_col)
-
-    # Build export base (same as before)
-    filename_base = f"outrankiq_{scoring_mode.lower().replace(' ', '_')}_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
-    base_cols = ([kw_col] if kw_col else []) + [vol_col, kd_col, "Score", "Tier", "Eligible", "Reason", "Category"]
-    export_df = scored[base_cols].copy()
-    export_df["Strategy"] = scoring_mode
-
-    export_df["_EligibleSort"] = export_df["Eligible"].map({"Yes": 1, "No": 0}).fillna(0)
-    export_df = export_df.sort_values(
-        by=["_EligibleSort", kd_col, vol_col], ascending=[False, True, False], kind="mergesort"
-    ).drop(columns=["_EligibleSort"])
-    export_cols = base_cols + ["Strategy"]
-    export_df = export_df[export_cols]
-
-    # ---------- Crawl site (silent) ----------
-    with st.spinner("Crawling site and mapping keywords to pages..."):
-        html_map = _collect_pages(site_url, include_subdomains=include_subdomains, max_pages=int(max_pages))
-
-    # ---------- Build page profiles ----------
-    pages_profiles: list[tuple[str, dict[str, float]]] = []
-    for u, html in html_map.items():
-        vec = _page_profile(u, html)
-        if vec:
-            pages_profiles.append((u, vec))
-
-    # If nothing crawled/profiled, we still provide the scored CSV (mapping blank)
-    if not pages_profiles:
-        export_df["Mapped URL"] = ""
-        export_df["Mapped Role"] = "Unassigned"
-        csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")
-        st.download_button(
-            label="⬇️ Download scored + mapping CSV",
-            data=csv_bytes,
-            file_name=f"{filename_base}.csv",
-            mime="text/csv",
-            help="Includes mapping columns; mapping may be blank if the crawl yielded no pages."
-        )
+if submit:
+    # Validate after click (keeps button enabled visually)
+    if df is None:
+        st.error("Please upload your keyword CSV first.")
+    elif not (site_url or "").strip():
+        st.error("Please enter a site URL to crawl.")
     else:
-        # ---------- Prepare keywords + assign ----------
-        kw_objs = _prepare_keywords_for_mapping(export_df, kw_col, vol_col, kd_col)
-        mapping = _assign_keywords_to_pages(pages_profiles, kw_objs, only_assign_eligible=only_assign_eligible)
+        # ---------- Score/Categorize ----------
+        scored = add_scoring_columns(df, vol_col, kd_col, kw_col)
 
-        # ---------- Merge mapping back to export ----------
-        mapped_urls = []
-        mapped_roles = []
-        for idx in export_df.index.tolist():
-            if idx in mapping:
-                url, role = mapping[idx]
-                mapped_urls.append(url)
-                mapped_roles.append(role)
-            else:
-                mapped_urls.append("")
-                mapped_roles.append("Unassigned")
-        export_df["Mapped URL"] = mapped_urls
-        export_df["Mapped Role"] = mapped_roles
+        # Build export base (same as before)
+        filename_base = f"outrankiq_{scoring_mode.lower().replace(' ', '_')}_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
+        base_cols = ([kw_col] if kw_col else []) + [vol_col, kd_col, "Score", "Tier", "Eligible", "Reason", "Category"]
+        export_df = scored[base_cols].copy()
+        export_df["Strategy"] = scoring_mode
 
-        csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")
-        st.download_button(
-            label="⬇️ Download scored + mapping CSV",
-            data=csv_bytes,
-            file_name=f"{filename_base}.csv",
-            mime="text/csv",
-            help="Sorted by eligibility (Yes first), KD ascending, Volume descending, with per-keyword URL mapping."
-        )
+        export_df["_EligibleSort"] = export_df["Eligible"].map({"Yes": 1, "No": 0}).fillna(0)
+        export_df = export_df.sort_values(
+            by=["_EligibleSort", kd_col, vol_col], ascending=[False, True, False], kind="mergesort"
+        ).drop(columns=["_EligibleSort"])
+        export_cols = base_cols + ["Strategy"]
+        export_df = export_df[export_cols]
 
-        # Optional preview (top 10) with color on Score/Tier
-        if st.checkbox("Preview first 10 rows (optional)", value=False, key="preview_mapping"):
-            preview_df = export_df.copy()
+        # ---------- Crawl site (silent) ----------
+        with st.spinner("Crawling site and mapping keywords to pages..."):
+            html_map = _collect_pages(
+                site_url,
+                include_subdomains=INCLUDE_SUBDOMAINS_ALWAYS,   # always True (hidden from UI)
+                max_pages=int(MAX_PAGES_DEFAULT)                 # hidden cap
+            )
 
-            def _row_style(row):
-                color = COLOR_MAP.get(int(row.get("Score", 0)) if pd.notna(row.get("Score", 0)) else 0, "#9ca3af")
-                return [
-                    ("background-color: " + color + "; color: black;") if c in ("Score", "Tier") else ""
-                    for c in row.index
-                ]
+        # ---------- Build page profiles ----------
+        pages_profiles: list[tuple[str, dict[str, float]]] = []
+        for u, html in html_map.items():
+            vec = _page_profile(u, html)
+            if vec:
+                pages_profiles.append((u, vec))
 
-            styled = preview_df.head(10).style.apply(_row_style, axis=1)
-            st.dataframe(styled, use_container_width=True)
+        # If nothing crawled/profiled, we still provide the scored CSV (mapping blank)
+        if not pages_profiles:
+            export_df["Mapped URL"] = ""
+            export_df["Mapped Role"] = "Unassigned"
+            csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")
+            st.download_button(
+                label="⬇️ Download scored + mapping CSV",
+                data=csv_bytes,
+                file_name=f"{filename_base}.csv",
+                mime="text/csv",
+                help="Includes mapping columns; mapping may be blank if the crawl yielded no pages."
+            )
+        else:
+            # ---------- Prepare keywords + assign ----------
+            kw_objs = _prepare_keywords_for_mapping(export_df, kw_col, vol_col, kd_col)
+            mapping = _assign_keywords_to_pages(
+                pages_profiles, kw_objs, only_assign_eligible=only_assign_eligible
+            )
+
+            # ---------- Merge mapping back to export ----------
+            mapped_urls = []
+            mapped_roles = []
+            for idx in export_df.index.tolist():
+                if idx in mapping:
+                    url, role = mapping[idx]
+                    mapped_urls.append(url)
+                    mapped_roles.append(role)
+                else:
+                    mapped_urls.append("")
+                    mapped_roles.append("Unassigned")
+            export_df["Mapped URL"] = mapped_urls
+            export_df["Mapped Role"] = mapped_roles
+
+            csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")
+            st.download_button(
+                label="⬇️ Download scored + mapping CSV",
+                data=csv_bytes,
+                file_name=f"{filename_base}.csv",
+                mime="text/csv",
+                help="Sorted by eligibility (Yes first), KD ascending, Volume descending, with per-keyword URL mapping."
+            )
+
+            # Optional preview (top 10) with color on Score/Tier
+            if st.checkbox("Preview first 10 rows (optional)", value=False, key="preview_mapping"):
+                preview_df = export_df.copy()
+
+                def _row_style(row):
+                    color = COLOR_MAP.get(int(row.get("Score", 0)) if pd.notna(row.get("Score", 0)) else 0, "#9ca3af")
+                    return [
+                        ("background-color: " + color + "; color: black;") if c in ("Score", "Tier") else ""
+                        for c in row.index
+                    ]
+
+                styled = preview_df.head(10).style.apply(_row_style, axis=1)
+                st.dataframe(styled, use_container_width=True)
 
 st.markdown("---")
 st.caption("© 2025 OutrankIQ • Select from three scoring strategies to target different types of keyword opportunities.")
