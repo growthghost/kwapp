@@ -123,7 +123,7 @@ def calculate_score(volume: float, kd: float) -> int:
 def add_scoring_columns(df: pd.DataFrame, volume_col: str, kd_col: str, kw_col: str | None) -> pd.DataFrame:
     out = df.copy()
 
-    # Eligibility + Reason (Option A)
+    # Eligibility + Reason
     def _eligibility_reason(vol, kd):
         if pd.isna(vol) or pd.isna(kd):
             return "No", "Invalid Volume/KD"
@@ -243,7 +243,7 @@ if uploaded is not None:
 
         export_df["_EligibleSort"] = export_df["Eligible"].map({"Yes": 1, "No": 0}).fillna(0)
         export_df = export_df.sort_values(
-            by=["._EligibleSort".replace(".", ""), kd_col, vol_col],
+            by=["_EligibleSort", kd_col, vol_col],
             ascending=[False, True, False],
             kind="mergesort"
         ).drop(columns=["_EligibleSort"])
@@ -283,12 +283,20 @@ if uploaded is not None:
             st.dataframe(styled, use_container_width=True)
 
 # =========================
-# Site Mapping (Fast Crawler)
+# Site Mapping (Fast Crawler) — minimal UI
 # =========================
 st.markdown("---")
 st.subheader("Site Mapping (Fast Crawler)")
 
-# Imports local to this section to avoid overhead if unused
+# ---- Internal crawler parameters (edit in code if needed) ----
+CRAWL_MAX_PAGES = 300          # total HTML pages to fetch
+CRAWL_TIMEOUT_SEC = 12         # per-request timeout
+CRAWL_CONCURRENCY = 20         # concurrent requests
+RESPECT_ROBOTS = True          # obey robots.txt
+STRIP_QUERYSTRINGS = True      # treat ?a=b as same page
+SAME_HOST_ONLY = True          # don't leave the domain
+
+# Imports local to this section
 import asyncio
 import html as _html
 from urllib.parse import urljoin, urldefrag, urlparse
@@ -301,20 +309,9 @@ try:
 except Exception:
     HAVE_AIOHTTP = False
 
-# ---- Crawler settings UI ----
-with st.expander("Crawler options", expanded=True):
-    crawl_url = st.text_input("Start URL (site root/homepage)", placeholder="https://example.com", value="")
-    colC1, colC2, colC3 = st.columns(3)
-    with colC1:
-        max_pages = st.number_input("Max pages", min_value=10, max_value=5000, value=300, step=10)
-    with colC2:
-        concurrency = st.number_input("Concurrent requests", min_value=2, max_value=64, value=20, step=1)
-    with colC3:
-        request_timeout = st.number_input("Request timeout (sec)", min_value=3, max_value=60, value=12, step=1)
-    respect_robots = st.checkbox("Respect robots.txt", value=True)
-    strip_query = st.checkbox("Strip querystrings (treat ?a=b as same page)", value=True)
-    same_host_only = st.checkbox("Limit to same host", value=True)
-    btn_crawl = st.button("🚀 Crawl Site", disabled=not HAVE_AIOHTTP)
+# ---- Minimal UI: URL + button only ----
+crawl_url = st.text_input("Site URL to crawl", placeholder="https://example.com", value="")
+btn_crawl = st.button("🚀 Crawl Site", disabled=(not HAVE_AIOHTTP))
 
 if not HAVE_AIOHTTP and crawl_url:
     st.info("Install aiohttp to enable fast crawling: `pip install aiohttp`")
@@ -348,7 +345,6 @@ def _same_host(u: str, root: str) -> bool:
     return (pu.netloc == pr.netloc)
 
 def _extract_fields(html_text: str):
-    # Prefer BeautifulSoup if available; fallback to regex
     title, meta_desc, h1s, h2s, h3s = "", "", [], [], []
     text = ""
     try:
@@ -379,7 +375,7 @@ def _extract_fields(html_text: str):
         pass
 
     combined = " ".join([title, meta_desc] + h1s + h2s + h3s + [text])
-    return title, meta_desc, h1s, h2s, h3s, combined[:200000]  # cap gigantic pages
+    return title, meta_desc, h1s, h2s, h3s, combined[:200000]
 
 async def _fetch(session, url: str, timeout: int):
     try:
@@ -394,9 +390,13 @@ async def _fetch(session, url: str, timeout: int):
     except Exception:
         return None, None, None
 
-async def crawl_site(root_url: str, max_pages: int = 300, concurrency: int = 20,
-                     timeout: int = 12, same_host_only: bool = True,
-                     strip_query: bool = True, respect_robots: bool = True):
+async def crawl_site(root_url: str,
+                     max_pages: int = CRAWL_MAX_PAGES,
+                     concurrency: int = CRAWL_CONCURRENCY,
+                     timeout: int = CRAWL_TIMEOUT_SEC,
+                     same_host_only: bool = SAME_HOST_ONLY,
+                     strip_query: bool = STRIP_QUERYSTRINGS,
+                     respect_robots: bool = RESPECT_ROBOTS):
     # robots
     rp = None
     if respect_robots:
@@ -413,7 +413,7 @@ async def crawl_site(root_url: str, max_pages: int = 300, concurrency: int = 20,
     q = deque()
     start = _normalize_url(root_url, root_url, strip_query)
     if not start:
-        return [], 0.0, 0
+        return [], 0
 
     q.append(start)
     seen.add(start)
@@ -421,9 +421,7 @@ async def crawl_site(root_url: str, max_pages: int = 300, concurrency: int = 20,
     sem = asyncio.Semaphore(concurrency)
     pages = []
 
-    async with aiohttp.ClientSession(headers={
-        "User-Agent": "OutrankIQ/1.2 (+https://outrankiq)"
-    }) as session:
+    async with aiohttp.ClientSession(headers={"User-Agent": "OutrankIQ/1.2 (+https://outrankiq)"}) as session:
 
         async def worker():
             while q and len(pages) < max_pages:
@@ -452,7 +450,7 @@ async def crawl_site(root_url: str, max_pages: int = 300, concurrency: int = 20,
                     "text": combined
                 })
 
-                # link discovery (cheap)
+                # link discovery
                 try:
                     if HAVE_BS4:
                         soup = BeautifulSoup(html_text, "lxml")
@@ -470,7 +468,7 @@ async def crawl_site(root_url: str, max_pages: int = 300, concurrency: int = 20,
                     if same_host_only and not _same_host(u, root_url):
                         continue
                     seen.add(u)
-                    if len(seen) <= max_pages * 3:  # modest frontier cap
+                    if len(seen) <= max_pages * 3:  # frontier cap
                         q.append(u)
 
         tasks = [asyncio.create_task(worker()) for _ in range(concurrency)]
@@ -517,11 +515,11 @@ def score_keyword_against_page(keyword: str, page: dict) -> tuple[float, str]:
     }
     total = sum(scores.values())
 
-    # body presence boost (boolean-ish)
+    # body presence boost (only if no structural overlap)
     body_hit = 0.0
-    if page.get("text"):
+    if total == 0 and page.get("text"):
         present = sum(1 for t in kw_tokens if t in page["text"].lower())
-        if present and total == 0:
+        if present:
             body_hit = 0.8 * present
     total += body_hit
 
@@ -538,7 +536,7 @@ def suggest_url_for_keyword(keyword: str, site_index: list[dict]) -> tuple[str, 
             best = (p["url"], score, where)
     return best
 
-# ---- Run crawl ----
+# ---- Run crawl (URL + button only) ----
 if btn_crawl and crawl_url.strip():
     if not HAVE_AIOHTTP:
         st.error("aiohttp is required for the fast crawler. Install with: pip install aiohttp")
@@ -546,15 +544,7 @@ if btn_crawl and crawl_url.strip():
         with st.spinner("Crawling..."):
             try:
                 pages, frontier = asyncio.run(
-                    crawl_site(
-                        crawl_url.strip(),
-                        max_pages=int(max_pages),
-                        concurrency=int(concurrency),
-                        timeout=int(request_timeout),
-                        same_host_only=bool(same_host_only),
-                        strip_query=bool(strip_query),
-                        respect_robots=bool(respect_robots),
-                    )
+                    crawl_site(crawl_url.strip())
                 )
                 st.success(f"Crawled {len(pages)} HTML pages (frontier discovered: {frontier})")
                 st.caption("Indexed: title, meta, H1–H3, and trimmed page text.")
