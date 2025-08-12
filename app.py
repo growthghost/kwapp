@@ -82,7 +82,7 @@ st.markdown(
 
 # ---------- Category tagging (multi-label) ----------
 CATEGORY_ORDER = ["SEO", "AIO", "VEO", "GEO", "AEO", "SXO", "LLM"]
-AIO_PAT = re.compile(r"\b(what is|what's|define|definition|how to|is|step[- ]?by[- ]?step|tutorial|guide)\b", re.I)
+AIO_PAT = re.compile(r"\b(what is|what's|define|definition|how to|step[- ]?by[- ]?step|tutorial|guide)\b", re.I)
 AEO_PAT = re.compile(r"^\s*(who|what|when|where|why|how|which|can|should)\b", re.I)
 VEO_PAT = re.compile(r"\b(near me|open now|closest|call now|directions|ok google|alexa|siri|hey google)\b", re.I)
 GEO_PAT = re.compile(r"\b(how to|best way to|steps? to|examples? of|checklist|framework|template)\b", re.I)
@@ -243,7 +243,7 @@ if uploaded is not None:
 
         export_df["_EligibleSort"] = export_df["Eligible"].map({"Yes": 1, "No": 0}).fillna(0)
         export_df = export_df.sort_values(
-            by=["_EligibleSort", kd_col, vol_col],
+            by=["._EligibleSort".replace(".", ""), kd_col, vol_col],
             ascending=[False, True, False],
             kind="mergesort"
         ).drop(columns=["_EligibleSort"])
@@ -281,6 +281,325 @@ if uploaded is not None:
             preview_cols = export_cols  # same columns as CSV
             styled = preview_df[preview_cols].head(10).style.apply(_row_style, axis=1)
             st.dataframe(styled, use_container_width=True)
+
+# =========================
+# Site Mapping (Fast Crawler)
+# =========================
+st.markdown("---")
+st.subheader("Site Mapping (Fast Crawler)")
+
+# Imports local to this section to avoid overhead if unused
+import asyncio
+import html as _html
+from urllib.parse import urljoin, urldefrag, urlparse
+import urllib.robotparser as urobot
+from collections import deque
+
+try:
+    import aiohttp
+    HAVE_AIOHTTP = True
+except Exception:
+    HAVE_AIOHTTP = False
+
+# ---- Crawler settings UI ----
+with st.expander("Crawler options", expanded=True):
+    crawl_url = st.text_input("Start URL (site root/homepage)", placeholder="https://example.com", value="")
+    colC1, colC2, colC3 = st.columns(3)
+    with colC1:
+        max_pages = st.number_input("Max pages", min_value=10, max_value=5000, value=300, step=10)
+    with colC2:
+        concurrency = st.number_input("Concurrent requests", min_value=2, max_value=64, value=20, step=1)
+    with colC3:
+        request_timeout = st.number_input("Request timeout (sec)", min_value=3, max_value=60, value=12, step=1)
+    respect_robots = st.checkbox("Respect robots.txt", value=True)
+    strip_query = st.checkbox("Strip querystrings (treat ?a=b as same page)", value=True)
+    same_host_only = st.checkbox("Limit to same host", value=True)
+    btn_crawl = st.button("🚀 Crawl Site", disabled=not HAVE_AIOHTTP)
+
+if not HAVE_AIOHTTP and crawl_url:
+    st.info("Install aiohttp to enable fast crawling: `pip install aiohttp`")
+
+BINARY_EXT = (
+    ".jpg",".jpeg",".png",".gif",".webp",".svg",".pdf",".zip",".rar",".7z",".gz",".mp3",".mp4",
+    ".avi",".mov",".wmv",".mkv",".doc",".docx",".xls",".xlsx",".ppt",".pptx",".ico",".dmg",".exe"
+)
+
+def _normalize_url(base: str, href: str, strip_q: bool) -> str | None:
+    if not href:
+        return None
+    try:
+        u = urljoin(base, href)
+        u, _frag = urldefrag(u)
+        p = urlparse(u)
+        if not p.scheme.startswith("http"):
+            return None
+        if strip_q:
+            u = f"{p.scheme}://{p.netloc}{p.path}"
+        # skip binary/static-ish
+        low_path = p.path.lower()
+        if any(low_path.endswith(ext) for ext in BINARY_EXT):
+            return None
+        return u
+    except Exception:
+        return None
+
+def _same_host(u: str, root: str) -> bool:
+    pu, pr = urlparse(u), urlparse(root)
+    return (pu.netloc == pr.netloc)
+
+def _extract_fields(html_text: str):
+    # Prefer BeautifulSoup if available; fallback to regex
+    title, meta_desc, h1s, h2s, h3s = "", "", [], [], []
+    text = ""
+    try:
+        if HAVE_BS4:
+            soup = BeautifulSoup(html_text, "lxml")
+            t = soup.find("title")
+            title = t.get_text(strip=True) if t else ""
+            md = soup.find("meta", attrs={"name":"description"})
+            meta_desc = md.get("content","").strip() if md else ""
+            h1s = [h.get_text(strip=True) for h in soup.find_all("h1")]
+            h2s = [h.get_text(strip=True) for h in soup.find_all("h2")]
+            h3s = [h.get_text(strip=True) for h in soup.find_all("h3")]
+            for s in soup(["script","style","noscript","svg","nav","footer","form"]):
+                s.decompose()
+            text = " ".join(soup.stripped_strings)
+        else:
+            import re as _re
+            tt = _re.search(r"<title[^>]*>(.*?)</title>", html_text, flags=_re.I|_re.S)
+            title = _html.unescape(tt.group(1).strip()) if tt else ""
+            md = _re.search(r'<meta[^>]*name=["\']description["\'][^>]*content=["\'](.*?)["\']', html_text, flags=_re.I|_re.S)
+            meta_desc = _html.unescape(md.group(1).strip()) if md else ""
+            h1s = [_html.unescape(x.strip()) for x in _re.findall(r"<h1[^>]*>(.*?)</h1>", html_text, flags=_re.I|_re.S)]
+            h2s = [_html.unescape(x.strip()) for x in _re.findall(r"<h2[^>]*>(.*?)</h2>", html_text, flags=_re.I|_re.S)]
+            h3s = [_html.unescape(x.strip()) for x in _re.findall(r"<h3[^>]*>(.*?)</h3>", html_text, flags=_re.I|_re.S)]
+            text = _re.sub(r"<[^>]+>", " ", html_text)
+            text = " ".join(text.split())
+    except Exception:
+        pass
+
+    combined = " ".join([title, meta_desc] + h1s + h2s + h3s + [text])
+    return title, meta_desc, h1s, h2s, h3s, combined[:200000]  # cap gigantic pages
+
+async def _fetch(session, url: str, timeout: int):
+    try:
+        async with session.get(url, timeout=timeout, allow_redirects=True) as r:
+            if r.status != 200:
+                return None, r.status, None
+            ctype = r.headers.get("content-type","").lower()
+            if "text/html" not in ctype:
+                return None, r.status, ctype
+            txt = await r.text(errors="ignore")
+            return txt, r.status, ctype
+    except Exception:
+        return None, None, None
+
+async def crawl_site(root_url: str, max_pages: int = 300, concurrency: int = 20,
+                     timeout: int = 12, same_host_only: bool = True,
+                     strip_query: bool = True, respect_robots: bool = True):
+    # robots
+    rp = None
+    if respect_robots:
+        try:
+            pr = urlparse(root_url)
+            robots_url = f"{pr.scheme}://{pr.netloc}/robots.txt"
+            rp = urobot.RobotFileParser()
+            rp.set_url(robots_url)
+            rp.read()
+        except Exception:
+            rp = None
+
+    seen = set()
+    q = deque()
+    start = _normalize_url(root_url, root_url, strip_query)
+    if not start:
+        return [], 0.0, 0
+
+    q.append(start)
+    seen.add(start)
+
+    sem = asyncio.Semaphore(concurrency)
+    pages = []
+
+    async with aiohttp.ClientSession(headers={
+        "User-Agent": "OutrankIQ/1.2 (+https://outrankiq)"
+    }) as session:
+
+        async def worker():
+            while q and len(pages) < max_pages:
+                url = q.popleft()
+
+                if respect_robots and rp:
+                    try:
+                        if not rp.can_fetch("*", url):
+                            continue
+                    except Exception:
+                        pass
+
+                async with sem:
+                    html_text, status, ctype = await _fetch(session, url, timeout)
+                if html_text is None:
+                    continue
+
+                title, meta_desc, h1s, h2s, h3s, combined = _extract_fields(html_text)
+                pages.append({
+                    "url": url,
+                    "title": title,
+                    "meta": meta_desc,
+                    "h1": h1s,
+                    "h2": h2s,
+                    "h3": h3s,
+                    "text": combined
+                })
+
+                # link discovery (cheap)
+                try:
+                    if HAVE_BS4:
+                        soup = BeautifulSoup(html_text, "lxml")
+                        links = [a.get("href","") for a in soup.find_all("a")]
+                    else:
+                        import re as _re
+                        links = _re.findall(r'href=["\'](.*?)["\']', html_text, flags=_re.I)
+                except Exception:
+                    links = []
+
+                for href in links:
+                    u = _normalize_url(url, href, strip_query)
+                    if not u or u in seen:
+                        continue
+                    if same_host_only and not _same_host(u, root_url):
+                        continue
+                    seen.add(u)
+                    if len(seen) <= max_pages * 3:  # modest frontier cap
+                        q.append(u)
+
+        tasks = [asyncio.create_task(worker()) for _ in range(concurrency)]
+        await asyncio.gather(*tasks)
+
+    return pages, len(seen)
+
+def _tokenize(s: str) -> set[str]:
+    s = (s or "").lower()
+    s = re.sub(r"[^a-z0-9\s\-_/]", " ", s)
+    return set([t for t in re.split(r"[\s/_\-]+", s) if t])
+
+def score_keyword_against_page(keyword: str, page: dict) -> tuple[float, str]:
+    """
+    Lightweight scoring:
+      - URL path tokens: weight 3.0
+      - Title tokens:    weight 2.5
+      - H1 tokens:       weight 2.2
+      - H2/H3 tokens:    weight 1.5
+      - Meta desc:       weight 1.2
+      - Body presence:   weight 0.8 per token (fallback)
+    Returns (score, best_field)
+    """
+    kw_tokens = _tokenize(keyword)
+    if not kw_tokens:
+        return 0.0, ""
+
+    from urllib.parse import urlparse as _up
+    url_tokens = _tokenize(_up(page["url"]).path)
+    title_tokens = _tokenize(page.get("title",""))
+    meta_tokens = _tokenize(page.get("meta",""))
+    h1_tokens = set().union(*[_tokenize(h) for h in page.get("h1",[]) or []])
+    h2_tokens = set().union(*[_tokenize(h) for h in page.get("h2",[]) or []])
+    h3_tokens = set().union(*[_tokenize(h) for h in page.get("h3",[]) or []])
+
+    def overlap(a, b): return len(a & b)
+
+    scores = {
+        "url": 3.0 * overlap(kw_tokens, url_tokens),
+        "title": 2.5 * overlap(kw_tokens, title_tokens),
+        "h1": 2.2 * overlap(kw_tokens, h1_tokens),
+        "h2h3": 1.5 * (overlap(kw_tokens, h2_tokens) + overlap(kw_tokens, h3_tokens)),
+        "meta": 1.2 * overlap(kw_tokens, meta_tokens),
+    }
+    total = sum(scores.values())
+
+    # body presence boost (boolean-ish)
+    body_hit = 0.0
+    if page.get("text"):
+        present = sum(1 for t in kw_tokens if t in page["text"].lower())
+        if present and total == 0:
+            body_hit = 0.8 * present
+    total += body_hit
+
+    best_field = max(scores, key=scores.get) if total > 0 else ("body" if body_hit > 0 else "")
+    return float(total), best_field
+
+def suggest_url_for_keyword(keyword: str, site_index: list[dict]) -> tuple[str, float, str]:
+    if not site_index:
+        return "", 0.0, ""
+    best = ("", 0.0, "")
+    for p in site_index:
+        score, where = score_keyword_against_page(keyword, p)
+        if score > best[1]:
+            best = (p["url"], score, where)
+    return best
+
+# ---- Run crawl ----
+if btn_crawl and crawl_url.strip():
+    if not HAVE_AIOHTTP:
+        st.error("aiohttp is required for the fast crawler. Install with: pip install aiohttp")
+    else:
+        with st.spinner("Crawling..."):
+            try:
+                pages, frontier = asyncio.run(
+                    crawl_site(
+                        crawl_url.strip(),
+                        max_pages=int(max_pages),
+                        concurrency=int(concurrency),
+                        timeout=int(request_timeout),
+                        same_host_only=bool(same_host_only),
+                        strip_query=bool(strip_query),
+                        respect_robots=bool(respect_robots),
+                    )
+                )
+                st.success(f"Crawled {len(pages)} HTML pages (frontier discovered: {frontier})")
+                st.caption("Indexed: title, meta, H1–H3, and trimmed page text.")
+                st.session_state["site_index"] = pages
+                if pages:
+                    peek = pd.DataFrame([{
+                        "URL": p["url"],
+                        "Title": p["title"][:200],
+                        "Meta": p["meta"][:200],
+                        "H1": "; ".join(p["h1"][:3])[:200]
+                    } for p in pages[:20]])
+                    st.dataframe(peek, use_container_width=True)
+            except Exception as e:
+                st.error(f"Crawler error: {e}")
+
+# ---- Keyword → URL Association & second CSV download ----
+if uploaded is not None and 'export_df' in locals():
+    if "site_index" in st.session_state and st.session_state["site_index"]:
+        st.markdown("### Keyword → Suggested URL (from crawl)")
+        site_index = st.session_state["site_index"]
+
+        kw_col_live = kw_col if (kw_col in export_df.columns) else find_column(export_df, ["keyword","query","term"])
+        if kw_col_live is None:
+            st.warning("No keyword column found in the scored data to map.")
+        else:
+            mapped = []
+            for kw in export_df[kw_col_live].astype(str):
+                url, score, where = suggest_url_for_keyword(kw, site_index)
+                mapped.append((url, score, where))
+
+            export_df_mapped = export_df.copy()
+            export_df_mapped["Suggested URL"] = [m[0] for m in mapped]
+            export_df_mapped["URL Match Score"] = [round(m[1], 2) for m in mapped]
+            export_df_mapped["URL Matched Field"] = [m[2] for m in mapped]
+
+            csv_bytes_mapped = export_df_mapped.to_csv(index=False).encode("utf-8-sig")
+            st.download_button(
+                label="⬇️ Download scored CSV (with Suggested URL)",
+                data=csv_bytes_mapped,
+                file_name=f"{filename_base}_mapped.csv",
+                mime="text/csv",
+                help="Adds Suggested URL, URL Match Score, and Matched Field"
+            )
+    else:
+        st.info("Crawl the site above to enable Suggested URL mapping in your CSV.")
 
 st.markdown("---")
 st.caption("© 2025 OutrankIQ • Select from three scoring strategies to target different types of keyword opportunities.")
