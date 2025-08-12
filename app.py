@@ -82,7 +82,7 @@ st.markdown(
 
 # ---------- Category tagging (multi-label) ----------
 CATEGORY_ORDER = ["SEO", "AIO", "VEO", "GEO", "AEO", "SXO", "LLM"]
-AIO_PAT = re.compile(r"\b(what is|what's|define|definition|how to|step[- ]?by[- ]?step|tutorial|guide)\b", re.I)
+AIO_PAT = re.compile(r"\b(what is|what's|define|definition|how to|step[- ]?by[- ]?step|tutorial|guide|is)\b", re.I)
 AEO_PAT = re.compile(r"^\s*(who|what|when|where|why|how|which|can|should)\b", re.I)
 VEO_PAT = re.compile(r"\b(near me|open now|closest|call now|directions|ok google|alexa|siri|hey google)\b", re.I)
 GEO_PAT = re.compile(r"\b(how to|best way to|steps? to|examples? of|checklist|framework|template)\b", re.I)
@@ -283,7 +283,7 @@ if uploaded is not None:
             st.dataframe(styled, use_container_width=True)
 
 # =========================
-# Site Mapping (Fast Crawler) — minimal UI
+# Site Mapping (Fast Crawler with aiohttp → requests fallback)
 # =========================
 st.markdown("---")
 st.subheader("Site Mapping (Fast Crawler)")
@@ -291,7 +291,7 @@ st.subheader("Site Mapping (Fast Crawler)")
 # ---- Internal crawler parameters (edit in code if needed) ----
 CRAWL_MAX_PAGES = 300          # total HTML pages to fetch
 CRAWL_TIMEOUT_SEC = 12         # per-request timeout
-CRAWL_CONCURRENCY = 20         # concurrent requests
+CRAWL_CONCURRENCY = 20         # concurrent requests (async) or threads (sync)
 RESPECT_ROBOTS = True          # obey robots.txt
 STRIP_QUERYSTRINGS = True      # treat ?a=b as same page
 SAME_HOST_ONLY = True          # don't leave the domain
@@ -303,18 +303,20 @@ from urllib.parse import urljoin, urldefrag, urlparse
 import urllib.robotparser as urobot
 from collections import deque
 
+# Optional async dependency
 try:
     import aiohttp
     HAVE_AIOHTTP = True
 except Exception:
     HAVE_AIOHTTP = False
 
+# Always-available sync fallback
+import requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 # ---- Minimal UI: URL + button only ----
 crawl_url = st.text_input("Site URL to crawl", placeholder="https://example.com", value="")
-btn_crawl = st.button("🚀 Crawl Site", disabled=(not HAVE_AIOHTTP))
-
-if not HAVE_AIOHTTP and crawl_url:
-    st.info("Install aiohttp to enable fast crawling: `pip install aiohttp`")
+btn_crawl = st.button("🚀 Crawl Site")
 
 BINARY_EXT = (
     ".jpg",".jpeg",".png",".gif",".webp",".svg",".pdf",".zip",".rar",".7z",".gz",".mp3",".mp4",
@@ -377,26 +379,26 @@ def _extract_fields(html_text: str):
     combined = " ".join([title, meta_desc] + h1s + h2s + h3s + [text])
     return title, meta_desc, h1s, h2s, h3s, combined[:200000]
 
-async def _fetch(session, url: str, timeout: int):
+# ---------- Async (aiohttp) path ----------
+async def _fetch_async(session, url: str, timeout: int):
     try:
         async with session.get(url, timeout=timeout, allow_redirects=True) as r:
             if r.status != 200:
-                return None, r.status, None
+                return None
             ctype = r.headers.get("content-type","").lower()
             if "text/html" not in ctype:
-                return None, r.status, ctype
-            txt = await r.text(errors="ignore")
-            return txt, r.status, ctype
+                return None
+            return await r.text(errors="ignore")
     except Exception:
-        return None, None, None
+        return None
 
-async def crawl_site(root_url: str,
-                     max_pages: int = CRAWL_MAX_PAGES,
-                     concurrency: int = CRAWL_CONCURRENCY,
-                     timeout: int = CRAWL_TIMEOUT_SEC,
-                     same_host_only: bool = SAME_HOST_ONLY,
-                     strip_query: bool = STRIP_QUERYSTRINGS,
-                     respect_robots: bool = RESPECT_ROBOTS):
+async def crawl_site_async(root_url: str,
+                           max_pages: int,
+                           concurrency: int,
+                           timeout: int,
+                           same_host_only: bool,
+                           strip_query: bool,
+                           respect_robots: bool):
     # robots
     rp = None
     if respect_robots:
@@ -435,7 +437,7 @@ async def crawl_site(root_url: str,
                         pass
 
                 async with sem:
-                    html_text, status, ctype = await _fetch(session, url, timeout)
+                    html_text = await _fetch_async(session, url, timeout)
                 if html_text is None:
                     continue
 
@@ -473,6 +475,119 @@ async def crawl_site(root_url: str,
 
         tasks = [asyncio.create_task(worker()) for _ in range(concurrency)]
         await asyncio.gather(*tasks)
+
+    return pages, len(seen)
+
+def _run_async(coro):
+    # Use asyncio.run if possible; otherwise create a new loop
+    try:
+        return asyncio.run(coro)
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        try:
+            asyncio.set_event_loop(loop)
+            return loop.run_until_complete(coro)
+        finally:
+            try:
+                loop.close()
+            except Exception:
+                pass
+
+# ---------- Sync (requests + threads) fallback ----------
+def _fetch_sync(session: requests.Session, url: str, timeout: int):
+    try:
+        r = session.get(url, timeout=timeout, allow_redirects=True, headers={"User-Agent": "OutrankIQ/1.2 (+https://outrankiq)"})
+        if r.status_code != 200:
+            return None
+        ctype = r.headers.get("content-type","").lower()
+        if "text/html" not in ctype:
+            return None
+        return r.text
+    except Exception:
+        return None
+
+def crawl_site_sync(root_url: str,
+                    max_pages: int,
+                    workers: int,
+                    timeout: int,
+                    same_host_only: bool,
+                    strip_query: bool,
+                    respect_robots: bool):
+    # robots
+    rp = None
+    if respect_robots:
+        try:
+            pr = urlparse(root_url)
+            robots_url = f"{pr.scheme}://{pr.netloc}/robots.txt"
+            rp = urobot.RobotFileParser()
+            rp.set_url(robots_url)
+            rp.read()
+        except Exception:
+            rp = None
+
+    start = _normalize_url(root_url, root_url, strip_query)
+    if not start:
+        return [], 0
+
+    seen = set([start])
+    q = deque([start])
+    pages = []
+
+    session = requests.Session()
+
+    while q and len(pages) < max_pages:
+        batch = []
+        while q and len(batch) < workers:
+            batch.append(q.popleft())
+
+        future_to_url = {}
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            for url in batch:
+                if respect_robots and rp:
+                    try:
+                        if not rp.can_fetch("*", url):
+                            continue
+                    except Exception:
+                        pass
+                future_to_url[ex.submit(_fetch_sync, session, url, timeout)] = url
+
+            for fut in as_completed(future_to_url):
+                url = future_to_url[fut]
+                html_text = fut.result()
+                if html_text is None:
+                    continue
+
+                title, meta_desc, h1s, h2s, h3s, combined = _extract_fields(html_text)
+                pages.append({
+                    "url": url,
+                    "title": title,
+                    "meta": meta_desc,
+                    "h1": h1s,
+                    "h2": h2s,
+                    "h3": h3s,
+                    "text": combined
+                })
+
+                # link discovery
+                try:
+                    if HAVE_BS4:
+                        soup = BeautifulSoup(html_text, "lxml")
+                        links = [a.get("href","") for a in soup.find_all("a")]
+                    else:
+                        import re as _re
+                        links = _re.findall(r'href=["\'](.*?)["\']', html_text, flags=_re.I)
+                except Exception:
+                    links = []
+
+                for href in links:
+                    u = _normalize_url(url, href, strip_query)
+                    if not u or u in seen:
+                        continue
+                    if same_host_only and not _same_host(u, root_url):
+                        continue
+                    seen.add(u)
+                    if len(seen) <= max_pages * 3:
+                        q.append(u)
 
     return pages, len(seen)
 
@@ -538,27 +653,44 @@ def suggest_url_for_keyword(keyword: str, site_index: list[dict]) -> tuple[str, 
 
 # ---- Run crawl (URL + button only) ----
 if btn_crawl and crawl_url.strip():
-    if not HAVE_AIOHTTP:
-        st.error("aiohttp is required for the fast crawler. Install with: pip install aiohttp")
-    else:
-        with st.spinner("Crawling..."):
-            try:
-                pages, frontier = asyncio.run(
-                    crawl_site(crawl_url.strip())
+    with st.spinner("Crawling..."):
+        try:
+            if HAVE_AIOHTTP:
+                pages, frontier = _run_async(
+                    crawl_site_async(
+                        crawl_url.strip(),
+                        max_pages=CRAWL_MAX_PAGES,
+                        concurrency=CRAWL_CONCURRENCY,
+                        timeout=CRAWL_TIMEOUT_SEC,
+                        same_host_only=SAME_HOST_ONLY,
+                        strip_query=STRIP_QUERYSTRINGS,
+                        respect_robots=RESPECT_ROBOTS,
+                    )
                 )
-                st.success(f"Crawled {len(pages)} HTML pages (frontier discovered: {frontier})")
-                st.caption("Indexed: title, meta, H1–H3, and trimmed page text.")
-                st.session_state["site_index"] = pages
-                if pages:
-                    peek = pd.DataFrame([{
-                        "URL": p["url"],
-                        "Title": p["title"][:200],
-                        "Meta": p["meta"][:200],
-                        "H1": "; ".join(p["h1"][:3])[:200]
-                    } for p in pages[:20]])
-                    st.dataframe(peek, use_container_width=True)
-            except Exception as e:
-                st.error(f"Crawler error: {e}")
+            else:
+                pages, frontier = crawl_site_sync(
+                    crawl_url.strip(),
+                    max_pages=CRAWL_MAX_PAGES,
+                    workers=CRAWL_CONCURRENCY,
+                    timeout=CRAWL_TIMEOUT_SEC,
+                    same_host_only=SAME_HOST_ONLY,
+                    strip_query=STRIP_QUERYSTRINGS,
+                    respect_robots=RESPECT_ROBOTS,
+                )
+
+            st.success(f"Crawled {len(pages)} HTML pages (frontier discovered: {frontier})")
+            st.caption("Indexed: title, meta, H1–H3, and trimmed page text.")
+            st.session_state["site_index"] = pages
+            if pages:
+                peek = pd.DataFrame([{
+                    "URL": p["url"],
+                    "Title": p["title"][:200],
+                    "Meta": p["meta"][:200],
+                    "H1": "; ".join(p["h1"][:3])[:200]
+                } for p in pages[:20]])
+                st.dataframe(peek, use_container_width=True)
+        except Exception as e:
+            st.error(f"Crawler error: {e}")
 
 # ---- Keyword → URL Association & second CSV download ----
 if uploaded is not None and 'export_df' in locals():
