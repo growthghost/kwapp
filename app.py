@@ -69,7 +69,7 @@ if scoring_mode == "Low Hanging Fruit":
     MIN_VALID_VOLUME = 10
     KD_BUCKETS = [(0, 15, 6), (16, 20, 5), (21, 25, 4), (26, 50, 3), (51, 75, 2), (76, 100, 1)]
 elif scoring_mode == "In The Game":
-    MIN_VALID_VOLUME = 1500  # corrected per your note
+    MIN_VALID_VOLUME = 1500  # corrected
     KD_BUCKETS = [(0, 30, 6), (31, 45, 5), (46, 60, 4), (61, 70, 3), (71, 80, 2), (81, 100, 1)]
 elif scoring_mode == "Competitive":
     MIN_VALID_VOLUME = 3000
@@ -115,7 +115,7 @@ def categorize_keyword(kw: str) -> list[str]:
             cats.add("SEO")
     return [c for c in CATEGORY_ORDER if c in cats]
 
-# ---------- Tokenization & normalization (C & niche synonyms) ----------
+# ---------- Tokenization & normalization ----------
 TOKEN_RE = re.compile(r"[a-z0-9]+")
 
 STOPWORDS = {
@@ -123,7 +123,6 @@ STOPWORDS = {
     "is","are","be","can","near","me","now"
 }
 
-# Simple plural-to-singular (very light)
 def singularize(token: str) -> str:
     if token.endswith("ies") and len(token) > 3:
         return token[:-3] + "y"
@@ -133,7 +132,6 @@ def singularize(token: str) -> str:
         return token[:-1]
     return token
 
-# Hyphen/punct normalization and synonym expansion
 SYNONYMS = {
     "pre-roll": {"preroll", "pre", "roll", "prerolls"},
     "preroll": {"pre-roll", "pre", "roll", "prerolls"},
@@ -149,7 +147,6 @@ SYNONYMS = {
 def normalize_text(s: str) -> str:
     if not isinstance(s, str):
         return ""
-    # unify hyphen variants: pre-roll/preroll/pre roll -> preroll
     s = s.lower().replace("pre-roll", "preroll").replace("pre roll", "preroll")
     s = s.replace("%", " percent ")
     return s
@@ -165,10 +162,8 @@ def expand_tokens(tokens: list[str]) -> set[str]:
             continue
         t1 = singularize(t)
         out.add(t1)
-        # synonym expansion (bidirectional via dict values)
         if t1 in SYNONYMS:
             out.update({singularize(x) for x in SYNONYMS[t1]})
-        # also if t1 appears as a synonym value for another key
         for k, vals in SYNONYMS.items():
             if t1 in vals:
                 out.add(singularize(k))
@@ -211,15 +206,14 @@ def jaccard(a: set[str], b: set[str]) -> float:
     union = len(a | b)
     return inter / union if union else 0.0
 
-# --------- Faster networking & parsing + resilient signals (B) ---------
+# --------- Networking & parsing + resilient signals ---------
 USER_AGENT = "OutrankIQ/1.0"
-FETCH_TIMEOUT = 5.0           # a bit higher for JS/age-gates
-CONTENT_MAX_BYTES = 300_000   # allow more headroom
-BODY_WORDS_LIMIT = 900        # first ~900 words
+FETCH_TIMEOUT = 5.0
+CONTENT_MAX_BYTES = 300_000
+BODY_WORDS_LIMIT = 900
 
 @st.cache_resource(show_spinner=False)
 def get_http_session():
-    """Shared requests.Session with connection pooling."""
     sess = requests.Session()
     adapter = requests.adapters.HTTPAdapter(pool_connections=64, pool_maxsize=64)
     sess.mount("http://", adapter)
@@ -229,7 +223,6 @@ def get_http_session():
 
 @st.cache_data(show_spinner=False)
 def fetch_page_html(url: str) -> bytes | None:
-    """Small retry for 429/5xx."""
     sess = get_http_session()
     tries = 2
     backoff = 0.5
@@ -256,7 +249,6 @@ def fetch_page_html(url: str) -> bytes | None:
     return None
 
 def extract_jsonld_texts(soup) -> str:
-    """Pull text-like fields from JSON-LD to strengthen tokens behind interstitials."""
     out = []
     try:
         scripts = soup.find_all("script", type="application/ld+json")
@@ -276,7 +268,6 @@ def extract_jsonld_texts(soup) -> str:
                         if k.lower() in ("name","headline","description","about","title"):
                             if isinstance(v, str) and v.strip():
                                 out.append(v.strip())
-                # BreadcrumbList items
                 if obj.get("@type","").lower() == "breadcrumblist":
                     items = obj.get("itemListElement", [])
                     if isinstance(items, list):
@@ -289,10 +280,9 @@ def extract_jsonld_texts(soup) -> str:
                 for x in obj:
                     collect(x)
         collect(data)
-    return " | ".join(out[:20])  # keep it light
+    return " | ".join(out[:20])
 
 def simple_extract_signals_from_html(html_bytes: bytes) -> dict:
-    """Fallback parsing without BeautifulSoup."""
     try:
         text = html_bytes.decode("utf-8", errors="ignore")
     except Exception:
@@ -345,7 +335,7 @@ def extract_page_signals(url: str) -> dict:
         return simple_extract_signals_from_html(html)
 
 def page_tokens_bundle(url: str, title: str | None, signals: dict) -> dict:
-    slug_tokens = extract_page_tokens(url, title)  # host/path/title-slug
+    slug_tokens = extract_page_tokens(url, title)
     def tok(s): return tokenize(s or "")
     sig = {
         "slug": slug_tokens,
@@ -356,12 +346,11 @@ def page_tokens_bundle(url: str, title: str | None, signals: dict) -> dict:
         "jsonld": tok(signals.get("jsonld", "")),
         "body": tok(signals.get("body", "")),
     }
-    # If body is empty (age gate/JS), we still keep strong fields
     combined = set().union(sig["slug"], sig["title"], sig["meta"], sig["h1"], sig["h2h3"], sig["jsonld"], sig["body"])
     sig["all"] = combined
     return sig
 
-# ---------- Scoring across signals (D) ----------
+# ---------- Scoring across signals ----------
 SIGNAL_WEIGHTS = {"title": 3.0, "h1": 2.0, "h2h3": 1.5, "meta": 1.5, "slug": 1.5, "jsonld": 1.5, "body": 1.0}
 
 def weighted_similarity(kw_tokens: set[str], token_bundle: dict) -> float:
@@ -376,7 +365,6 @@ def exact_phrase_bonus(keyword: str, signals: dict) -> float:
     k = normalize_text(keyword).strip()
     if not k:
         return 0.0
-    # bonus if exact keyword phrase appears in title/h1/meta/h2h3
     for field in ("title", "h1", "meta", "h2h3"):
         val = (signals.get(field, "") or "").lower()
         if k in val:
@@ -398,7 +386,6 @@ def score_keyword_to_page(keyword: str, categories: list[str], token_bundle: dic
         terms = CATEGORY_BOOST_TERMS.get(c, set())
         if terms and (terms & all_tokens):
             boost += 0.05
-    # Exact phrase + slug containment bonuses
     phrase_b = exact_phrase_bonus(keyword, {
         "title": " ".join(token_bundle.get("title", [])),
         "h1": " ".join(token_bundle.get("h1", [])),
@@ -410,7 +397,7 @@ def score_keyword_to_page(keyword: str, categories: list[str], token_bundle: dic
     return total
 
 def make_page_obj(url: str, title: str | None) -> dict:
-    signals = extract_page_signals(url)  # cached + (retry) fast-ish
+    signals = extract_page_signals(url)
     tokens = page_tokens_bundle(url, title, signals)
     return {"url": url, "title": title or url_to_title(url), "tokens": tokens}
 
@@ -448,13 +435,10 @@ def parse_sitemap(content_bytes: bytes) -> tuple[list[str], list[str]]:
     except Exception:
         return [], []
     urls, children = [], []
+    # pass 1: generic iteration
     for elem in tree.iter():
         tag = elem.tag.lower()
-        if tag.endswith("loc"):
-            parent = elem.getparent() if hasattr(elem, "getparent") else None
-        # fallback: infer by ancestor names via string checks
         if tag.endswith("url"):
-            # collect loc under it
             for child in list(elem):
                 if child.tag.lower().endswith("loc") and child.text:
                     urls.append(child.text.strip())
@@ -462,7 +446,7 @@ def parse_sitemap(content_bytes: bytes) -> tuple[list[str], list[str]]:
             for child in list(elem):
                 if child.tag.lower().endswith("loc") and child.text:
                     children.append(child.text.strip())
-    # If above didn't capture (because stdlib ET lacks getparent), do a second pass using XPath-like
+    # fallback pass: strip namespaces and use simple finds
     if not urls and not children:
         nsfree = re.sub(rb'\sxmlns(:\w+)?="[^"]+"', b"", content_bytes, flags=re.I)
         try:
@@ -512,6 +496,7 @@ def robots_sitemaps(domain: str) -> list[str]:
     return list(dict.fromkeys(urls))
 
 def alternate_sitemap_paths(domain: str) -> list[str]:
+    """Try common sitemap locations on domain and common subdomains."""
     root = normalize_domain(domain)
     base_paths = [
         "/sitemap.xml",
@@ -525,8 +510,7 @@ def alternate_sitemap_paths(domain: str) -> list[str]:
     for sub in subs:
         host = f"{sub+'.' if sub else ''}{root}"
         for pth in base_paths:
-            urls.append(f"https://{h
-ost}{pth}")
+            urls.append(f"https://{host}{pth}")   # <-- fixed f-string
     return urls
 
 def host_is_within_root(hostname: str, root: str) -> bool:
@@ -668,7 +652,6 @@ def suggest_urls_for_keywords(df: pd.DataFrame, kw_col: str | None, only_eligibl
         df["URL Match Score"] = ""
         return df
 
-    # Precompute category lists & keyword tokens once
     cat_lists = df["Category"].fillna("").apply(
         lambda s: [c.strip() for c in str(s).split(",") if c.strip()] if s else ["SEO"]
     )
@@ -709,7 +692,6 @@ def suggest_urls_for_keywords(df: pd.DataFrame, kw_col: str | None, only_eligibl
 
 # ---------- Scoring ----------
 def calculate_score(volume: float, kd: float) -> int:
-    """Return score 0-6, but ONLY if eligible (volume >= min)."""
     if pd.isna(volume) or pd.isna(kd):
         return 0
     if volume < MIN_VALID_VOLUME:
@@ -723,7 +705,6 @@ def calculate_score(volume: float, kd: float) -> int:
 def add_scoring_columns(df: pd.DataFrame, volume_col: str, kd_col: str, kw_col: str | None) -> pd.DataFrame:
     out = df.copy()
 
-    # Eligibility + Reason (Option A)
     def _eligibility_reason(vol, kd):
         if pd.isna(vol) or pd.isna(kd):
             return "No", "Invalid Volume/KD"
@@ -737,11 +718,9 @@ def add_scoring_columns(df: pd.DataFrame, volume_col: str, kd_col: str, kw_col: 
     out["Score"] = [calculate_score(v, k) for v, k in zip(out[volume_col], out[kd_col])]
     out["Tier"] = out["Score"].map(LABEL_MAP).fillna("Not rated")
 
-    # Category (multi-label)
     kw_series = out[kw_col] if kw_col else pd.Series([""] * len(out))
     out["Category"] = [", ".join(categorize_keyword(str(k))) for k in kw_series]
 
-    # Order columns
     ordered = ([kw_col] if kw_col else []) + [volume_col, kd_col, "Score", "Tier", "Eligible", "Reason", "Category"]
     remaining = [c for c in out.columns if c not in ordered]
     out = out[ordered + remaining]
@@ -795,10 +774,10 @@ with st.expander("Site mapping (optional): map keywords to URLs discovered from 
     extra_subs = [s.strip() for s in extra_subs_raw.split(",")] if extra_subs_raw else []
     only_eligible = st.checkbox("Only assign eligible keywords", value=True)
 
-    # ADVANCED (E): test different thresholds without changing default
+    # Advanced: threshold tester (default remains 0.25)
     with st.expander("Advanced (optional)"):
         MIN_MATCH_SCORE = st.slider("Temporary match threshold", min_value=0.10, max_value=0.40, step=0.01, value=0.25)
-        st.caption("Default is 0.25. Use this slider to test if borderline matches appear; CSV still uses this chosen value.")
+        st.caption("Default is 0.25. Use this slider to test if borderline matches appear; CSV uses this chosen value.")
 
     discovered_urls = []
 
@@ -875,7 +854,7 @@ if uploaded is not None:
 
         scored = add_scoring_columns(df, vol_col, kd_col, kw_col)
 
-        # Build pages from discovery — fast parallel fetch+parse
+        # Build pages from discovery — parallel fetch+parse
         pages = []
         if discovered_urls:
             with st.spinner("Fetching page content & extracting signals (parallel)…"):
