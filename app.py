@@ -5,8 +5,9 @@ import math
 import time
 from collections import deque, defaultdict
 from datetime import datetime
-from urllib.parse import urlparse, urljoin
+from urllib.parse import urlparse, urljoin, urlunparse, parse_qsl, urlencode
 from urllib import robotparser as _robotparser
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pandas as pd
 import streamlit as st
@@ -49,10 +50,7 @@ def find_column(df: pd.DataFrame, candidates) -> str | None:
 LABEL_MAP = {6: "Elite", 5: "Excellent", 4: "Good", 3: "Fair", 2: "Low", 1: "Very Low", 0: "Not rated"}
 
 # Used for card + preview styling only (NOT exported)
-COLOR_MAP = {
-    6: "#2ecc71", 5: "#a3e635", 4: "#facc15",
-    3: "#fb923c", 2: "#f87171", 1: "#ef4444", 0: "#9ca3af",
-}
+COLOR_MAP = {6:"#2ecc71",5:"#a3e635",4:"#facc15",3:"#fb923c",2:"#f87171",1:"#ef4444",0:"#9ca3af"}
 
 strategy_descriptions = {
     "Low Hanging Fruit": "Keywords that can be used to rank quickly with minimal effort. Ideal for new content or low-authority sites. Try targeting long-tail keywords, create quick-win content, and build a few internal links.",
@@ -230,15 +228,14 @@ if uploaded is not None:
         df[kd_col] = pd.to_numeric(df[kd_col], errors="coerce").clip(lower=0, upper=100)
         # Global keyword token set (for fast page pruning)
         TOKEN_SPLIT_RE = re.compile(r"[^a-z0-9]+")
-        _STOPWORDS = set("""
+        _STOPWORDS_G = set("""
         a an the and or of for to in on at by with from as is are be was were this that these those it its it's your our my we you
         what when where why how which who can should could would will near open now closest call directions ok google alexa siri hey
         """.split())
-        def _tokens(text: str) -> list[str]:
-            if not text: return []
-            return [t for t in TOKEN_SPLIT_RE.split(str(text).lower()) if t and t not in _STOPWORDS and len(t) > 1]
+        def _toks(s: str):
+            return [t for t in TOKEN_SPLIT_RE.split(str(s).lower()) if t and t not in _STOPWORDS_G and len(t) > 1]
         for kw in df[kw_col].astype(str).tolist():
-            GLOBAL_KW_TOKENS.update(_tokens(kw))
+            GLOBAL_KW_TOKENS.update(_toks(kw))
 
 # =========================================================
 # ========== Crawl + Mapping UI (single action) ===========
@@ -249,30 +246,46 @@ st.subheader("Site Crawl & Keyword Mapping")
 # Hidden defaults (always include subdomains; cap pages internally)
 MAX_PAGES_DEFAULT = 500
 INCLUDE_SUBDOMAINS_ALWAYS = True
+TIME_BUDGET_SECS = 35     # hard budget to keep the UX snappy
+CONCURRENCY = 20
+PARTIAL_MAX_BYTES = 200_000
+FETCH_TIMEOUT_SECS = 8
 
-# Fun rocket button styling (only affects submit buttons inside forms)
+# 🚀 Fun rocket button CSS (reliable selector)
 st.markdown("""
 <style>
-form button[type="submit"]{
-  background: linear-gradient(90deg,#2563eb,#06b6d4);
-  color:#fff; font-weight:700; border:0; border-radius:12px; padding:0.6rem 1rem;
-  box-shadow:0 8px 18px rgba(2,132,199,.35);
-  transition: transform .08s ease, box-shadow .2s ease;
+div[data-testid="stFormSubmitButton"] > button {
+  background: linear-gradient(90deg,#2563eb,#06b6d4) !important;
+  color:#fff !important; font-weight:700 !important; border:0 !important;
+  border-radius:12px !important; padding:0.6rem 1rem !important;
+  box-shadow:0 8px 18px rgba(2,132,199,.35) !important;
+  transition: transform .08s ease, box-shadow .2s ease !important;
 }
-form button[type="submit"]::before{ content:"🚀 "; margin-right:.35rem; }
-form button[type="submit"]:hover{ transform: translateY(-1px); box-shadow:0 10px 22px rgba(2,132,199,.45);}
+div[data-testid="stFormSubmitButton"] > button:before { content:"🚀 "; margin-right:.35rem; }
+div[data-testid="stFormSubmitButton"] > button:hover{
+  transform: translateY(-1px);
+  box-shadow:0 10px 22px rgba(2,132,199,.45) !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
 with st.form("crawlmap"):
     site_url = st.text_input("Site to crawl (domain or full URL)", placeholder="https://example.com")
     only_assign_eligible = st.checkbox("Only assign eligible keywords", value=True)
-    submit = st.form_submit_button("Score, Crawl, and Map")  # always enabled
+    submit = st.form_submit_button("Score, Crawl, and Map")  # 🚀 label added via CSS
 
 # =========================================================
 # ============== Crawl + Mapping Implementation ===========
 # =========================================================
-# ---- Utility: domain + scope checks ----
+_DEFAULT_HEADERS = {
+    "User-Agent": "OutrankIQBot/1.1 (+https://outrankiq.local)",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+_STATIC_PREFIXES = ("cdn", "static", "img", "images", "media", "assets")
+
 def _normalize_site(u: str) -> str:
     u = (u or "").strip()
     if not u: return ""
@@ -282,7 +295,20 @@ def _normalize_site(u: str) -> str:
     if not netloc: return ""
     return f"{scheme}://{netloc}"
 
-_STATIC_PREFIXES = ("cdn", "static", "img", "images", "media", "assets")
+def _strip_tracking(u: str) -> str:
+    try:
+        p = urlparse(u)
+        q = [(k, v) for k, v in parse_qsl(p.query, keep_blank_values=False)
+             if not (k.startswith("utm_") or k in {"gclid","fbclid","mc_cid","mc_eid","ref","referrer"})]
+        clean = p._replace(query=urlencode(q), fragment="")
+        # collapse multiple slashes, remove trailing slash (except root)
+        path = re.sub(r"/{2,}", "/", clean.path)
+        if path.endswith("/") and path != "/":
+            path = path[:-1]
+        clean = clean._replace(path=path)
+        return urlunparse(clean)
+    except Exception:
+        return u
 
 def _is_static_host(host: str) -> bool:
     try:
@@ -303,11 +329,11 @@ def _in_scope(url: str, root_host: str, include_subs: bool) -> bool:
 
 def _is_html_like(url: str) -> bool:
     lower = url.lower()
-    bad_exts = (".pdf", ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".zip",
-                ".rar", ".7z", ".gz", ".mp4", ".mp3", ".avi", ".mov", ".wmv", ".doc", ".docx", ".xls", ".xlsx")
+    bad_exts = (".pdf",".jpg",".jpeg",".png",".gif",".webp",".svg",".zip",".rar",".7z",".gz",
+                ".mp4",".mp3",".avi",".mov",".wmv",".doc",".docx",".xls",".xlsx",".ppt",".pptx",".ics",".csv")
     return not any(lower.endswith(ext) for ext in bad_exts)
 
-# ---- robots.txt (silent; always respected) ----
+# robots
 def _load_robots(base: str) -> _robotparser.RobotFileParser:
     rp = _robotparser.RobotFileParser()
     try:
@@ -317,7 +343,7 @@ def _load_robots(base: str) -> _robotparser.RobotFileParser:
         pass
     return rp
 
-# ---- Tokenization & page vector helpers ----
+# tokenization / page vectors
 _STOPWORDS = set("""
 a an the and or of for to in on at by with from as is are be was were this that these those it its it's your our my we you
 what when where why how which who can should could would will near open now closest call directions ok google alexa siri hey
@@ -372,8 +398,23 @@ def _extract_meta_desc(html: str) -> str:
     m = re.search(r'<meta[^>]+property=["\']og:description["\'][^>]*content=["\'](.*?)["\']', html, flags=re.I | re.S)
     return m.group(1).strip() if m else ""
 
+def _extract_canonical(html: str, base_url: str) -> str | None:
+    try:
+        if HAVE_BS4:
+            soup = BeautifulSoup(html, "html.parser")
+            link = soup.find("link", rel=lambda v: v and "canonical" in v)
+            href = (link.get("href") or "").strip() if link else ""
+        else:
+            m = re.search(r'<link[^>]+rel=["\']?canonical["\']?[^>]*href=["\'](.*?)["\']', html, flags=re.I)
+            href = m.group(1).strip() if m else ""
+        if href:
+            return _strip_tracking(urljoin(base_url, href))
+    except Exception:
+        pass
+    return None
+
 def _page_profile(url: str, html: str):
-    """Return (weights_dict, norm)"""
+    """Return (weights_dict, norm, canonical_url_or_None)"""
     title_txts = _extract_text_tag(html, "title")
     h1_txts = _extract_text_tag(html, "h1")
     h2_txts = _extract_text_tag(html, "h2")
@@ -388,11 +429,11 @@ def _page_profile(url: str, html: str):
     for t in _tokens(" ".join(h2_txts)):   weights[t] += 1.5
     for t in _tokens(" ".join(h3_txts)):   weights[t] += 1.2
     for t in _tokens(meta_desc):            weights[t] += 1.0
-    if not weights: return {}, 0.0
+    if not weights: return {}, 0.0, None
     norm = math.sqrt(sum(w*w for w in weights.values()))
-    return dict(weights), norm
+    canonical = _extract_canonical(html, url)
+    return dict(weights), norm, canonical
 
-# ---- Faster similarity ----
 def _cosine_overlap(page_vec: dict[str, float], page_norm: float, kw_tokens: set[str], kw_norm: float) -> float:
     if not page_vec or not kw_tokens or page_norm <= 1e-9 or kw_norm <= 1e-9: return 0.0
     num = sum(page_vec.get(t, 0.0) for t in kw_tokens)
@@ -401,7 +442,7 @@ def _cosine_overlap(page_vec: dict[str, float], page_norm: float, kw_tokens: set
 
 # ---- Keyword structures ----
 class _Kw:
-    __slots__ = ("idx", "text", "vol", "kd", "score", "eligible", "cats", "kw_tokens", "vol_norm", "kw_norm")
+    __slots__ = ("idx","text","vol","kd","score","eligible","cats","kw_tokens","vol_norm","kw_norm")
     def __init__(self, idx, text, vol, kd, score, eligible, cats):
         self.idx = idx
         self.text = str(text or "")
@@ -414,21 +455,18 @@ class _Kw:
         self.kw_norm = math.sqrt(len(self.kw_tokens)) if self.kw_tokens else 0.0
         self.vol_norm = 0.0
 
-# ---- Mapping core ----
 def _prepare_keywords_for_mapping(export_df: pd.DataFrame, kw_col: str, vol_col: str, kd_col: str) -> list[_Kw]:
     kws = []
     for i, row in export_df.reset_index(drop=False).iterrows():
-        kws.append(
-            _Kw(
-                idx=row["index"],
-                text=row.get(kw_col, ""),
-                vol=row.get(vol_col, 0),
-                kd=row.get(kd_col, 0),
-                score=row.get("Score", 0),
-                eligible=row.get("Eligible", "No"),
-                cats=row.get("Category", ""),
-            )
-        )
+        kws.append(_Kw(
+            idx=row["index"],
+            text=row.get(kw_col, ""),
+            vol=row.get(vol_col, 0),
+            kd=row.get(kd_col, 0),
+            score=row.get("Score", 0),
+            eligible=row.get("Eligible", "No"),
+            cats=row.get("Category", ""),
+        ))
     vols = [k.vol for k in kws] or [0.0]
     vmin, vmax = min(vols), max(vols)
     rng = max(vmax - vmin, 1e-9)
@@ -437,7 +475,7 @@ def _prepare_keywords_for_mapping(export_df: pd.DataFrame, kw_col: str, vol_col:
     return kws
 
 def _rank_score(rel: float, score: int, vol_norm: float) -> float:
-    return 0.6 * rel + 0.3 * (score / 6.0) + 0.1 * vol_norm
+    return 0.6*rel + 0.3*(score/6.0) + 0.1*vol_norm
 
 def _assign_keywords_to_pages(pages, keywords, only_assign_eligible: bool):
     """
@@ -449,46 +487,31 @@ def _assign_keywords_to_pages(pages, keywords, only_assign_eligible: bool):
     assigned_kw_ids: set[int] = set()
 
     for url, page_vec, page_norm in pages:
-        # candidates for this page
         cands = []
         for k in available:
             if k.idx in assigned_kw_ids or not k.kw_tokens or k.kw_norm == 0.0:
                 continue
             rel = _cosine_overlap(page_vec, page_norm, k.kw_tokens, k.kw_norm)
-            if rel <= 0:
-                continue
-            cands.append(( _rank_score(rel, k.score, k.vol_norm), k, rel ))
-        if not cands:
-            continue
+            if rel <= 0: continue
+            cands.append((_rank_score(rel, k.score, k.vol_norm), k, rel))
+        if not cands: continue
         cands.sort(key=lambda x: x[0], reverse=True)
 
-        # Primary
         primary = next((k for _, k, _ in cands if k.idx not in assigned_kw_ids), None)
         if primary:
-            mapping[primary.idx] = (url, "Primary")
-            assigned_kw_ids.add(primary.idx)
-        # Secondary
+            mapping[primary.idx] = (url, "Primary"); assigned_kw_ids.add(primary.idx)
         secondary = next((k for _, k, _ in cands if k.idx not in assigned_kw_ids), None)
         if secondary:
-            mapping[secondary.idx] = (url, "Secondary")
-            assigned_kw_ids.add(secondary.idx)
-        # AIO
+            mapping[secondary.idx] = (url, "Secondary"); assigned_kw_ids.add(secondary.idx)
         aio = next((k for _, k, _ in cands if k.idx not in assigned_kw_ids and ("AIO" in k.cats)), None)
         if aio:
-            mapping[aio.idx] = (url, "AIO")
-            assigned_kw_ids.add(aio.idx)
-        # VEO
+            mapping[aio.idx] = (url, "AIO"); assigned_kw_ids.add(aio.idx)
         veo = next((k for _, k, _ in cands if k.idx not in assigned_kw_ids and ("VEO" in k.cats)), None)
         if veo:
-            mapping[veo.idx] = (url, "VEO")
-            assigned_kw_ids.add(veo.idx)
+            mapping[veo.idx] = (url, "VEO"); assigned_kw_ids.add(veo.idx)
     return mapping
 
-# ---- Networking: faster, concurrent, partial reads ----
-FETCH_TIMEOUT_SECS = 8
-PARTIAL_MAX_BYTES = 200_000  # ~200KB is enough for head + headings
-CONCURRENCY = 20
-
+# ---- Networking: partial reads + concurrency + fallbacks ----
 def _content_type_ok(ctype: str) -> bool:
     ctype = (ctype or "").lower()
     return ("text/html" in ctype) or ("xml" in ctype)
@@ -496,10 +519,8 @@ def _content_type_ok(ctype: str) -> bool:
 async def _fetch_async_partial(session, url: str) -> str | None:
     try:
         async with session.get(url) as r:
-            if r.status != 200:
-                return None
-            if not _content_type_ok(r.headers.get("Content-Type", "")):
-                return None
+            if r.status != 200: return None
+            if not _content_type_ok(r.headers.get("Content-Type", "")): return None
             b = await r.content.read(PARTIAL_MAX_BYTES)
             try:
                 return b.decode("utf-8", errors="ignore")
@@ -509,14 +530,11 @@ async def _fetch_async_partial(session, url: str) -> str | None:
         return None
 
 def _fetch_sync_partial(url: str) -> str | None:
-    if not HAVE_REQUESTS:
-        return None
+    if not HAVE_REQUESTS: return None
     try:
-        r = requests.get(url, headers={"User-Agent": "OutrankIQBot/1.0"}, timeout=FETCH_TIMEOUT_SECS, stream=True)
-        if r.status_code != 200:
-            return None
-        if not _content_type_ok(r.headers.get("Content-Type", "")):
-            return None
+        r = requests.get(url, headers=_DEFAULT_HEADERS, timeout=FETCH_TIMEOUT_SECS, stream=True)
+        if r.status_code != 200: return None
+        if not _content_type_ok(r.headers.get("Content-Type", "")): return None
         b = b""
         for chunk in r.iter_content(chunk_size=65536):
             if not chunk: break
@@ -526,65 +544,108 @@ def _fetch_sync_partial(url: str) -> str | None:
     except Exception:
         return None
 
-# ---- Sitemap discovery ----
+# ---- Sitemap helpers (recursion) ----
 _SITEMAP_RE = re.compile(r"(?i)^\s*sitemap:\s*(\S+)\s*$", re.M)
 
 def _extract_sitemaps_from_robots(robots_txt: str) -> list[str]:
     return _SITEMAP_RE.findall(robots_txt or "") if robots_txt else []
 
-def _parse_sitemap_xml(xml_text: str) -> list[str]:
-    if not xml_text: return []
-    locs = re.findall(r"<loc>(.*?)</loc>", xml_text, flags=re.I | re.S)
-    if not locs:
-        locs = re.findall(r"<\s*loc\s*>\s*(.*?)\s*<\s*/\s*loc\s*>", xml_text, flags=re.I | re.S)
-    return [l.strip() for l in locs if l.strip()]
+def _parse_sitemap_entries(xml_text: str) -> tuple[list[str], list[str]]:
+    """Return (sitemap_links, url_links) from a sitemap or sitemapindex XML."""
+    if not xml_text: return [], []
+    # child sitemaps
+    sm = re.findall(r"<sitemap>.*?<loc>(.*?)</loc>.*?</sitemap>", xml_text, flags=re.I | re.S)
+    # urls
+    urls = re.findall(r"<url>.*?<loc>(.*?)</loc>.*?</url>", xml_text, flags=re.I | re.S)
+    if not (sm or urls):
+        # fallback generic <loc>
+        locs = re.findall(r"<loc>(.*?)</loc>", xml_text, flags=re.I | re.S)
+        # naive guess: if endswith .xml assume sitemap, else URL
+        for l in locs:
+            if l.strip().lower().endswith(".xml"): sm.append(l.strip())
+            else: urls.append(l.strip())
+    return [s.strip() for s in sm], [u.strip() for u in urls]
 
-async def _gather_sitemap_urls_async(base: str, include_subs: bool, max_pages: int) -> set[str]:
+def _score_link_for_bfs(u: str) -> int:
+    """Heuristic to prioritize likely-content links."""
+    p = urlparse(u)
+    path = p.path.lower()
+    score = 0
+    if "-" in path: score += 2
+    for token in ("blog","post","article","guide","docs","learn","case","study","news"):
+        if f"/{token}/" in path: score += 2
+    if path.count("/") <= 3: score += 1
+    if len(path) <= 80: score += 1
+    return score
+
+# ---- Concurrent sitemap + page fetching ----
+async def _gather_sitemap_urls_async(base: str, include_subs: bool, max_pages: int, time_budget_deadline: float) -> set[str]:
     urls: set[str] = set()
     root_host = urlparse(base).netloc.lower()
     robots_url = base.rstrip("/") + "/robots.txt"
     timeout = aiohttp.ClientTimeout(total=FETCH_TIMEOUT_SECS)
-    async with aiohttp.ClientSession(headers={"User-Agent":"OutrankIQBot/1.0"}, timeout=timeout) as session:
+    async with aiohttp.ClientSession(headers=_DEFAULT_HEADERS, timeout=timeout) as session:
         robots_txt = await _fetch_async_partial(session, robots_url) or ""
-        sitemap_urls = _extract_sitemaps_from_robots(robots_txt)
-        sitemap_urls.append(base.rstrip("/") + "/sitemap.xml")
-        for sm in list(dict.fromkeys(sitemap_urls)):
-            xml = await _fetch_async_partial(session, sm)
-            if not xml: continue
-            for u in _parse_sitemap_xml(xml):
-                if _is_html_like(u) and _in_scope(u, root_host, include_subs):
-                    urls.add(u)
-                if len(urls) >= max_pages: break
-            if len(urls) >= max_pages: break
+        todo = list(dict.fromkeys(_extract_sitemaps_from_robots(robots_txt) + [base.rstrip("/") + "/sitemap.xml"]))
+        seen = set()
+        while todo and len(urls) < max_pages and time.time() < time_budget_deadline:
+            batch = []
+            for sm in list(todo)[:CONCURRENCY]:
+                todo.pop(0)
+                if sm in seen: continue
+                seen.add(sm)
+                batch.append(asyncio.create_task(_fetch_async_partial(session, sm)))
+            if not batch: break
+            xml_list = await asyncio.gather(*batch, return_exceptions=True)
+            for xml in xml_list:
+                if not isinstance(xml, str) or not xml: continue
+                child_sitemaps, url_entries = _parse_sitemap_entries(xml)
+                # enqueue child sitemaps
+                for c in child_sitemaps:
+                    if c not in seen:
+                        todo.append(c)
+                # collect page URLs
+                for u in url_entries:
+                    if len(urls) >= max_pages: break
+                    if _is_html_like(u) and _in_scope(u, root_host, include_subs):
+                        urls.add(_strip_tracking(u))
     return urls
 
-def _gather_sitemap_urls_sync(base: str, include_subs: bool, max_pages: int) -> set[str]:
+def _gather_sitemap_urls_sync(base: str, include_subs: bool, max_pages: int, time_budget_deadline: float) -> set[str]:
     urls: set[str] = set()
     if not HAVE_REQUESTS: return urls
     root_host = urlparse(base).netloc.lower()
     robots_url = base.rstrip("/") + "/robots.txt"
     robots_txt = _fetch_sync_partial(robots_url) or ""
-    sitemap_urls = _extract_sitemaps_from_robots(robots_txt)
-    sitemap_urls.append(base.rstrip("/") + "/sitemap.xml")
-    for sm in list(dict.fromkeys(sitemap_urls)):
-        xml = _fetch_sync_partial(sm)
-        if not xml: continue
-        for u in _parse_sitemap_xml(xml):
-            if _is_html_like(u) and _in_scope(u, root_host, include_subs):
-                urls.add(u)
-            if len(urls) >= max_pages: break
-        if len(urls) >= max_pages: break
+    todo = list(dict.fromkeys(_extract_sitemaps_from_robots(robots_txt) + [base.rstrip("/") + "/sitemap.xml"]))
+    seen = set()
+    with ThreadPoolExecutor(max_workers=CONCURRENCY) as ex:
+        while todo and len(urls) < max_pages and time.time() < time_budget_deadline:
+            batch = []
+            while todo and len(batch) < CONCURRENCY:
+                sm = todo.pop(0)
+                if sm in seen: continue
+                seen.add(sm)
+                batch.append(ex.submit(_fetch_sync_partial, sm))
+            for fut in as_completed(batch, timeout=FETCH_TIMEOUT_SECS+2):
+                xml = fut.result() if hasattr(fut, "result") else None
+                if not xml: continue
+                child_sitemaps, url_entries = _parse_sitemap_entries(xml)
+                todo.extend([c for c in child_sitemaps if c not in seen])
+                for u in url_entries:
+                    if len(urls) >= max_pages: break
+                    if _is_html_like(u) and _in_scope(u, root_host, include_subs):
+                        urls.add(_strip_tracking(u))
     return urls
 
-# ---- Concurrent page fetch helpers ----
-async def _fetch_many_async(urls: list[str], rp: _robotparser.RobotFileParser, max_pages: int) -> dict[str, str]:
+async def _fetch_many_async(urls: list[str], rp: _robotparser.RobotFileParser, max_pages: int, time_budget_deadline: float) -> dict[str, str]:
     out: dict[str, str] = {}
     timeout = aiohttp.ClientTimeout(total=FETCH_TIMEOUT_SECS)
     sem = asyncio.Semaphore(CONCURRENCY)
-    async with aiohttp.ClientSession(headers={"User-Agent":"OutrankIQBot/1.0"}, timeout=timeout) as session:
+    async with aiohttp.ClientSession(headers=_DEFAULT_HEADERS, timeout=timeout) as session:
         async def go(u: str):
-            if not rp.can_fetch("OutrankIQBot/1.0", u):
-                return
+            if time.time() >= time_budget_deadline: return
+            if not rp.can_fetch(_DEFAULT_HEADERS["User-Agent"], u): return
             async with sem:
                 html = await _fetch_async_partial(session, u)
             if html:
@@ -594,13 +655,28 @@ async def _fetch_many_async(urls: list[str], rp: _robotparser.RobotFileParser, m
             tasks.append(asyncio.create_task(go(u)))
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
-    # Cap just in case
     if len(out) > max_pages:
-        # trim deterministically
         out = dict(list(out.items())[:max_pages])
     return out
 
-# ---- Link crawling (BFS) with batching ----
+def _fetch_many_sync_parallel(urls: list[str], rp: _robotparser.RobotFileParser, max_pages: int, time_budget_deadline: float) -> dict[str, str]:
+    out: dict[str, str] = {}
+    if not HAVE_REQUESTS: return out
+    def job(u: str):
+        if time.time() >= time_budget_deadline: return (u, None)
+        if not rp.can_fetch(_DEFAULT_HEADERS["User-Agent"], u): return (u, None)
+        return (u, _fetch_sync_partial(u))
+    with ThreadPoolExecutor(max_workers=CONCURRENCY) as ex:
+        futs = [ex.submit(job, u) for u in urls[:max_pages]]
+        for fut in as_completed(futs, timeout=FETCH_TIMEOUT_SECS+5):
+            u, html = fut.result() if hasattr(fut, "result") else (None, None)
+            if u and html:
+                out[u] = html
+            if len(out) >= max_pages or time.time() >= time_budget_deadline:
+                break
+    return out
+
+# ---- Link crawling (BFS) with batching & heuristics ----
 _LINK_HREF_RE = re.compile(r'href=[\'"]?([^\'" >]+)')
 
 def _extract_links(html: str, base_url: str) -> list[str]:
@@ -617,72 +693,96 @@ def _extract_links(html: str, base_url: str) -> list[str]:
     else:
         for href in _LINK_HREF_RE.findall(html):
             links.append(urljoin(base_url, href.strip()))
-    return links
+    # normalize
+    return [_strip_tracking(u) for u in links]
 
-async def _crawl_bfs_async(base: str, include_subs: bool, max_pages: int, rp: _robotparser.RobotFileParser) -> dict[str, str]:
+async def _crawl_bfs_async(base: str, include_subs: bool, max_pages: int, rp: _robotparser.RobotFileParser, time_budget_deadline: float) -> dict[str, str]:
     result: dict[str, str] = {}
     root_host = urlparse(base).netloc.lower()
     seen = set()
     q = deque([base])
     timeout = aiohttp.ClientTimeout(total=FETCH_TIMEOUT_SECS)
     sem = asyncio.Semaphore(CONCURRENCY)
-    async with aiohttp.ClientSession(headers={"User-Agent":"OutrankIQBot/1.0"}, timeout=timeout) as session:
-        while q and len(result) < max_pages:
-            batch = []
-            while q and len(batch) < CONCURRENCY and len(result) + len(batch) < max_pages:
+    async with aiohttp.ClientSession(headers=_DEFAULT_HEADERS, timeout=timeout) as session:
+        while q and len(result) < max_pages and time.time() < time_budget_deadline:
+            batch_urls = []
+            while q and len(batch_urls) < CONCURRENCY and len(result) + len(batch_urls) < max_pages:
                 url = q.popleft()
-                if url in seen:
-                    continue
+                if url in seen: continue
                 seen.add(url)
-                if not _is_html_like(url) or not _in_scope(url, root_host, include_subs):
-                    continue
-                if not rp.can_fetch("OutrankIQBot/1.0", url):
-                    continue
-                async def fetch_one(u=url):
-                    async with sem:
-                        html = await _fetch_async_partial(session, u)
-                    return u, html
-                batch.append(asyncio.create_task(fetch_one()))
-            if not batch:
-                break
-            done = await asyncio.gather(*batch, return_exceptions=True)
+                if not _is_html_like(url) or not _in_scope(url, root_host, include_subs): continue
+                if not rp.can_fetch(_DEFAULT_HEADERS["User-Agent"], url): continue
+                batch_urls.append(url)
+
+            if not batch_urls: break
+
+            async def fetch_one(u: str):
+                if time.time() >= time_budget_deadline: return u, None
+                async with sem:
+                    html = await _fetch_async_partial(session, u)
+                return u, html
+
+            done = await asyncio.gather(*[fetch_one(u) for u in batch_urls], return_exceptions=True)
             for tup in done:
-                if not isinstance(tup, tuple):  # skip errors
-                    continue
+                if not isinstance(tup, tuple): continue
                 url, html = tup
-                if html:
-                    result[url] = html
-                    # enqueue links
-                    for lk in _extract_links(html, url):
-                        if len(result) >= max_pages: break
-                        if (lk not in seen) and _is_html_like(lk) and _in_scope(lk, root_host, include_subs):
-                            q.append(lk)
-            if len(result) >= max_pages:
-                break
+                if not html: continue
+                result[url] = html
+                # dedupe by canonical if present
+                _, _, canon = _page_profile(url, html)
+                if canon:
+                    canon = _strip_tracking(canon)
+                    result.setdefault(canon, html)
+                # enqueue links (prioritized)
+                links = _extract_links(html, url)
+                links = [lk for lk in links if _is_html_like(lk) and _in_scope(lk, root_host, include_subs)]
+                links.sort(key=_score_link_for_bfs, reverse=True)
+                for lk in links:
+                    if len(result) >= max_pages or time.time() >= time_budget_deadline: break
+                    if lk not in seen:
+                        q.append(lk)
     return result
 
-def _crawl_bfs_sync(base: str, include_subs: bool, max_pages: int, rp: _robotparser.RobotFileParser) -> dict[str, str]:
+def _crawl_bfs_sync(base: str, include_subs: bool, max_pages: int, rp: _robotparser.RobotFileParser, time_budget_deadline: float) -> dict[str, str]:
     result: dict[str, str] = {}
     if not HAVE_REQUESTS: return result
     root_host = urlparse(base).netloc.lower()
     seen = set()
     q = deque([base])
-    while q and len(result) < max_pages:
-        url = q.popleft()
-        if url in seen: continue
-        seen.add(url)
-        if not _is_html_like(url) or not _in_scope(url, root_host, include_subs): continue
-        if not rp.can_fetch("OutrankIQBot/1.0", url): continue
-        html = _fetch_sync_partial(url)
-        if not html: continue
-        result[url] = html
-        for lk in _extract_links(html, url):
-            if len(result) >= max_pages: break
-            if (lk not in seen) and _is_html_like(lk) and _in_scope(lk, root_host, include_subs):
-                q.append(lk)
+
+    def fetch_one(u: str):
+        if time.time() >= time_budget_deadline: return u, None
+        return u, _fetch_sync_partial(u)
+
+    with ThreadPoolExecutor(max_workers=CONCURRENCY) as ex:
+        while q and len(result) < max_pages and time.time() < time_budget_deadline:
+            batch = []
+            while q and len(batch) < CONCURRENCY and len(result) + len(batch) < max_pages:
+                url = q.popleft()
+                if url in seen: continue
+                seen.add(url)
+                if not _is_html_like(url) or not _in_scope(url, root_host, include_subs): continue
+                if not rp.can_fetch(_DEFAULT_HEADERS["User-Agent"], url): continue
+                batch.append(ex.submit(fetch_one, url))
+            if not batch: break
+            for fut in as_completed(batch, timeout=FETCH_TIMEOUT_SECS+2):
+                url, html = fut.result() if hasattr(fut, "result") else (None, None)
+                if not url or not html: continue
+                result[url] = html
+                _, _, canon = _page_profile(url, html)
+                if canon:
+                    canon = _strip_tracking(canon)
+                    result.setdefault(canon, html)
+                links = _extract_links(html, url)
+                links = [lk for lk in links if _is_html_like(lk) and _in_scope(lk, root_host, include_subs)]
+                links.sort(key=_score_link_for_bfs, reverse=True)
+                for lk in links:
+                    if len(result) >= max_pages or time.time() >= time_budget_deadline: break
+                    if lk not in seen:
+                        q.append(lk)
     return result
 
-# ---- Crawl orchestrator with per-session cache ----
+# ---- Crawl orchestrator with per-session cache + budget ----
 def _collect_pages(site_url: str, include_subdomains: bool, max_pages: int) -> dict[str, str]:
     base = _normalize_site(site_url)
     if not base: return {}
@@ -693,50 +793,44 @@ def _collect_pages(site_url: str, include_subdomains: bool, max_pages: int) -> d
     if cached and isinstance(cached, dict) and cached.get("_html_map"):
         return cached["_html_map"]
 
+    deadline = time.time() + TIME_BUDGET_SECS
     rp = _load_robots(base)
 
-    # 1) Try sitemaps
-    pages_from_sitemap: set[str] = set()
+    # 1) Sitemap recursion
     if HAVE_AIOHTTP:
         try:
-            pages_from_sitemap = asyncio.run(_gather_sitemap_urls_async(base, include_subdomains, max_pages))
+            pages_from_sitemap = asyncio.run(_gather_sitemap_urls_async(base, include_subdomains, max_pages, deadline))
         except RuntimeError:
-            pages_from_sitemap = _gather_sitemap_urls_sync(base, include_subdomains, max_pages)
+            pages_from_sitemap = _gather_sitemap_urls_sync(base, include_subdomains, max_pages, deadline)
     else:
-        pages_from_sitemap = _gather_sitemap_urls_sync(base, include_subdomains, max_pages)
+        pages_from_sitemap = _gather_sitemap_urls_sync(base, include_subdomains, max_pages, deadline)
 
+    # 2) Fetch those pages concurrently
     html_map: dict[str, str] = {}
     if pages_from_sitemap:
         if HAVE_AIOHTTP:
             try:
-                html_map = asyncio.run(_fetch_many_async(list(pages_from_sitemap), rp, max_pages))
+                html_map = asyncio.run(_fetch_many_async(list(pages_from_sitemap), rp, max_pages, deadline))
             except RuntimeError:
-                for u in list(pages_from_sitemap)[:max_pages]:
-                    if not rp.can_fetch("OutrankIQBot/1.0", u): continue
-                    h = _fetch_sync_partial(u)
-                    if h: html_map[u] = h
+                html_map = _fetch_many_sync_parallel(list(pages_from_sitemap), rp, max_pages, deadline)
         else:
-            for u in list(pages_from_sitemap)[:max_pages]:
-                if not rp.can_fetch("OutrankIQBot/1.0", u): continue
-                h = _fetch_sync_partial(u)
-                if h: html_map[u] = h
+            html_map = _fetch_many_sync_parallel(list(pages_from_sitemap), rp, max_pages, deadline)
 
-    # 2) If sitemap insufficient, BFS crawl
-    if len(html_map) < max_pages:
+    # 3) If still under page cap/time budget, BFS crawl
+    if len(html_map) < max_pages and time.time() < deadline:
         remaining = max_pages - len(html_map)
         if HAVE_AIOHTTP:
             try:
-                bfs_map = asyncio.run(_crawl_bfs_async(base, include_subdomains, remaining, rp))
+                bfs_map = asyncio.run(_crawl_bfs_async(base, include_subdomains, remaining, rp, deadline))
             except RuntimeError:
-                bfs_map = _crawl_bfs_sync(base, include_subdomains, remaining, rp)
+                bfs_map = _crawl_bfs_sync(base, include_subdomains, remaining, rp, deadline)
         else:
-            bfs_map = _crawl_bfs_sync(base, include_subdomains, remaining, rp)
+            bfs_map = _crawl_bfs_sync(base, include_subdomains, remaining, rp, deadline)
         for k, v in bfs_map.items():
-            if len(html_map) >= max_pages: break
+            if len(html_map) >= max_pages or time.time() >= deadline: break
             if k not in html_map:
                 html_map[k] = v
 
-    # store to cache
     cache[cache_key] = {"_html_map": html_map, "_ts": time.time()}
     return html_map
 
@@ -744,7 +838,7 @@ def _collect_pages(site_url: str, include_subdomains: bool, max_pages: int) -> d
 # ================= Button Action Handler =================
 # =========================================================
 if submit:
-    # Validate after click (keeps button enabled visually)
+    # Validate after click
     if df is None:
         st.error("Please upload your keyword CSV first.")
     elif not (site_url or "").strip():
@@ -766,7 +860,7 @@ if submit:
         export_cols = base_cols + ["Strategy"]
         export_df = export_df[export_cols]
 
-        # ---------- Crawl site (silent) ----------
+        # ---------- Crawl site (fast/parallel + budget) ----------
         with st.spinner("Crawling site and mapping keywords to pages..."):
             html_map = _collect_pages(
                 site_url,
@@ -776,14 +870,18 @@ if submit:
 
         # ---------- Build page profiles with pruning ----------
         pages_profiles = []
+        seen_urls = set()
         for u, html in html_map.items():
-            vec, norm = _page_profile(u, html)
+            vec, norm, canon = _page_profile(u, html)
             if not vec or norm <= 0.0:
                 continue
-            # prune pages with no overlap to any keyword token
+            rep_url = _strip_tracking(canon or u)
+            if rep_url in seen_urls:
+                continue
+            seen_urls.add(rep_url)
             if GLOBAL_KW_TOKENS and not (set(vec.keys()) & GLOBAL_KW_TOKENS):
                 continue
-            pages_profiles.append((u, vec, norm))
+            pages_profiles.append((rep_url, vec, norm))
 
         # If nothing crawled/profiled, we still provide the scored CSV (mapping blank)
         if not pages_profiles:
@@ -831,10 +929,7 @@ if submit:
                 preview_df = export_df.copy()
                 def _row_style(row):
                     color = COLOR_MAP.get(int(row.get("Score", 0)) if pd.notna(row.get("Score", 0)) else 0, "#9ca3af")
-                    return [
-                        ("background-color: " + color + "; color: black;") if c in ("Score", "Tier") else ""
-                        for c in row.index
-                    ]
+                    return [("background-color:" + color + "; color:black;") if c in ("Score","Tier") else "" for c in row.index]
                 styled = preview_df.head(10).style.apply(_row_style, axis=1)
                 st.dataframe(styled, use_container_width=True)
 
