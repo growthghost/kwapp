@@ -1,20 +1,12 @@
 import io
 import re
-import gzip
-import json
-import time
 import pandas as pd
 import streamlit as st
 from datetime import datetime
-from urllib.parse import urlparse
-import requests
-import xml.etree.ElementTree as ET
-import concurrent.futures
-import os
 
-# Try to use BeautifulSoup if available; otherwise fallback to simple parsing
+# ---------- Optional bs4 for future use (safe if missing) ----------
 try:
-    from bs4 import BeautifulSoup
+    from bs4 import BeautifulSoup  # noqa: F401
     HAVE_BS4 = True
 except Exception:
     HAVE_BS4 = False
@@ -69,7 +61,7 @@ if scoring_mode == "Low Hanging Fruit":
     MIN_VALID_VOLUME = 10
     KD_BUCKETS = [(0, 15, 6), (16, 20, 5), (21, 25, 4), (26, 50, 3), (51, 75, 2), (76, 100, 1)]
 elif scoring_mode == "In The Game":
-    MIN_VALID_VOLUME = 1500  # corrected
+    MIN_VALID_VOLUME = 1500  # per your correction
     KD_BUCKETS = [(0, 30, 6), (31, 45, 5), (46, 60, 4), (61, 70, 3), (71, 80, 2), (81, 100, 1)]
 elif scoring_mode == "Competitive":
     MIN_VALID_VOLUME = 3000
@@ -115,583 +107,9 @@ def categorize_keyword(kw: str) -> list[str]:
             cats.add("SEO")
     return [c for c in CATEGORY_ORDER if c in cats]
 
-# ---------- Tokenization & normalization ----------
-TOKEN_RE = re.compile(r"[a-z0-9]+")
-
-STOPWORDS = {
-    "the","a","an","and","or","of","for","to","in","on","at","with","by","from",
-    "is","are","be","can","near","me","now"
-}
-
-def singularize(token: str) -> str:
-    if token.endswith("ies") and len(token) > 3:
-        return token[:-3] + "y"
-    if token.endswith("ses") or token.endswith("xes"):
-        return token[:-2]
-    if token.endswith("s") and not token.endswith("ss"):
-        return token[:-1]
-    return token
-
-SYNONYMS = {
-    "pre-roll": {"preroll", "pre", "roll", "prerolls"},
-    "preroll": {"pre-roll", "pre", "roll", "prerolls"},
-    "vape": {"vaporizer", "vaping"},
-    "cart": {"cartridge", "carts", "cartridges"},
-    "weed": {"cannabis", "marijuana"},
-    "rec": {"recreational"},
-    "med": {"medical"},
-    "thc": {"potency", "thcpercent", "thcpercentage"},
-    "dispo": {"dispensary", "dispensaries"},
-}
-
-def normalize_text(s: str) -> str:
-    if not isinstance(s, str):
-        return ""
-    s = s.lower().replace("pre-roll", "preroll").replace("pre roll", "preroll")
-    s = s.replace("%", " percent ")
-    return s
-
-def base_tokenize(s: str) -> list[str]:
-    s = normalize_text(s)
-    return TOKEN_RE.findall(s)
-
-def expand_tokens(tokens: list[str]) -> set[str]:
-    out = set()
-    for t in tokens:
-        if not t or t in STOPWORDS:
-            continue
-        t1 = singularize(t)
-        out.add(t1)
-        if t1 in SYNONYMS:
-            out.update({singularize(x) for x in SYNONYMS[t1]})
-        for k, vals in SYNONYMS.items():
-            if t1 in vals:
-                out.add(singularize(k))
-    return out
-
-def tokenize(s: str) -> set[str]:
-    return expand_tokens(base_tokenize(s))
-
-def url_to_title(url: str) -> str:
-    try:
-        p = urlparse(url)
-        last = p.path.strip("/").split("/")[-1] if p.path else ""
-        last = last.replace("-", " ").replace("_", " ").strip()
-        return last.title() if last else (p.netloc or url)
-    except Exception:
-        return url
-
-def extract_page_tokens(url: str, title: str | None) -> set[str]:
-    p = urlparse(url)
-    path_tokens = tokenize(p.path.replace("/", " "))
-    host_tokens = tokenize(p.netloc)
-    title_tokens = tokenize(title or url_to_title(url))
-    return path_tokens.union(host_tokens).union(title_tokens)
-
-# Category-aware boosts for URL mapping
-CATEGORY_BOOST_TERMS = {
-    "AIO": {"guide", "tutorial", "how", "learn", "blog", "faq"},
-    "AEO": {"faq", "questions", "what", "how", "who", "why"},
-    "VEO": {"locations", "near", "store", "contact", "phone", "hours"},
-    "GEO": {"guide", "how", "steps", "template", "framework"},
-    "SXO": {"pricing", "compare", "comparison", "best", "review", "vs"},
-    "LLM": {"ai", "docs", "developers", "api", "prompt", "gpt", "llm"},
-    "SEO": set(),
-}
-
-def jaccard(a: set[str], b: set[str]) -> float:
-    if not a or not b:
-        return 0.0
-    inter = len(a & b)
-    union = len(a | b)
-    return inter / union if union else 0.0
-
-# --------- Networking & parsing + resilient signals ---------
-USER_AGENT = "OutrankIQ/1.0"
-FETCH_TIMEOUT = 5.0
-CONTENT_MAX_BYTES = 300_000
-BODY_WORDS_LIMIT = 900
-
-@st.cache_resource(show_spinner=False)
-def get_http_session():
-    sess = requests.Session()
-    adapter = requests.adapters.HTTPAdapter(pool_connections=64, pool_maxsize=64)
-    sess.mount("http://", adapter)
-    sess.mount("https://", adapter)
-    sess.headers.update({"User-Agent": USER_AGENT})
-    return sess
-
-@st.cache_data(show_spinner=False)
-def fetch_page_html(url: str) -> bytes | None:
-    sess = get_http_session()
-    tries = 2
-    backoff = 0.5
-    for i in range(tries):
-        try:
-            with sess.get(url, timeout=FETCH_TIMEOUT, stream=True) as r:
-                status = r.status_code
-                if status in (429, 500, 502, 503, 504) and i < tries - 1:
-                    time.sleep(backoff)
-                    backoff *= 2
-                    continue
-                r.raise_for_status()
-                content = b""
-                for chunk in r.iter_content(chunk_size=8192):
-                    content += chunk
-                    if len(content) > CONTENT_MAX_BYTES:
-                        break
-                return content
-        except Exception:
-            if i == tries - 1:
-                return None
-            time.sleep(backoff)
-            backoff *= 2
-    return None
-
-def extract_jsonld_texts(soup) -> str:
-    out = []
-    try:
-        scripts = soup.find_all("script", type="application/ld+json")
-    except Exception:
-        scripts = []
-    for sc in scripts:
-        try:
-            data = json.loads(sc.string or "")
-        except Exception:
-            continue
-        def collect(obj):
-            if isinstance(obj, dict):
-                for k, v in obj.items():
-                    if isinstance(v, (dict, list)):
-                        collect(v)
-                    else:
-                        if k.lower() in ("name","headline","description","about","title"):
-                            if isinstance(v, str) and v.strip():
-                                out.append(v.strip())
-                if obj.get("@type","").lower() == "breadcrumblist":
-                    items = obj.get("itemListElement", [])
-                    if isinstance(items, list):
-                        for it in items:
-                            if isinstance(it, dict):
-                                nm = it.get("name")
-                                if isinstance(nm, str) and nm.strip():
-                                    out.append(nm.strip())
-            elif isinstance(obj, list):
-                for x in obj:
-                    collect(x)
-        collect(data)
-    return " | ".join(out[:20])
-
-def simple_extract_signals_from_html(html_bytes: bytes) -> dict:
-    try:
-        text = html_bytes.decode("utf-8", errors="ignore")
-    except Exception:
-        return {}
-    title_match = re.search(r"<title[^>]*>(.*?)</title>", text, re.I | re.S)
-    meta_desc_match = re.search(r'<meta[^>]+name=["\']description["\'][^>]+content=["\'](.*?)["\']', text, re.I | re.S)
-    body_match = re.search(r"<body[^>]*>(.*?)</body>", text, re.I | re.S)
-    body_text = re.sub(r"<[^>]+>", " ", body_match.group(1)) if body_match else ""
-    return {
-        "title": (title_match.group(1).strip() if title_match else ""),
-        "meta": (meta_desc_match.group(1).strip() if meta_desc_match else ""),
-        "h1": "",
-        "h2h3": "",
-        "jsonld": "",
-        "body": " ".join(body_text.split())
-    }
-
-def bs4_extract_signals_from_html(html_bytes: bytes) -> dict:
-    soup = BeautifulSoup(html_bytes, "lxml" if HAVE_BS4 else "html.parser")
-    title = (soup.title.string.strip() if soup.title and soup.title.string else "") or \
-            (soup.find("meta", property="og:title") or {}).get("content", "") or ""
-    meta =  (soup.find("meta", attrs={"name": "description"}) or {}).get("content", "") or \
-            (soup.find("meta", property="og:description") or {}).get("content", "") or ""
-    h1_el = soup.find("h1")
-    h1 = h1_el.get_text(" ", strip=True) if h1_el else ""
-    h2h3_parts = []
-    for tag in soup.find_all(["h2", "h3"]):
-        t = tag.get_text(" ", strip=True)
-        if t:
-            h2h3_parts.append(t)
-    h2h3 = " | ".join(h2h3_parts[:8])
-    for s in soup(["script", "style", "noscript"]):
-        s.decompose()
-    body_text = soup.get_text(" ", strip=True)
-    words = body_text.split()
-    if len(words) > BODY_WORDS_LIMIT:
-        body_text = " ".join(words[:BODY_WORDS_LIMIT])
-
-    jsonld_text = extract_jsonld_texts(soup)
-
-    return {"title": title, "meta": meta, "h1": h1, "h2h3": h2h3, "jsonld": jsonld_text, "body": body_text}
-
-def extract_page_signals(url: str) -> dict:
-    html = fetch_page_html(url)
-    if not html:
-        return {}
-    try:
-        return bs4_extract_signals_from_html(html) if HAVE_BS4 else simple_extract_signals_from_html(html)
-    except Exception:
-        return simple_extract_signals_from_html(html)
-
-def page_tokens_bundle(url: str, title: str | None, signals: dict) -> dict:
-    slug_tokens = extract_page_tokens(url, title)
-    def tok(s): return tokenize(s or "")
-    sig = {
-        "slug": slug_tokens,
-        "title": tok(signals.get("title", "")),
-        "meta": tok(signals.get("meta", "")),
-        "h1": tok(signals.get("h1", "")),
-        "h2h3": tok(signals.get("h2h3", "")),
-        "jsonld": tok(signals.get("jsonld", "")),
-        "body": tok(signals.get("body", "")),
-    }
-    combined = set().union(sig["slug"], sig["title"], sig["meta"], sig["h1"], sig["h2h3"], sig["jsonld"], sig["body"])
-    sig["all"] = combined
-    return sig
-
-# ---------- Scoring across signals ----------
-SIGNAL_WEIGHTS = {"title": 3.0, "h1": 2.0, "h2h3": 1.5, "meta": 1.5, "slug": 1.5, "jsonld": 1.5, "body": 1.0}
-
-def weighted_similarity(kw_tokens: set[str], token_bundle: dict) -> float:
-    num, den = 0.0, 0.0
-    for key, w in SIGNAL_WEIGHTS.items():
-        s = jaccard(kw_tokens, token_bundle.get(key, set()))
-        num += w * s
-        den += w
-    return num / den if den else 0.0
-
-def exact_phrase_bonus(keyword: str, signals: dict) -> float:
-    k = normalize_text(keyword).strip()
-    if not k:
-        return 0.0
-    for field in ("title", "h1", "meta", "h2h3"):
-        val = (signals.get(field, "") or "").lower()
-        if k in val:
-            return 0.10
-    return 0.0
-
-def slug_containment_bonus(kw_tokens: set[str], slug_tokens: set[str]) -> float:
-    sig_kw = {t for t in kw_tokens if t not in STOPWORDS}
-    if sig_kw and sig_kw.issubset(slug_tokens):
-        return 0.05
-    return 0.0
-
-def score_keyword_to_page(keyword: str, categories: list[str], token_bundle: dict) -> float:
-    kw_tokens = tokenize(keyword)
-    base = weighted_similarity(kw_tokens, token_bundle)
-    boost = 0.0
-    all_tokens = token_bundle.get("all", set())
-    for c in categories:
-        terms = CATEGORY_BOOST_TERMS.get(c, set())
-        if terms and (terms & all_tokens):
-            boost += 0.05
-    phrase_b = exact_phrase_bonus(keyword, {
-        "title": " ".join(token_bundle.get("title", [])),
-        "h1": " ".join(token_bundle.get("h1", [])),
-        "meta": " ".join(token_bundle.get("meta", [])),
-        "h2h3": " ".join(token_bundle.get("h2h3", [])),
-    })
-    slug_b = slug_containment_bonus(kw_tokens, token_bundle.get("slug", set()))
-    total = min(base + boost + phrase_b + slug_b, 1.0)
-    return total
-
-def make_page_obj(url: str, title: str | None) -> dict:
-    signals = extract_page_signals(url)
-    tokens = page_tokens_bundle(url, title, signals)
-    return {"url": url, "title": title or url_to_title(url), "tokens": tokens}
-
-# ----- Discovery helpers (domain OR sitemap) -----
-COMMON_SUBDOMAINS = ["www", "blog", "docs", "help", "support", "learn", "resources"]
-
-def normalize_domain(d: str) -> str:
-    d = d.strip().lower().replace("http://", "").replace("https://", "").strip("/")
-    return d
-
-def apex_from_host(host: str) -> str:
-    h = (host or "").strip().lower()
-    return h[4:] if h.startswith("www.") else h
-
-@st.cache_resource(show_spinner=False)
-def get_plain_http_session():
-    sess = requests.Session()
-    sess.headers.update({"User-Agent": USER_AGENT})
-    return sess
-
-def fetch(url: str, timeout: float = 8.0):
-    try:
-        sess = get_plain_http_session()
-        r = sess.get(url, timeout=timeout, allow_redirects=True)
-        if r.status_code == 200 and r.content:
-            return r
-    except Exception:
-        return None
-    return None
-
-def parse_sitemap(content_bytes: bytes) -> tuple[list[str], list[str]]:
-    """Namespace-agnostic: treat any *url/loc and *sitemap/loc as valid."""
-    try:
-        tree = ET.fromstring(content_bytes)
-    except Exception:
-        return [], []
-    urls, children = [], []
-    # pass 1: generic iteration
-    for elem in tree.iter():
-        tag = elem.tag.lower()
-        if tag.endswith("url"):
-            for child in list(elem):
-                if child.tag.lower().endswith("loc") and child.text:
-                    urls.append(child.text.strip())
-        if tag.endswith("sitemap"):
-            for child in list(elem):
-                if child.tag.lower().endswith("loc") and child.text:
-                    children.append(child.text.strip())
-    # fallback pass: strip namespaces and use simple finds
-    if not urls and not children:
-        nsfree = re.sub(rb'\sxmlns(:\w+)?="[^"]+"', b"", content_bytes, flags=re.I)
-        try:
-            tree2 = ET.fromstring(nsfree)
-            for url in tree2.findall(".//url"):
-                loc = url.find("loc")
-                if loc is not None and loc.text:
-                    urls.append(loc.text.strip())
-            for sm in tree2.findall(".//sitemap"):
-                loc = sm.find("loc")
-                if loc is not None and loc.text:
-                    children.append(loc.text.strip())
-        except Exception:
-            pass
-    return urls, children
-
-def maybe_decompress(resp) -> bytes:
-    try:
-        content = resp.content
-        if resp.headers.get("Content-Type", "").endswith("gzip") or resp.url.lower().endswith(".gz"):
-            return gzip.decompress(content)
-        return content
-    except Exception:
-        try:
-            return gzip.decompress(resp.content)
-        except Exception:
-            return resp.content or b""
-
-def robots_sitemaps(domain: str) -> list[str]:
-    root = normalize_domain(domain)
-    urls = []
-    for scheme in ("https://", "http://"):
-        r = fetch(f"{scheme}{root}/robots.txt", timeout=5.0)
-        if not r:
-            continue
-        text = r.text or ""
-        for line in text.splitlines():
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if line.lower().startswith("sitemap:"):
-                loc = line.split(":", 1)[1].strip()
-                if loc:
-                    urls.append(loc)
-        if urls:
-            break
-    return list(dict.fromkeys(urls))
-
-def alternate_sitemap_paths(domain: str) -> list[str]:
-    """Try common sitemap locations on domain and common subdomains."""
-    root = normalize_domain(domain)
-    base_paths = [
-        "/sitemap.xml",
-        "/sitemap_index.xml",
-        "/sitemaps.xml",
-        "/sitemap/sitemap.xml",
-        "/sitemap/sitemap_index.xml",
-    ]
-    subs = set([""] + COMMON_SUBDOMAINS)
-    urls = []
-    for sub in subs:
-        host = f"{sub+'.' if sub else ''}{root}"
-        for pth in base_paths:
-            urls.append(f"https://{host}{pth}")   # <-- fixed f-string
-    return urls
-
-def host_is_within_root(hostname: str, root: str) -> bool:
-    hostname = (hostname or "").lower()
-    return hostname.endswith(root)
-
-def sub_of(hostname: str, root: str) -> str | None:
-    hostname = (hostname or "").lower()
-    if not hostname.endswith(root):
-        return None
-    if hostname == root:
-        return ""
-    suffix = "." + root
-    label = hostname[:-len(suffix)]
-    return label
-
-def add_urls_capped(url_list, discovered, seen_urls, urls_per_sub, per_sub_cap, root):
-    for u in url_list:
-        if u in seen_urls:
-            continue
-        try:
-            p = urlparse(u)
-            host = (p.netloc or "").lower()
-            if not host_is_within_root(host, root):
-                continue
-            label = sub_of(host, root)
-            if label is None:
-                continue
-        except Exception:
-            continue
-        current = urls_per_sub.get(label, 0)
-        if current >= per_sub_cap:
-            continue
-        seen_urls.add(u)
-        discovered.append(u)
-        urls_per_sub[label] = current + 1
-
-def looks_like_sitemap_url(s: str) -> bool:
-    t = s.strip().lower()
-    if not t:
-        return False
-    if "sitemap" in t and (t.startswith("http://") or t.startswith("https://") or "/" in t):
-        return True
-    if t.endswith(".xml") or t.endswith(".xml.gz"):
-        return True
-    return False
-
-def ensure_url(s: str) -> str:
-    t = s.strip()
-    if not t:
-        return t
-    if not t.startswith("http://") and not t.startswith("https://"):
-        return "https://" + t
-    return t
-
-def apex_from_url(url: str) -> str:
-    host = urlparse(url).netloc or ""
-    return apex_from_host(normalize_domain(host))
-
-def discover_from_sitemap_urls(sitemap_urls: list[str], root: str, per_sub_cap: int = 500) -> list[str]:
-    root = apex_from_host(root)
-    discovered, seen_urls = [], set()
-    urls_per_sub = {"": 0}
-    queue = list(dict.fromkeys(sitemap_urls))
-    visited = set()
-    while queue:
-        sm_url = queue.pop(0)
-        if sm_url in visited:
-            continue
-        visited.add(sm_url)
-        resp = fetch(sm_url, timeout=8.0)
-        if not resp:
-            continue
-        data = maybe_decompress(resp)
-        urls, children = parse_sitemap(data)
-        add_urls_capped(urls, discovered, seen_urls, urls_per_sub, per_sub_cap, root)
-        for child in children:
-            if child not in visited:
-                queue.append(child)
-            try:
-                h = apex_from_host(urlparse(child).netloc.lower())
-                if host_is_within_root(h, root):
-                    for pth in ("/sitemap.xml", "/sitemap_index.xml"):
-                        cand = f"https://{h}{pth}"
-                        if cand not in visited and cand not in queue:
-                            queue.append(cand)
-            except Exception:
-                pass
-    return discovered
-
-def discover_urls_from_domain(domain: str, extra_subs: list[str], per_sub_cap: int = 500) -> list[str]:
-    root = apex_from_host(normalize_domain(domain))
-    if not root:
-        return []
-    initial_subs = set([""])
-    initial_subs.update(COMMON_SUBDOMAINS)
-    for s in extra_subs:
-        s = s.strip()
-        if s:
-            initial_subs.add(s)
-    candidate_sitemaps = []
-    candidate_sitemaps += robots_sitemaps(root)
-    candidate_sitemaps += alternate_sitemap_paths(root)
-    candidate_sitemaps = list(dict.fromkeys(candidate_sitemaps))
-    discovered, seen_urls = [], set()
-    urls_per_sub = {s: 0 for s in initial_subs}
-    visited = set()
-    queue = list(candidate_sitemaps)
-    while queue:
-        sm_url = queue.pop(0)
-        if sm_url in visited:
-            continue
-        visited.add(sm_url)
-        resp = fetch(sm_url, timeout=8.0)
-        if not resp:
-            continue
-        data = maybe_decompress(resp)
-        urls, children = parse_sitemap(data)
-        add_urls_capped(urls, discovered, seen_urls, urls_per_sub, per_sub_cap, root)
-        for child in children:
-            if child not in visited:
-                queue.append(child)
-            try:
-                h = apex_from_host(urlparse(child).netloc.lower())
-                if host_is_within_root(h, root):
-                    for pth in ("/sitemap.xml", "/sitemap_index.xml"):
-                        cand = f"https://{h}{pth}"
-                        if cand not in visited and cand not in queue:
-                            queue.append(cand)
-            except Exception:
-                pass
-    return discovered
-
-# ---------- Suggest URLs to keywords ----------
-def suggest_urls_for_keywords(df: pd.DataFrame, kw_col: str | None, only_eligible: bool,
-                              min_score: float, pages: list[dict]) -> pd.DataFrame:
-    if not pages or kw_col is None:
-        df["Suggested URL"] = ""
-        df["URL Match Score"] = ""
-        return df
-
-    cat_lists = df["Category"].fillna("").apply(
-        lambda s: [c.strip() for c in str(s).split(",") if c.strip()] if s else ["SEO"]
-    )
-    kw_tokens_series = (df[kw_col] if kw_col else pd.Series([""] * len(df))).astype(str).apply(tokenize)
-
-    mask = df["Eligible"].eq("Yes") if only_eligible and "Eligible" in df.columns else pd.Series([True]*len(df), index=df.index)
-
-    suggested, scores = [], []
-    for idx, row in df.iterrows():
-        if not mask.loc[idx]:
-            suggested.append("")
-            scores.append("")
-            continue
-        kw_tokens = kw_tokens_series.loc[idx]
-        keyword = str(row.get(kw_col, "")).strip()
-        if not keyword or not kw_tokens:
-            suggested.append("")
-            scores.append("")
-            continue
-        categories = cat_lists.loc[idx] if isinstance(cat_lists.loc[idx], list) else ["SEO"]
-
-        best_url, best_score = "", 0.0
-        for p in pages:
-            s = score_keyword_to_page(keyword, categories, p["tokens"])
-            if s > best_score:
-                best_url, best_score = p["url"], s
-
-        if best_score >= min_score:
-            suggested.append(best_url)
-            scores.append(round(float(best_score), 3))
-        else:
-            suggested.append("")
-            scores.append("")
-
-    df["Suggested URL"] = suggested
-    df["URL Match Score"] = scores
-    return df
-
 # ---------- Scoring ----------
 def calculate_score(volume: float, kd: float) -> int:
+    """Return score 0-6, but ONLY if eligible (volume >= min)."""
     if pd.isna(volume) or pd.isna(kd):
         return 0
     if volume < MIN_VALID_VOLUME:
@@ -705,6 +123,7 @@ def calculate_score(volume: float, kd: float) -> int:
 def add_scoring_columns(df: pd.DataFrame, volume_col: str, kd_col: str, kw_col: str | None) -> pd.DataFrame:
     out = df.copy()
 
+    # Eligibility + Reason (Option A)
     def _eligibility_reason(vol, kd):
         if pd.isna(vol) or pd.isna(kd):
             return "No", "Invalid Volume/KD"
@@ -718,9 +137,11 @@ def add_scoring_columns(df: pd.DataFrame, volume_col: str, kd_col: str, kw_col: 
     out["Score"] = [calculate_score(v, k) for v, k in zip(out[volume_col], out[kd_col])]
     out["Tier"] = out["Score"].map(LABEL_MAP).fillna("Not rated")
 
+    # Category (multi-label)
     kw_series = out[kw_col] if kw_col else pd.Series([""] * len(out))
     out["Category"] = [", ".join(categorize_keyword(str(k))) for k in kw_series]
 
+    # Order columns (no color column shown)
     ordered = ([kw_col] if kw_col else []) + [volume_col, kd_col, "Score", "Tier", "Eligible", "Reason", "Category"]
     remaining = [c for c in out.columns if c not in ordered]
     out = out[ordered + remaining]
@@ -760,62 +181,20 @@ example = pd.DataFrame(
 with st.expander("See example CSV format"):
     st.dataframe(example, use_container_width=True)
 
-# ---------- Site mapping (domain OR sitemap) ----------
-with st.expander("Site mapping (optional): map keywords to URLs discovered from sitemap(s)"):
-    st.markdown(
-        "<div style='background:#FEF9C3;border:1px solid #FDE68A;padding:10px;border-radius:8px;color:#000;'>"
-        "<strong>Heads up:</strong> We discover URLs from sitemap(s) across common subdomains and "
-        "<strong>cap at 500 pages per subdomain</strong>. Need more? Contact <em>OutrankIQ</em>."
-        "</div>",
-        unsafe_allow_html=True
-    )
-    entry = st.text_input("Domain or sitemap URL (e.g., example.com OR https://www.example.com/sitemap.xml)", "")
-    extra_subs_raw = st.text_input("Extra subdomains (optional, comma-separated)", "")
-    extra_subs = [s.strip() for s in extra_subs_raw.split(",")] if extra_subs_raw else []
-    only_eligible = st.checkbox("Only assign eligible keywords", value=True)
-
-    # Advanced: threshold tester (default remains 0.25)
-    with st.expander("Advanced (optional)"):
-        MIN_MATCH_SCORE = st.slider("Temporary match threshold", min_value=0.10, max_value=0.40, step=0.01, value=0.25)
-        st.caption("Default is 0.25. Use this slider to test if borderline matches appear; CSV uses this chosen value.")
-
-    discovered_urls = []
-
-    if entry.strip():
-        if "sitemap" in entry.lower() or entry.lower().endswith((".xml", ".xml.gz")):
-            raw_parts = [p for p in re.split(r"[,\s]+", entry) if p]
-            sm_urls = [ensure_url(p) for p in raw_parts]
-            first_root = apex_from_url(sm_urls[0])
-            with st.spinner("Reading sitemap(s)..."):
-                try:
-                    discovered_urls = discover_from_sitemap_urls(sm_urls, first_root, per_sub_cap=500)
-                except Exception:
-                    discovered_urls = []
-            st.success(f"Discovered {len(discovered_urls)} URL(s) from provided sitemap(s).")
-        else:
-            with st.spinner("Discovering URLs from domain sitemap(s)..."):
-                try:
-                    discovered_urls = discover_urls_from_domain(entry, extra_subs, per_sub_cap=500)
-                except Exception:
-                    discovered_urls = []
-            st.success(f"Discovered {len(discovered_urls)} URL(s) from sitemap(s).")
-    else:
-        st.info("Enter a domain or paste a sitemap URL to begin discovery.")
-
 # ---------- Robust CSV reader + numeric cleaning ----------
 if uploaded is not None:
     raw = uploaded.getvalue()
 
     def try_read(bytes_data: bytes) -> pd.DataFrame:
         trials = [
-            {"encoding": None, "sep": None, "engine": "python"},
+            {"encoding": None, "sep": None, "engine": "python"},  # let pandas infer
             {"encoding": "utf-8", "sep": None, "engine": "python"},
             {"encoding": "utf-8-sig", "sep": None, "engine": "python"},
             {"encoding": "ISO-8859-1", "sep": None, "engine": "python"},
             {"encoding": "cp1252", "sep": None, "engine": "python"},
             {"encoding": "utf-16", "sep": None, "engine": "python"},
-            {"encoding": None, "sep": ",", "engine": "python"},
-            {"encoding": None, "sep": "\t", "engine": "python"},
+            {"encoding": None, "sep": ",", "engine": "python"},   # force comma
+            {"encoding": None, "sep": "\t", "engine": "python"},  # TSV fallback
         ]
         last_err = None
         for t in trials:
@@ -854,31 +233,10 @@ if uploaded is not None:
 
         scored = add_scoring_columns(df, vol_col, kd_col, kw_col)
 
-        # Build pages from discovery — parallel fetch+parse
-        pages = []
-        if discovered_urls:
-            with st.spinner("Fetching page content & extracting signals (parallel)…"):
-                max_workers = min(32, max(4, os.cpu_count() * 2 if os.cpu_count() else 8))
-                with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:
-                    futures = [ex.submit(make_page_obj, u, None) for u in discovered_urls]
-                    for f in concurrent.futures.as_completed(futures):
-                        try:
-                            page = f.result()
-                            pages.append(page)
-                        except Exception:
-                            pass
-
-        # Apply URL suggestions
-        scored = suggest_urls_for_keywords(
-            scored, kw_col=kw_col, only_eligible=only_eligible,
-            min_score=MIN_MATCH_SCORE, pages=pages
-        )
-
         # ---------- CSV DOWNLOAD (sorted: Yes first, KD ↑ then Volume ↓) ----------
         filename_base = f"outrankiq_{scoring_mode.lower().replace(' ', '_')}_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
         base_cols = ([kw_col] if kw_col else []) + [
-            vol_col, kd_col, "Score", "Tier", "Eligible", "Reason", "Category",
-            "Suggested URL", "URL Match Score"
+            vol_col, kd_col, "Score", "Tier", "Eligible", "Reason", "Category"
         ]
         export_df = scored[base_cols].copy()
         export_df["Strategy"] = scoring_mode
@@ -902,7 +260,7 @@ if uploaded is not None:
             help="Sorted by eligibility (Yes first), KD ascending, Volume descending"
         )
 
-        # Optional preview (same sorting; colorized Score/Tier cells only; NO Color column shown)
+        # Optional preview (same sorting; colorized Score/Tier cells only)
         if st.checkbox("Preview first 10 rows (optional)", value=False):
             preview_df = scored.copy()
             preview_df["Strategy"] = scoring_mode
