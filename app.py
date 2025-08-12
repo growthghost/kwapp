@@ -251,6 +251,11 @@ if uploaded is not None:
         export_cols = base_cols + ["Strategy"]
         export_df = export_df[export_cols]
 
+        # Save to session so it's available after crawl
+        st.session_state["export_df_base"] = export_df
+        st.session_state["filename_base"] = filename_base
+        st.session_state["kw_col_name"] = kw_col
+
         csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")
         st.download_button(
             label="⬇️ Download scored CSV",
@@ -283,10 +288,10 @@ if uploaded is not None:
             st.dataframe(styled, use_container_width=True)
 
 # =========================
-# Site Mapping (Fast Crawler with aiohttp → requests fallback)
+# Site Mapping (aiohttp preferred → requests fallback)
 # =========================
 st.markdown("---")
-st.subheader("Site Mapping (Fast Crawler)")
+st.subheader("Site Mapping")
 
 # ---- Internal crawler parameters (edit in code if needed) ----
 CRAWL_MAX_PAGES = 300          # total HTML pages to fetch
@@ -651,6 +656,17 @@ def suggest_url_for_keyword(keyword: str, site_index: list[dict]) -> tuple[str, 
             best = (p["url"], score, where)
     return best
 
+def url_parts(u: str):
+    from urllib.parse import urlparse as _up
+    try:
+        p = _up(u)
+        host = p.netloc or ""
+        path = p.path or "/"
+        depth = sum(1 for seg in path.split("/") if seg)
+        return host, path, depth
+    except Exception:
+        return "", "", 0
+
 # ---- Run crawl (URL + button only) ----
 if btn_crawl and crawl_url.strip():
     with st.spinner("Crawling..."):
@@ -692,36 +708,64 @@ if btn_crawl and crawl_url.strip():
         except Exception as e:
             st.error(f"Crawler error: {e}")
 
-# ---- Keyword → URL Association & second CSV download ----
-if uploaded is not None and 'export_df' in locals():
-    if "site_index" in st.session_state and st.session_state["site_index"]:
-        st.markdown("### Keyword → Suggested URL (from crawl)")
-        site_index = st.session_state["site_index"]
+# ---- Keyword → URL Association & Site-Mapped CSV download ----
+has_export = "export_df_base" in st.session_state and isinstance(st.session_state.get("export_df_base"), pd.DataFrame)
+has_site = "site_index" in st.session_state and isinstance(st.session_state.get("site_index"), list) and len(st.session_state["site_index"]) > 0
 
-        kw_col_live = kw_col if (kw_col in export_df.columns) else find_column(export_df, ["keyword","query","term"])
+if has_export:
+    export_df_base = st.session_state["export_df_base"].copy()
+    filename_base = st.session_state.get("filename_base", f"outrankiq_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}")
+    kw_col_live = st.session_state.get("kw_col_name")
+
+    if has_site:
+        st.markdown("### Keyword → Suggested URL (Site Mapping)")
+
+        # If keyword column name got lost, try to recover from the export_df_base
+        if (kw_col_live is None) or (kw_col_live not in export_df_base.columns):
+            kw_col_live = find_column(export_df_base, ["keyword","query","term"])
+
         if kw_col_live is None:
             st.warning("No keyword column found in the scored data to map.")
         else:
-            mapped = []
-            for kw in export_df[kw_col_live].astype(str):
-                url, score, where = suggest_url_for_keyword(kw, site_index)
-                mapped.append((url, score, where))
+            site_index = st.session_state["site_index"]
 
-            export_df_mapped = export_df.copy()
-            export_df_mapped["Suggested URL"] = [m[0] for m in mapped]
-            export_df_mapped["URL Match Score"] = [round(m[1], 2) for m in mapped]
-            export_df_mapped["URL Matched Field"] = [m[2] for m in mapped]
+            suggested_url = []
+            url_score = []
+            url_field = []
+            host_col = []
+            path_col = []
+            depth_col = []
+
+            for kw in export_df_base[kw_col_live].astype(str):
+                url, score, where = suggest_url_for_keyword(kw, site_index)
+                h, p, d = url_parts(url) if url else ("", "", 0)
+                suggested_url.append(url)
+                url_score.append(round(score, 2))
+                url_field.append(where)
+                host_col.append(h)
+                path_col.append(p)
+                depth_col.append(d)
+
+            export_df_mapped = export_df_base.copy()
+            export_df_mapped["Suggested URL"] = suggested_url
+            export_df_mapped["Host"] = host_col
+            export_df_mapped["Path"] = path_col
+            export_df_mapped["Path Depth"] = depth_col
+            export_df_mapped["URL Match Score"] = url_score
+            export_df_mapped["URL Matched Field"] = url_field
 
             csv_bytes_mapped = export_df_mapped.to_csv(index=False).encode("utf-8-sig")
             st.download_button(
-                label="⬇️ Download scored CSV (with Suggested URL)",
+                label="⬇️ Download Scored CSV (with Site Mapping)",
                 data=csv_bytes_mapped,
-                file_name=f"{filename_base}_mapped.csv",
+                file_name=f"{filename_base}_with_site_mapping.csv",
                 mime="text/csv",
-                help="Adds Suggested URL, URL Match Score, and Matched Field"
+                help="Includes Suggested URL, Host, Path, Path Depth, URL Match Score, and Matched Field"
             )
     else:
-        st.info("Crawl the site above to enable Suggested URL mapping in your CSV.")
+        st.info("Crawl a site above to enable the Site Mapping download.")
+else:
+    st.info("Upload and score a CSV first, then crawl a site to enable the Site Mapping download.")
 
 st.markdown("---")
 st.caption("© 2025 OutrankIQ • Select from three scoring strategies to target different types of keyword opportunities.")
