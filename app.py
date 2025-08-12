@@ -285,9 +285,6 @@ def _normalize_site(u: str) -> str:
         return ""
     return f"{scheme}://{netloc}"
 
-def _base_hostparts(host: str) -> list[str]:
-    return host.split(".")
-
 def _in_scope(url: str, root_host: str, include_subs: bool) -> bool:
     try:
         h = urlparse(url).netloc.lower()
@@ -310,7 +307,6 @@ def _load_robots(base: str) -> _robotparser.RobotFileParser:
         rp.set_url(base.rstrip("/") + "/robots.txt")
         rp.read()
     except Exception:
-        # If robots fails to load, default allow False -> be conservative and still check can_fetch
         pass
     return rp
 
@@ -320,7 +316,7 @@ _DEFAULT_HEADERS = {
 }
 FETCH_TIMEOUT = 12
 
-async def _fetch_async(session: aiohttp.ClientSession, url: str) -> str | None:
+async def _fetch_async(session, url: str) -> str | None:
     try:
         async with session.get(url, timeout=FETCH_TIMEOUT) as r:
             if r.status != 200:
@@ -353,11 +349,9 @@ def _extract_sitemaps_from_robots(robots_txt: str) -> list[str]:
     return _SITEMAP_RE.findall(robots_txt or "") if robots_txt else []
 
 def _parse_sitemap_xml(xml_text: str) -> list[str]:
-    # Very light parser for <loc>...</loc>
     if not xml_text:
         return []
     locs = re.findall(r"<loc>(.*?)</loc>", xml_text, flags=re.I | re.S)
-    # also handle self-closing tags or with namespaces
     if not locs:
         locs = re.findall(r"<\s*loc\s*>\s*(.*?)\s*<\s*/\s*loc\s*>", xml_text, flags=re.I | re.S)
     return [l.strip() for l in locs if l.strip()]
@@ -369,7 +363,6 @@ async def _gather_sitemap_urls_async(base: str, include_subs: bool, max_pages: i
     async with aiohttp.ClientSession(headers=_DEFAULT_HEADERS) as session:
         robots_txt = await _fetch_async(session, robots_url) or ""
         sitemap_urls = _extract_sitemaps_from_robots(robots_txt)
-        # Always try /sitemap.xml too
         sitemap_urls.append(base.rstrip("/") + "/sitemap.xml")
         for sm in list(dict.fromkeys(sitemap_urls)):
             xml = await _fetch_async(session, sm)
@@ -446,7 +439,6 @@ async def _crawl_bfs_async(base: str, include_subs: bool, max_pages: int, rp: _r
             if not html:
                 continue
             result[url] = html
-            # enqueue links
             for lk in _extract_links(html, url):
                 if (lk not in seen) and _is_html_like(lk) and _in_scope(lk, root_host, include_subs):
                     q.append(lk)
@@ -521,7 +513,6 @@ def _extract_text_tag(html: str, tag: str) -> list[str]:
         except Exception:
             pass
     else:
-        # light regex fallback (best-effort)
         pattern = re.compile(fr"<{tag}[^>]*>(.*?)</{tag}>", re.I | re.S)
         for m in pattern.findall(html):
             t = re.sub(r"<[^>]+>", " ", m)
@@ -542,7 +533,6 @@ def _extract_meta_desc(html: str) -> str:
             return (m.get("content") or "").strip() if m else ""
         except Exception:
             return ""
-    # regex fallback
     m = re.search(r'<meta[^>]+name=["\']description["\'][^>]*content=["\'](.*?)["\']', html, flags=re.I | re.S)
     if m:
         return m.group(1).strip()
@@ -550,7 +540,6 @@ def _extract_meta_desc(html: str) -> str:
     return m.group(1).strip() if m else ""
 
 def _page_profile(url: str, html: str) -> dict[str, float]:
-    # Weighted token bag
     title_txts = _extract_text_tag(html, "title")
     h1_txts = _extract_text_tag(html, "h1")
     h2_txts = _extract_text_tag(html, "h2")
@@ -596,7 +585,7 @@ def _prepare_keywords_for_mapping(export_df: pd.DataFrame, kw_col: str, vol_col:
     for i, row in export_df.reset_index(drop=False).iterrows():
         kws.append(
             _Kw(
-                idx=row["index"],  # original DataFrame index
+                idx=row["index"],
                 text=row.get(kw_col, ""),
                 vol=row.get(vol_col, 0),
                 kd=row.get(kd_col, 0),
@@ -605,7 +594,6 @@ def _prepare_keywords_for_mapping(export_df: pd.DataFrame, kw_col: str, vol_col:
                 cats=row.get("Category", ""),
             )
         )
-    # Volume normalization
     vols = [k.vol for k in kws]
     vmin, vmax = (min(vols), max(vols)) if vols else (0.0, 0.0)
     rng = max(vmax - vmin, 1e-9)
@@ -625,12 +613,10 @@ def _assign_keywords_to_pages(pages: list[tuple[str, dict[str, float]]],
     Enforces uniqueness: a keyword is used at most once across the site.
     """
     mapping: dict[int, tuple[str, str]] = {}
-    # Available keyword set
     available = [k for k in keywords if (k.eligible if only_assign_eligible else True)]
     assigned_kw_ids: set[int] = set()
 
     for url, page_vec in pages:
-        # Build candidate list once for the page (skip zero-overlap)
         cands = []
         for k in available:
             if k.idx in assigned_kw_ids:
@@ -646,25 +632,21 @@ def _assign_keywords_to_pages(pages: list[tuple[str, dict[str, float]]],
             continue
         cands.sort(key=lambda x: x[0], reverse=True)
 
-        # Primary
         primary = next((k for _, k, _ in cands if k.idx not in assigned_kw_ids), None)
         if primary:
             mapping[primary.idx] = (url, "Primary")
             assigned_kw_ids.add(primary.idx)
 
-        # Secondary
         secondary = next((k for _, k, _ in cands if k.idx not in assigned_kw_ids), None)
         if secondary:
             mapping[secondary.idx] = (url, "Secondary")
             assigned_kw_ids.add(secondary.idx)
 
-        # AIO
         aio = next((k for _, k, _ in cands if k.idx not in assigned_kw_ids and ("AIO" in k.cats)), None)
         if aio:
             mapping[aio.idx] = (url, "AIO")
             assigned_kw_ids.add(aio.idx)
 
-        # VEO
         veo = next((k for _, k, _ in cands if k.idx not in assigned_kw_ids and ("VEO" in k.cats)), None)
         if veo:
             mapping[veo.idx] = (url, "VEO")
@@ -686,15 +668,13 @@ def _collect_pages(site_url: str, include_subdomains: bool, max_pages: int) -> d
         try:
             pages_from_sitemap = asyncio.run(_gather_sitemap_urls_async(base, include_subdomains, max_pages))
         except RuntimeError:
-            # If inside existing event loop (rare in Streamlit), fall back to sync
             pages_from_sitemap = _gather_sitemap_urls_sync(base, include_subdomains, max_pages)
     else:
         pages_from_sitemap = _gather_sitemap_urls_sync(base, include_subdomains, max_pages)
 
-    # Filter robots + fetch
+    # Fetch pages listed in sitemap
     html_map: dict[str, str] = {}
     if pages_from_sitemap:
-        # Fetch content for sitemap URLs
         if HAVE_AIOHTTP:
             async def _fetch_many(urls: list[str]) -> dict[str, str]:
                 out: dict[str, str] = {}
@@ -711,7 +691,6 @@ def _collect_pages(site_url: str, include_subdomains: bool, max_pages: int) -> d
             try:
                 html_map = asyncio.run(_fetch_many(list(pages_from_sitemap)[:max_pages]))
             except RuntimeError:
-                # event loop edge-case -> sync fallback
                 for u in list(pages_from_sitemap)[:max_pages]:
                     if not rp.can_fetch(_DEFAULT_HEADERS["User-Agent"], u):
                         continue
@@ -736,7 +715,6 @@ def _collect_pages(site_url: str, include_subdomains: bool, max_pages: int) -> d
                 bfs_map = _crawl_bfs_sync(base, include_subdomains, remaining, rp)
         else:
             bfs_map = _crawl_bfs_sync(base, include_subdomains, remaining, rp)
-        # Merge (avoid duplicates)
         for k, v in bfs_map.items():
             if len(html_map) >= max_pages:
                 break
@@ -794,7 +772,6 @@ if submit and df is not None:
         mapping = _assign_keywords_to_pages(pages_profiles, kw_objs, only_assign_eligible=only_assign_eligible)
 
         # ---------- Merge mapping back to export ----------
-        # We'll use export_df's index as the key
         mapped_urls = []
         mapped_roles = []
         for idx in export_df.index.tolist():
