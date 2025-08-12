@@ -179,6 +179,7 @@ with st.expander("See example CSV format"):
 df = None
 kw_col = vol_col = kd_col = None
 GLOBAL_KW_TOKENS: set[str] = set()
+GLOBAL_KW_TOKENS_NORM: set[str] = set()
 
 if uploaded is not None:
     raw = uploaded.getvalue()
@@ -226,16 +227,27 @@ if uploaded is not None:
         df[kd_col] = df[kd_col].astype(str).str.replace(r"[,\s]", "", regex=True).str.replace("%", "", regex=False)
         df[vol_col] = pd.to_numeric(df[vol_col], errors="coerce")
         df[kd_col] = pd.to_numeric(df[kd_col], errors="coerce").clip(lower=0, upper=100)
-        # Global keyword token set (for fast page pruning)
+
+        # Global keyword token sets (raw + normalized)
         TOKEN_SPLIT_RE = re.compile(r"[^a-z0-9]+")
         _STOPWORDS_G = set("""
         a an the and or of for to in on at by with from as is are be was were this that these those it its it's your our my we you
         what when where why how which who can should could would will near open now closest call directions ok google alexa siri hey
         """.split())
-        def _toks(s: str):
-            return [t for t in TOKEN_SPLIT_RE.split(str(s).lower()) if t and t not in _STOPWORDS_G and len(t) > 1]
+        def _tokens_g(text: str):
+            if not text: return []
+            return [t for t in TOKEN_SPLIT_RE.split(str(text).lower()) if t and t not in _STOPWORDS_G and len(t) > 1]
+        def _normalize_token(t: str) -> str:
+            # very light stemming
+            if len(t) > 4:
+                for suf in ("ing","ers","ies","ment","tion","s","es","ed"):
+                    if t.endswith(suf) and len(t) - len(suf) >= 3:
+                        return t[: -len(suf)]
+            return t
         for kw in df[kw_col].astype(str).tolist():
-            GLOBAL_KW_TOKENS.update(_toks(kw))
+            toks = _tokens_g(kw)
+            GLOBAL_KW_TOKENS.update(toks)
+            GLOBAL_KW_TOKENS_NORM.update(_normalize_token(t) for t in toks)
 
 # =========================================================
 # ========== Crawl + Mapping UI (single action) ===========
@@ -246,7 +258,7 @@ st.subheader("Site Crawl & Keyword Mapping")
 # Hidden defaults (always include subdomains; cap pages internally)
 MAX_PAGES_DEFAULT = 500
 INCLUDE_SUBDOMAINS_ALWAYS = True
-TIME_BUDGET_SECS = 35     # hard budget to keep the UX snappy
+TIME_BUDGET_SECS = 35
 CONCURRENCY = 20
 PARTIAL_MAX_BYTES = 200_000
 FETCH_TIMEOUT_SECS = 8
@@ -272,7 +284,7 @@ div[data-testid="stFormSubmitButton"] > button:hover{
 with st.form("crawlmap"):
     site_url = st.text_input("Site to crawl (domain or full URL)", placeholder="https://example.com")
     only_assign_eligible = st.checkbox("Only assign eligible keywords", value=True)
-    submit = st.form_submit_button("Score, Crawl, and Map")  # 🚀 label added via CSS
+    submit = st.form_submit_button("Score, Crawl, and Map")
 
 # =========================================================
 # ============== Crawl + Mapping Implementation ===========
@@ -301,7 +313,6 @@ def _strip_tracking(u: str) -> str:
         q = [(k, v) for k, v in parse_qsl(p.query, keep_blank_values=False)
              if not (k.startswith("utm_") or k in {"gclid","fbclid","mc_cid","mc_eid","ref","referrer"})]
         clean = p._replace(query=urlencode(q), fragment="")
-        # collapse multiple slashes, remove trailing slash (except root)
         path = re.sub(r"/{2,}", "/", clean.path)
         if path.endswith("/") and path != "/":
             path = path[:-1]
@@ -333,7 +344,6 @@ def _is_html_like(url: str) -> bool:
                 ".mp4",".mp3",".avi",".mov",".wmv",".doc",".docx",".xls",".xlsx",".ppt",".pptx",".ics",".csv")
     return not any(lower.endswith(ext) for ext in bad_exts)
 
-# robots
 def _load_robots(base: str) -> _robotparser.RobotFileParser:
     rp = _robotparser.RobotFileParser()
     try:
@@ -353,6 +363,13 @@ TOKEN_SPLIT_RE = re.compile(r"[^a-z0-9]+")
 def _tokens(text: str) -> list[str]:
     if not text: return []
     return [t for t in TOKEN_SPLIT_RE.split(str(text).lower()) if t and t not in _STOPWORDS and len(t) > 1]
+
+def _normalize_token(t: str) -> str:
+    if len(t) > 4:
+        for suf in ("ing","ers","ies","ment","tion","s","es","ed"):
+            if t.endswith(suf) and len(t) - len(suf) >= 3:
+                return t[: -len(suf)]
+    return t
 
 def _slug_tokens(url: str) -> list[str]:
     try:
@@ -414,7 +431,7 @@ def _extract_canonical(html: str, base_url: str) -> str | None:
     return None
 
 def _page_profile(url: str, html: str):
-    """Return (weights_dict, norm, canonical_url_or_None)"""
+    """Return (weights_dict, norm, canonical_url_or_None, token_set, token_set_normed)"""
     title_txts = _extract_text_tag(html, "title")
     h1_txts = _extract_text_tag(html, "h1")
     h2_txts = _extract_text_tag(html, "h2")
@@ -429,10 +446,14 @@ def _page_profile(url: str, html: str):
     for t in _tokens(" ".join(h2_txts)):   weights[t] += 1.5
     for t in _tokens(" ".join(h3_txts)):   weights[t] += 1.2
     for t in _tokens(meta_desc):            weights[t] += 1.0
-    if not weights: return {}, 0.0, None
+
+    token_set = set(weights.keys())
+    token_set_norm = set(_normalize_token(t) for t in token_set)
+
+    if not weights: return {}, 0.0, None, token_set, token_set_norm
     norm = math.sqrt(sum(w*w for w in weights.values()))
     canonical = _extract_canonical(html, url)
-    return dict(weights), norm, canonical
+    return dict(weights), norm, canonical, token_set, token_set_norm
 
 def _cosine_overlap(page_vec: dict[str, float], page_norm: float, kw_tokens: set[str], kw_norm: float) -> float:
     if not page_vec or not kw_tokens or page_norm <= 1e-9 or kw_norm <= 1e-9: return 0.0
@@ -442,7 +463,7 @@ def _cosine_overlap(page_vec: dict[str, float], page_norm: float, kw_tokens: set
 
 # ---- Keyword structures ----
 class _Kw:
-    __slots__ = ("idx","text","vol","kd","score","eligible","cats","kw_tokens","vol_norm","kw_norm")
+    __slots__ = ("idx","text","vol","kd","score","eligible","cats","kw_tokens","kw_tokens_norm","vol_norm","kw_norm")
     def __init__(self, idx, text, vol, kd, score, eligible, cats):
         self.idx = idx
         self.text = str(text or "")
@@ -452,6 +473,7 @@ class _Kw:
         self.eligible = str(eligible) == "Yes"
         self.cats = set([c.strip() for c in str(cats or "").split(",") if c.strip()])
         self.kw_tokens = set(_tokens(self.text))
+        self.kw_tokens_norm = set(_normalize_token(t) for t in self.kw_tokens)
         self.kw_norm = math.sqrt(len(self.kw_tokens)) if self.kw_tokens else 0.0
         self.vol_norm = 0.0
 
@@ -477,38 +499,86 @@ def _prepare_keywords_for_mapping(export_df: pd.DataFrame, kw_col: str, vol_col:
 def _rank_score(rel: float, score: int, vol_norm: float) -> float:
     return 0.6*rel + 0.3*(score/6.0) + 0.1*vol_norm
 
+def _soft_overlap(page_tokens_norm: set[str], kw_tokens_norm: set[str]) -> int:
+    return len(page_tokens_norm & kw_tokens_norm)
+
+def _fallback_rank(soft_olap: int, score: int, vol_norm: float) -> float:
+    # Used when cosine == 0; emphasizes any token overlap, then score/volume
+    return 0.5*(soft_olap > 0) + 0.3*(score/6.0) + 0.2*vol_norm
+
+def _pick_roles_from_candidates(cands_sorted, assigned_ids, want_aio, want_veo):
+    """Return [primary, secondary, aio, veo] from cands, ensuring unique picks."""
+    picks = []
+
+    def next_unassigned(pred=lambda k: True):
+        for _, k, _ in cands_sorted:
+            if k.idx not in assigned_ids and pred(k):
+                assigned_ids.add(k.idx)
+                return k
+        return None
+
+    # Primary, Secondary
+    p = next_unassigned()
+    if p: picks.append(("Primary", p))
+    s = next_unassigned()
+    if s: picks.append(("Secondary", s))
+    # AIO pref
+    a = next_unassigned(lambda k: ("AIO" in k.cats)) or next_unassigned()
+    if a: picks.append(("AIO", a))
+    # VEO pref
+    v = next_unassigned(lambda k: ("VEO" in k.cats)) or next_unassigned()
+    if v: picks.append(("VEO", v))
+    return picks
+
 def _assign_keywords_to_pages(pages, keywords, only_assign_eligible: bool):
     """
-    pages: list[(url, page_vec, page_norm)]
+    pages: list[(url, page_vec, page_norm, token_set, token_set_norm)]
     returns mapping: keyword_row_index -> (url, role)
+    Ensures up to four keywords per page (Primary, Secondary, AIO, VEO),
+    with robust fallbacks if cosine similarity is zero.
     """
     mapping: dict[int, tuple[str, str]] = {}
     available = [k for k in keywords if (k.eligible if only_assign_eligible else True)]
     assigned_kw_ids: set[int] = set()
 
-    for url, page_vec, page_norm in pages:
+    for url, page_vec, page_norm, token_set, token_set_norm in pages:
+        # 1) Build candidate list with cosine similarity (fast)
         cands = []
         for k in available:
-            if k.idx in assigned_kw_ids or not k.kw_tokens or k.kw_norm == 0.0:
+            if k.idx in assigned_kw_ids or not k.kw_tokens:
                 continue
             rel = _cosine_overlap(page_vec, page_norm, k.kw_tokens, k.kw_norm)
-            if rel <= 0: continue
-            cands.append((_rank_score(rel, k.score, k.vol_norm), k, rel))
-        if not cands: continue
+            if rel > 0:
+                cands.append((_rank_score(rel, k.score, k.vol_norm), k, rel))
+
+        # 2) If no cosine matches, fall back to normalized token overlap
+        if not cands:
+            fcands = []
+            for k in available:
+                if k.idx in assigned_kw_ids or not k.kw_tokens_norm:
+                    continue
+                olap = _soft_overlap(token_set_norm, k.kw_tokens_norm)
+                if olap > 0:
+                    fcands.append((_fallback_rank(olap, k.score, k.vol_norm), k, float(olap)))
+            cands = fcands
+
+        # 3) If STILL nothing, pick highest score/volume keywords to ensure mapping
+        if not cands:
+            fcands = [((0.15*k.score/6.0 + 0.85*k.vol_norm), k, 0.0) for k in available if k.idx not in assigned_kw_ids]
+            cands = fcands
+
+        if not cands:
+            continue
+
         cands.sort(key=lambda x: x[0], reverse=True)
 
-        primary = next((k for _, k, _ in cands if k.idx not in assigned_kw_ids), None)
-        if primary:
-            mapping[primary.idx] = (url, "Primary"); assigned_kw_ids.add(primary.idx)
-        secondary = next((k for _, k, _ in cands if k.idx not in assigned_kw_ids), None)
-        if secondary:
-            mapping[secondary.idx] = (url, "Secondary"); assigned_kw_ids.add(secondary.idx)
-        aio = next((k for _, k, _ in cands if k.idx not in assigned_kw_ids and ("AIO" in k.cats)), None)
-        if aio:
-            mapping[aio.idx] = (url, "AIO"); assigned_kw_ids.add(aio.idx)
-        veo = next((k for _, k, _ in cands if k.idx not in assigned_kw_ids and ("VEO" in k.cats)), None)
-        if veo:
-            mapping[veo.idx] = (url, "VEO"); assigned_kw_ids.add(veo.idx)
+        # 4) Pick roles with category preferences
+        want_aio = True
+        want_veo = True
+        picks = _pick_roles_from_candidates(cands, assigned_kw_ids, want_aio, want_veo)
+        for role, kw in picks:
+            mapping[kw.idx] = (url, role)
+
     return mapping
 
 # ---- Networking: partial reads + concurrency + fallbacks ----
@@ -553,21 +623,16 @@ def _extract_sitemaps_from_robots(robots_txt: str) -> list[str]:
 def _parse_sitemap_entries(xml_text: str) -> tuple[list[str], list[str]]:
     """Return (sitemap_links, url_links) from a sitemap or sitemapindex XML."""
     if not xml_text: return [], []
-    # child sitemaps
     sm = re.findall(r"<sitemap>.*?<loc>(.*?)</loc>.*?</sitemap>", xml_text, flags=re.I | re.S)
-    # urls
     urls = re.findall(r"<url>.*?<loc>(.*?)</loc>.*?</url>", xml_text, flags=re.I | re.S)
     if not (sm or urls):
-        # fallback generic <loc>
         locs = re.findall(r"<loc>(.*?)</loc>", xml_text, flags=re.I | re.S)
-        # naive guess: if endswith .xml assume sitemap, else URL
         for l in locs:
             if l.strip().lower().endswith(".xml"): sm.append(l.strip())
             else: urls.append(l.strip())
     return [s.strip() for s in sm], [u.strip() for u in urls]
 
 def _score_link_for_bfs(u: str) -> int:
-    """Heuristic to prioritize likely-content links."""
     p = urlparse(u)
     path = p.path.lower()
     score = 0
@@ -600,11 +665,9 @@ async def _gather_sitemap_urls_async(base: str, include_subs: bool, max_pages: i
             for xml in xml_list:
                 if not isinstance(xml, str) or not xml: continue
                 child_sitemaps, url_entries = _parse_sitemap_entries(xml)
-                # enqueue child sitemaps
                 for c in child_sitemaps:
                     if c not in seen:
                         todo.append(c)
-                # collect page URLs
                 for u in url_entries:
                     if len(urls) >= max_pages: break
                     if _is_html_like(u) and _in_scope(u, root_host, include_subs):
@@ -693,7 +756,6 @@ def _extract_links(html: str, base_url: str) -> list[str]:
     else:
         for href in _LINK_HREF_RE.findall(html):
             links.append(urljoin(base_url, href.strip()))
-    # normalize
     return [_strip_tracking(u) for u in links]
 
 async def _crawl_bfs_async(base: str, include_subs: bool, max_pages: int, rp: _robotparser.RobotFileParser, time_budget_deadline: float) -> dict[str, str]:
@@ -728,12 +790,10 @@ async def _crawl_bfs_async(base: str, include_subs: bool, max_pages: int, rp: _r
                 url, html = tup
                 if not html: continue
                 result[url] = html
-                # dedupe by canonical if present
-                _, _, canon = _page_profile(url, html)
+                _, _, canon, _, _ = _page_profile(url, html)
                 if canon:
                     canon = _strip_tracking(canon)
                     result.setdefault(canon, html)
-                # enqueue links (prioritized)
                 links = _extract_links(html, url)
                 links = [lk for lk in links if _is_html_like(lk) and _in_scope(lk, root_host, include_subs)]
                 links.sort(key=_score_link_for_bfs, reverse=True)
@@ -769,7 +829,7 @@ def _crawl_bfs_sync(base: str, include_subs: bool, max_pages: int, rp: _robotpar
                 url, html = fut.result() if hasattr(fut, "result") else (None, None)
                 if not url or not html: continue
                 result[url] = html
-                _, _, canon = _page_profile(url, html)
+                _, _, canon, _, _ = _page_profile(url, html)
                 if canon:
                     canon = _strip_tracking(canon)
                     result.setdefault(canon, html)
@@ -837,8 +897,10 @@ def _collect_pages(site_url: str, include_subdomains: bool, max_pages: int) -> d
 # =========================================================
 # ================= Button Action Handler =================
 # =========================================================
+# Persistent download area
+download_area = st.empty()
+
 if submit:
-    # Validate after click
     if df is None:
         st.error("Please upload your keyword CSV first.")
     elif not (site_url or "").strip():
@@ -847,7 +909,6 @@ if submit:
         # ---------- Score/Categorize ----------
         scored = add_scoring_columns(df, vol_col, kd_col, kw_col)
 
-        # Build export base (same as before)
         filename_base = f"outrankiq_{scoring_mode.lower().replace(' ', '_')}_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
         base_cols = ([kw_col] if kw_col else []) + [vol_col, kd_col, "Score", "Tier", "Eligible", "Reason", "Category"]
         export_df = scored[base_cols].copy()
@@ -860,41 +921,31 @@ if submit:
         export_cols = base_cols + ["Strategy"]
         export_df = export_df[export_cols]
 
-        # ---------- Crawl site (fast/parallel + budget) ----------
+        # ---------- Crawl site ----------
         with st.spinner("Crawling site and mapping keywords to pages..."):
             html_map = _collect_pages(
                 site_url,
-                include_subdomains=INCLUDE_SUBDOMAINS_ALWAYS,   # always True (hidden from UI)
-                max_pages=int(MAX_PAGES_DEFAULT)                 # hidden cap
+                include_subdomains=INCLUDE_SUBDOMAINS_ALWAYS,
+                max_pages=int(MAX_PAGES_DEFAULT)
             )
 
-        # ---------- Build page profiles with pruning ----------
+        # ---------- Build page profiles (no pruning; use fallbacks later) ----------
         pages_profiles = []
         seen_urls = set()
         for u, html in html_map.items():
-            vec, norm, canon = _page_profile(u, html)
+            vec, norm, canon, tset, tset_norm = _page_profile(u, html)
             if not vec or norm <= 0.0:
                 continue
             rep_url = _strip_tracking(canon or u)
             if rep_url in seen_urls:
                 continue
             seen_urls.add(rep_url)
-            if GLOBAL_KW_TOKENS and not (set(vec.keys()) & GLOBAL_KW_TOKENS):
-                continue
-            pages_profiles.append((rep_url, vec, norm))
+            pages_profiles.append((rep_url, vec, norm, tset, tset_norm))
 
-        # If nothing crawled/profiled, we still provide the scored CSV (mapping blank)
+        # If nothing crawled/profiled, still offer CSV (unassigned)
         if not pages_profiles:
             export_df["Mapped URL"] = ""
             export_df["Mapped Role"] = "Unassigned"
-            csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")
-            st.download_button(
-                label="⬇️ Download scored + mapping CSV",
-                data=csv_bytes,
-                file_name=f"{filename_base}.csv",
-                mime="text/csv",
-                help="Includes mapping columns; mapping may be blank if the crawl yielded no pages."
-            )
         else:
             # ---------- Prepare keywords + assign ----------
             kw_objs = _prepare_keywords_for_mapping(export_df, kw_col, vol_col, kd_col)
@@ -915,23 +966,34 @@ if submit:
             export_df["Mapped URL"] = mapped_urls
             export_df["Mapped Role"] = mapped_roles
 
-            csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")
-            st.download_button(
-                label="⬇️ Download scored + mapping CSV",
-                data=csv_bytes,
-                file_name=f"{filename_base}.csv",
-                mime="text/csv",
-                help="Sorted by eligibility (Yes first), KD ascending, Volume descending, with per-keyword URL mapping."
-            )
+        # ---------- Persist CSV so it doesn't disappear ----------
+        csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")
+        st.session_state["last_csv_bytes"] = csv_bytes
+        st.session_state["last_csv_name"] = f"{filename_base}.csv"
 
-            # Optional preview (top 10) with color on Score/Tier
-            if st.checkbox("Preview first 10 rows (optional)", value=False, key="preview_mapping"):
-                preview_df = export_df.copy()
-                def _row_style(row):
-                    color = COLOR_MAP.get(int(row.get("Score", 0)) if pd.notna(row.get("Score", 0)) else 0, "#9ca3af")
-                    return [("background-color:" + color + "; color:black;") if c in ("Score","Tier") else "" for c in row.index]
-                styled = preview_df.head(10).style.apply(_row_style, axis=1)
-                st.dataframe(styled, use_container_width=True)
+# Persistent download button (survives reruns)
+if "last_csv_bytes" in st.session_state and "last_csv_name" in st.session_state:
+    with download_area:
+        st.download_button(
+            label="⬇️ Download scored + mapping CSV",
+            data=st.session_state["last_csv_bytes"],
+            file_name=st.session_state["last_csv_name"],
+            mime="text/csv",
+            help="Includes per-keyword URL mapping (Primary, Secondary, AIO, VEO).",
+            key="dl_persist"
+        )
+
+# Optional preview
+if "last_csv_bytes" in st.session_state and st.checkbox("Preview first 10 rows (optional)", value=False, key="preview_mapping"):
+    try:
+        df_preview = pd.read_csv(io.BytesIO(st.session_state["last_csv_bytes"]))
+        def _row_style(row):
+            color = COLOR_MAP.get(int(row.get("Score", 0)) if pd.notna(row.get("Score", 0)) else 0, "#9ca3af")
+            return [("background-color:" + color + "; color:black;") if c in ("Score","Tier") else "" for c in row.index]
+        styled = df_preview.head(10).style.apply(_row_style, axis=1)
+        st.dataframe(styled, use_container_width=True)
+    except Exception:
+        pass
 
 st.markdown("---")
 st.caption("© 2025 OutrankIQ • Select from three scoring strategies to target different types of keyword opportunities.")
