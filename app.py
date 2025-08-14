@@ -1,3 +1,10 @@
+# OutrankIQ — v1.3 (simple, fast mapper + stable CSV join)
+# - Signals: URL/slug, <title>, <h1>-<h3>, meta description
+# - Deterministic mapping: Primary, Secondary, AIO-preferred, VEO-preferred (≤4/page)
+# - Stable "__rowid" ensures "Mapped URL" shows up in the downloaded CSV
+# - Subdomains included automatically; auto-discover up to 5 pages OR paste up to 10 URLs
+# - Rocket button styling, persistent download
+
 import io
 import re
 import math
@@ -33,7 +40,7 @@ st.set_page_config(page_title="OutrankIQ", page_icon="🔎", layout="centered")
 st.title("OutrankIQ")
 st.caption(
     "Score keywords by Search Volume (A) and Keyword Difficulty (B) — then 🚀 crawl pages "
-    "(domain + subdomains) and map exactly four keywords per page (Primary, Secondary, AIO, VEO)."
+    "(domain + subdomains) and map four keywords per page (Primary, Secondary, AIO, VEO)."
 )
 
 # ---------- Helpers ----------
@@ -170,7 +177,7 @@ st.subheader("Bulk Scoring (CSV Upload)")
 
 uploaded = st.file_uploader("Upload CSV", type=["csv"])
 
-# Minimal, generic example for display only
+# Minimal, generic example for display only (not used in logic)
 example = pd.DataFrame({"Keyword": ["example one","example two","example three"], "Volume": [5400, 880, 12000], "KD": [38, 72, 18]})
 with st.expander("See example CSV format"):
     st.dataframe(example, use_container_width=True)
@@ -626,7 +633,7 @@ def page_vector(url: str, html: str):
     norm = math.sqrt(sum(w*w for w in weights.values())) if weights else 0.0
     return dict(weights), norm
 
-# -------- similarity + page-topics --------
+# -------- similarity + simple page-topics --------
 SPLIT_RE2 = re.compile(r"[^a-z0-9]+")
 
 def base_kw_page_score(kw_text: str, page_url: str, page_vec: dict[str,float], page_norm: float) -> float:
@@ -638,6 +645,7 @@ def base_kw_page_score(kw_text: str, page_url: str, page_vec: dict[str,float], p
     overlap = sum(page_vec.get(t, 0.0) for t in kw_tokens_exp)
     score = overlap / max(page_norm, 1e-9)
 
+    # raw token hints from URL/slug
     slug_hit = any(t in slug_tokens(page_url) for t in kw_tokens)
     if slug_hit:
         score += 0.6
@@ -656,43 +664,45 @@ def is_aio_kw(cat: str) -> bool:
 def is_veo_kw(cat: str) -> bool:
     return isinstance(cat, str) and ("VEO" in cat)
 
-# -------- assignment: exactly 4 per page, unique across site --------
+# -------- assignment (stable key): 4 per page when enough keywords exist --------
 def assign_keywords_page_first(pages_html: dict[str, str], export_df: pd.DataFrame, kw_col: str, vol_col: str):
     """
     Returns:
-      mapped_by_index: {row_index -> mapped_url}
+      mapped_by_rowid: {rowid -> mapped_url}
       page_summary: [{url, topics, picks: [kw1,kw2,kw3,kw4]}]
+    Uses export_df['__rowid'] as the stable join key so CSV mapping never misaligns.
     """
     mapped = {}
     page_summary = []
 
-    if not pages_html or kw_col is None:
+    if not pages_html or kw_col is None or "__rowid" not in export_df.columns:
         return mapped, page_summary
 
-    # Precompute page vectors and topics
-    page_profiles = []
+    # Precompute page vectors + page topics
+    profiles = []
     for u, html in pages_html.items():
         vec, norm = page_vector(u, html)
         if norm > 0:
-            page_profiles.append((u, vec, norm, top_page_terms(vec)))
+            profiles.append((u, vec, norm, top_page_terms(vec)))
 
-    if not page_profiles:
+    if not profiles:
         return mapped, page_summary
 
-    # Candidate pool = ALL keywords (no gating)
-    idx = export_df.index
-    kw_texts = export_df[kw_col].astype(str)
-    kw_scores = pd.to_numeric(export_df["Score"], errors="coerce").fillna(0).astype(float)
-    kw_vols = pd.to_numeric(export_df[vol_col], errors="coerce").fillna(0).astype(float)
-    kw_cats = export_df["Category"].fillna("")
+    df = export_df.set_index("__rowid", drop=False)
 
-    used = set()
+    idx = df.index.tolist()
+    kw_texts = df[kw_col].astype(str)
+    kw_scores = pd.to_numeric(df["Score"], errors="coerce").fillna(0).astype(float)
+    kw_vols   = pd.to_numeric(df[vol_col], errors="coerce").fillna(0).astype(float)
+    kw_cats   = df["Category"].fillna("")
 
     def tie_key(i):
         return (-kw_scores.loc[i], -kw_vols.loc[i], str(kw_texts.loc[i]).lower())
 
-    for (url, vec, norm, topics) in page_profiles:
-        # Rank all unused keywords by similarity
+    used = set()  # unique across site; remove if you want reuse across pages
+
+    for (url, vec, norm, topics) in profiles:
+        # Rank all unused keywords by similarity to this page
         sims = {}
         for i in idx:
             if i in used:
@@ -706,7 +716,7 @@ def assign_keywords_page_first(pages_html: dict[str, str], export_df: pd.DataFra
 
         def pick_next(pred=None):
             for i in ranked:
-                if i in used: 
+                if i in used:
                     continue
                 if (pred is None) or pred(i):
                     used.add(i)
@@ -718,10 +728,10 @@ def assign_keywords_page_first(pages_html: dict[str, str], export_df: pd.DataFra
         p_idx = pick_next()
         s_idx = pick_next()
 
-        # AIO (prefer AIO-tagged; else best remaining)
+        # AIO preferred
         a_idx = pick_next(lambda i: is_aio_kw(kw_cats.loc[i])) or pick_next()
 
-        # VEO (prefer VEO-tagged; else best remaining)
+        # VEO preferred
         v_idx = pick_next(lambda i: is_veo_kw(kw_cats.loc[i])) or pick_next()
 
         picks = [x for x in [p_idx, s_idx, a_idx, v_idx] if x is not None]
@@ -762,40 +772,44 @@ if map_submit:
         scored = add_scoring_columns(df_clean, vol_col, kd_col, kw_col)
 
         with st.spinner("Crawling & mapping…"):
-            html_map = {}
             if pasted.strip():
                 url_list = [line.strip() for line in pasted.splitlines() if line.strip()]
                 html_map = collect_pages_from_list(url_list)
             else:
                 html_map = collect_pages_auto(site_url)
 
-        # Prepare export (stable sort)
+        # ============ Build export_df with a STABLE ROW KEY ============
         filename_base = f"outrankiq_map_{scoring_mode.lower().replace(' ', '_')}_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
         base_cols = ([kw_col] if kw_col else []) + [vol_col, kd_col, "Score", "Tier", "Eligible", "Reason", "Category"]
         export_df = scored[base_cols].copy()
-        export_df["Strategy"] = scoring_mode
 
+        # Stable key to guarantee correct "Mapped URL" alignment in the CSV
+        export_df["__rowid"] = export_df.index.astype(int)
+
+        export_df["Strategy"] = scoring_mode
         export_df["_EligibleSort"] = export_df["Eligible"].map({"Yes": 1, "No": 0}).fillna(0)
         export_df = export_df.sort_values(
             by=["_EligibleSort", kd_col, vol_col],
             ascending=[False, True, False],
             kind="mergesort"
         ).drop(columns=["_EligibleSort"])
+        # (Do NOT reset_index here; __rowid keeps the original identity)
 
-        # Do the mapping
-        mapped_by_index, page_summary = assign_keywords_page_first(html_map, export_df, kw_col, vol_col)
+        # Do the mapping (returns mapping keyed by __rowid)
+        mapped_by_rowid, page_summary = assign_keywords_page_first(html_map, export_df, kw_col, vol_col)
 
-        # Add Mapped URL column (blank for unassigned)
-        export_df["Mapped URL"] = [mapped_by_index.get(idx, "") for idx in export_df.index]
+        # Write the column using the stable key; blanks for unassigned
+        export_df["Mapped URL"] = export_df["__rowid"].map(mapped_by_rowid).fillna("")
 
-        # Persist CSV so it doesn't disappear
-        csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")
+        # Persist CSV so it doesn't disappear (drop helper key)
+        csv_bytes = export_df.drop(columns=["__rowid"]).to_csv(index=False).encode("utf-8-sig")
         st.session_state["last_csv_bytes"] = csv_bytes
         st.session_state["last_csv_name"] = f"{filename_base}.csv"
 
-        # Show a concise summary of what got mapped (URL + topics + 4 picks)
+        # Minimal summary UI
         if page_summary:
-            st.success(f"Mapped keywords to {sum(1 for s in page_summary if s['picks'])} of {len(page_summary)} pages.")
+            assigned_pages = sum(1 for s in page_summary if s['picks'])
+            st.success(f"Mapped keywords to {assigned_pages} of {len(page_summary)} pages.")
             with st.expander("See per-page topics & selected keywords"):
                 for s in page_summary:
                     st.markdown(f"**{s['url']}**")
@@ -833,4 +847,4 @@ if "last_csv_bytes" in st.session_state and st.checkbox("Preview first 10 rows (
         pass
 
 st.markdown("---")
-st.caption("© 2025 OutrankIQ • Simple page-first mapping: URL/slug + title/H1–H3 + meta → 4 keywords per page (unique across site).")
+st.caption("© 2025 OutrankIQ • Stable CSV mapping via __rowid; simple page-first mapping with fast partial crawl.")
