@@ -32,8 +32,8 @@ except Exception:
 st.set_page_config(page_title="OutrankIQ", page_icon="🔎", layout="centered")
 st.title("OutrankIQ")
 st.caption(
-    "Score keywords by Search Volume (A) and Keyword Difficulty (B) — then 🚀 crawl 5 pages "
-    "(domain + subdomains) and map exactly four keywords per page (Primary, Secondary, AIO, VEO) when enough keywords exist."
+    "Score keywords by Search Volume (A) and Keyword Difficulty (B) — then 🚀 crawl pages "
+    "(domain + subdomains) and map exactly four keywords per page (Primary, Secondary, AIO, VEO)."
 )
 
 # ---------- Helpers ----------
@@ -170,12 +170,8 @@ st.subheader("Bulk Scoring (CSV Upload)")
 
 uploaded = st.file_uploader("Upload CSV", type=["csv"])
 
-# purely illustrative, generic sample shown only in the expander (not used anywhere)
-example = pd.DataFrame({
-    "Keyword": ["example keyword one", "example keyword two", "example keyword three"],
-    "Volume": [5400, 880, 12000],
-    "KD": [38, 72, 18]
-})
+# Minimal, generic example for display only
+example = pd.DataFrame({"Keyword": ["example one","example two","example three"], "Volume": [5400, 880, 12000], "KD": [38, 72, 18]})
 with st.expander("See example CSV format"):
     st.dataframe(example, use_container_width=True)
 
@@ -229,9 +225,10 @@ if uploaded is not None:
             st.session_state["kw_cols"] = {"kw": kw_col, "vol": vol_col, "kd": kd_col}
 
 # =========================================================
-# ========== Quick 5-Page Crawl + Mapping (Simple) ========
+# ========== Crawl + Mapping (Simple & Fast) ===============
 # =========================================================
-MAX_PAGES = 5
+DEFAULT_MAX_PAGES_AUTODISCOVER = 5          # hidden default
+DEFAULT_MAX_PASTED_URLS = 10                # cap pasted URLs
 CONCURRENCY = 12
 PARTIAL_MAX_BYTES = 150_000
 FETCH_TIMEOUT_SECS = 4
@@ -382,7 +379,7 @@ def fetch_sync_partial(url: str) -> str | None:
     except Exception:
         return None
 
-# -------- minimal sitemap discovery --------
+# -------- sitemap discovery (for auto mode) --------
 SITEMAP_RE = re.compile(r"(?i)^\s*sitemap:\s*(\S+)\s*$", re.M)
 
 async def gather_candidates_async(base: str, root_host: str) -> list[str]:
@@ -403,7 +400,7 @@ async def gather_candidates_async(base: str, root_host: str) -> list[str]:
 
         for xml in xmls:
             for u in parse_sitemap(xml if isinstance(xml, str) else ""):
-                if len(out) >= MAX_PAGES: break
+                if len(out) >= DEFAULT_MAX_PAGES_AUTODISCOVER: break
                 if is_html_like(u) and host_in_scope(u, root_host):
                     out.append(u)
     return list(dict.fromkeys(out))
@@ -423,7 +420,7 @@ def gather_candidates_sync(base: str, root_host: str) -> list[str]:
         for sm in dict.fromkeys(sm_urls):
             xml = fetch_sync_partial(sm)
             for u in parse_sitemap(xml):
-                if len(out) >= MAX_PAGES: break
+                if len(out) >= DEFAULT_MAX_PAGES_AUTODISCOVER: break
                 if is_html_like(u) and host_in_scope(u, root_host):
                     out.append(u)
     return list(dict.fromkeys(out))
@@ -459,9 +456,9 @@ def extract_links(html: str, base_url: str, root_host: str) -> list[str]:
         return s
     links = list(dict.fromkeys(links))
     links.sort(key=score, reverse=True)
-    return links[:MAX_PAGES]
+    return links[:DEFAULT_MAX_PAGES_AUTODISCOVER]
 
-def collect_quick_pages(site: str) -> dict[str, str]:
+def collect_pages_auto(site: str) -> dict[str, str]:
     base = normalize_site(site)
     if not base: return {}
     root_host = urlparse(base).netloc.lower()
@@ -478,7 +475,7 @@ def collect_quick_pages(site: str) -> dict[str, str]:
     urls = [u for u in urls if host_in_scope(u, root_host)]
     urls = list(dict.fromkeys(urls))
     urls = [base] + [u for u in urls if u != base]
-    urls = urls[:MAX_PAGES]
+    urls = urls[:DEFAULT_MAX_PAGES_AUTODISCOVER]
 
     async def fetch_many_async(cands: list[str]) -> dict[str,str]:
         out = {}
@@ -499,10 +496,10 @@ def collect_quick_pages(site: str) -> dict[str, str]:
         for u in cands:
             h = fetch_sync_partial(u)
             if h: out[u] = h
-            if len(out) >= MAX_PAGES: break
+            if len(out) >= DEFAULT_MAX_PAGES_AUTODISCOVER: break
         return out
 
-    cands = urls[:MAX_PAGES]
+    cands = urls[:DEFAULT_MAX_PAGES_AUTODISCOVER]
     if HAVE_AIOHTTP:
         try:
             html_map = asyncio.run(fetch_many_async(cands))
@@ -511,13 +508,13 @@ def collect_quick_pages(site: str) -> dict[str, str]:
     else:
         html_map = fetch_many_sync(cands)
 
-    if len(html_map) < MAX_PAGES and base not in html_map:
+    if len(html_map) < DEFAULT_MAX_PAGES_AUTODISCOVER and base not in html_map:
         home_html = fetch_sync_partial(base)
         if home_html:
             html_map[base] = home_html
-    if len(html_map) < MAX_PAGES and base in html_map:
+    if len(html_map) < DEFAULT_MAX_PAGES_AUTODISCOVER and base in html_map:
         more = extract_links(html_map[base], base, root_host)
-        need = MAX_PAGES - len(html_map)
+        need = DEFAULT_MAX_PAGES_AUTODISCOVER - len(html_map)
         more = [u for u in more if u not in html_map][:need]
         if more:
             if HAVE_AIOHTTP:
@@ -529,9 +526,43 @@ def collect_quick_pages(site: str) -> dict[str, str]:
                 extra = fetch_many_sync(more)
             html_map.update(extra)
 
-    return dict(list(html_map.items())[:MAX_PAGES])
+    return dict(list(html_map.items())[:DEFAULT_MAX_PAGES_AUTODISCOVER])
 
-# -------- page signals & vector (ONLY url/slug, title, h1-h3, meta) --------
+def collect_pages_from_list(urls: list[str]) -> dict[str, str]:
+    urls = [strip_tracking(u if "://" in u else "https://" + u.strip()) for u in urls if u.strip()]
+    urls = list(dict.fromkeys(urls))[:DEFAULT_MAX_PASTED_URLS]
+
+    async def fetch_many_async(cands: list[str]) -> dict[str,str]:
+        out = {}
+        timeout = aiohttp.ClientTimeout(total=FETCH_TIMEOUT_SECS)
+        sem = asyncio.Semaphore(CONCURRENCY)
+        async with aiohttp.ClientSession(headers=DEFAULT_HEADERS, timeout=timeout) as session:
+            async def go(u: str):
+                async with sem:
+                    h = await fetch_async_partial(session, u)
+                if h: out[u] = h
+            tasks = [asyncio.create_task(go(u)) for u in cands]
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+        return out
+
+    def fetch_many_sync(cands: list[str]) -> dict[str,str]:
+        out = {}
+        for u in cands:
+            h = fetch_sync_partial(u)
+            if h: out[u] = h
+        return out
+
+    if HAVE_AIOHTTP:
+        try:
+            html_map = asyncio.run(fetch_many_async(urls))
+        except RuntimeError:
+            html_map = fetch_many_sync(urls)
+    else:
+        html_map = fetch_many_sync(urls)
+    return html_map
+
+# -------- page vector (ONLY url/slug, title, h1-h3, meta) --------
 def extract_text_tag(html: str, tag: str) -> list[str]:
     results = []
     if not html: return results
@@ -595,9 +626,11 @@ def page_vector(url: str, html: str):
     norm = math.sqrt(sum(w*w for w in weights.values())) if weights else 0.0
     return dict(weights), norm
 
-# -------- base similarity (simple, deterministic) --------
+# -------- similarity + page-topics --------
+SPLIT_RE2 = re.compile(r"[^a-z0-9]+")
+
 def base_kw_page_score(kw_text: str, page_url: str, page_vec: dict[str,float], page_norm: float) -> float:
-    tokens = tok(kw_text)
+    tokens = [t for t in SPLIT_RE2.split(kw_text.lower()) if t and t not in STOPWORDS]
     if not tokens or not page_vec:
         return 0.0
     kw_tokens = set(tokens)
@@ -605,7 +638,6 @@ def base_kw_page_score(kw_text: str, page_url: str, page_vec: dict[str,float], p
     overlap = sum(page_vec.get(t, 0.0) for t in kw_tokens_exp)
     score = overlap / max(page_norm, 1e-9)
 
-    # raw token hints from URL/slug
     slug_hit = any(t in slug_tokens(page_url) for t in kw_tokens)
     if slug_hit:
         score += 0.6
@@ -613,34 +645,41 @@ def base_kw_page_score(kw_text: str, page_url: str, page_vec: dict[str,float], p
         score += 0.3
     return score
 
+def top_page_terms(vec: dict[str,float], n: int = 6) -> list[str]:
+    if not vec: return []
+    tops = sorted(vec.items(), key=lambda kv: kv[1], reverse=True)[:n]
+    return [t for t, _ in tops]
+
 def is_aio_kw(cat: str) -> bool:
-    return isinstance(cat, str) and ("AIO" in cat.split(",") or "AIO" in cat)
+    return isinstance(cat, str) and ("AIO" in cat)
 
 def is_veo_kw(cat: str) -> bool:
-    return isinstance(cat, str) and ("VEO" in cat.split(",") or "VEO" in cat)
+    return isinstance(cat, str) and ("VEO" in cat)
 
-# -------- assignment: exactly 4 per page when possible --------
-def assign_keywords_page_first(pages_html: dict[str, str], export_df: pd.DataFrame, kw_col: str, vol_col: str) -> dict[int, str]:
+# -------- assignment: exactly 4 per page, unique across site --------
+def assign_keywords_page_first(pages_html: dict[str, str], export_df: pd.DataFrame, kw_col: str, vol_col: str):
     """
-    Returns: mapping {row_index -> mapped_url}
-    - Unique keyword use across the site.
-    - Per page: Primary, Secondary, AIO, VEO (fallbacks fill to 4).
+    Returns:
+      mapped_by_index: {row_index -> mapped_url}
+      page_summary: [{url, topics, picks: [kw1,kw2,kw3,kw4]}]
     """
     mapped = {}
-    if not pages_html or kw_col is None:
-        return mapped
+    page_summary = []
 
-    # Precompute page vectors
+    if not pages_html or kw_col is None:
+        return mapped, page_summary
+
+    # Precompute page vectors and topics
     page_profiles = []
     for u, html in pages_html.items():
         vec, norm = page_vector(u, html)
         if norm > 0:
-            page_profiles.append((u, vec, norm))
+            page_profiles.append((u, vec, norm, top_page_terms(vec)))
 
     if not page_profiles:
-        return mapped
+        return mapped, page_summary
 
-    # Candidate pool = ALL keywords (not just Eligible) to ensure 4-per-page if possible
+    # Candidate pool = ALL keywords (no gating)
     idx = export_df.index
     kw_texts = export_df[kw_col].astype(str)
     kw_scores = pd.to_numeric(export_df["Score"], errors="coerce").fillna(0).astype(float)
@@ -649,24 +688,22 @@ def assign_keywords_page_first(pages_html: dict[str, str], export_df: pd.DataFra
 
     used = set()
 
-    # Deterministic tie-break key
     def tie_key(i):
         return (-kw_scores.loc[i], -kw_vols.loc[i], str(kw_texts.loc[i]).lower())
 
-    for (url, vec, norm) in page_profiles:
-        # Rank all unused keywords by base similarity
+    for (url, vec, norm, topics) in page_profiles:
+        # Rank all unused keywords by similarity
         sims = {}
         for i in idx:
-            if i in used: 
+            if i in used:
                 continue
             sims[i] = base_kw_page_score(kw_texts.loc[i], url, vec, norm)
-
         if not sims:
+            page_summary.append({"url": url, "topics": topics, "picks": []})
             continue
 
         ranked = sorted(sims.keys(), key=lambda i: (-sims[i],) + tie_key(i))
 
-        # Helper to pop next best satisfying a predicate
         def pick_next(pred=None):
             for i in ranked:
                 if i in used: 
@@ -677,44 +714,38 @@ def assign_keywords_page_first(pages_html: dict[str, str], export_df: pd.DataFra
                     return i
             return None
 
-        # Primary (best overall)
+        # Primary, Secondary
         p_idx = pick_next()
-        # Secondary (next overall, different from Primary)
-        s_idx = pick_next() if p_idx is not None else pick_next()
+        s_idx = pick_next()
 
-        # AIO (prefer keywords tagged AIO; else next best)
-        def is_aio(i): 
-            return is_aio_kw(kw_cats.loc[i])
-        a_idx = pick_next(is_aio) or pick_next()
+        # AIO (prefer AIO-tagged; else best remaining)
+        a_idx = pick_next(lambda i: is_aio_kw(kw_cats.loc[i])) or pick_next()
 
-        # VEO (prefer keywords tagged VEO; else next best)
-        def is_veo(i):
-            return is_veo_kw(kw_cats.loc[i])
-        v_idx = pick_next(is_veo) or pick_next()
+        # VEO (prefer VEO-tagged; else best remaining)
+        v_idx = pick_next(lambda i: is_veo_kw(kw_cats.loc[i])) or pick_next()
 
-        # Ensure exactly 4 assignments per page when possible
-        picks = [p_idx, s_idx, a_idx, v_idx]
-        need = 4 - sum(1 for x in picks if x is not None)
-        while need > 0:
-            extra = pick_next()
-            if extra is None:
-                break
-            picks.append(extra)
-            need -= 1
+        picks = [x for x in [p_idx, s_idx, a_idx, v_idx] if x is not None]
+        page_summary.append({
+            "url": url,
+            "topics": topics,
+            "picks": [kw_texts.loc[i] for i in picks]
+        })
 
-    return mapped
+    return mapped, page_summary
 
 # =========================================================
 # ================== Quick-Map Form =======================
 # =========================================================
 st.markdown("---")
-st.subheader("Site Quick-Map (5 pages)")
+st.subheader("Site Quick-Map")
 
 with st.form("quickmap_form"):
-    site_url = st.text_input(
-        "Main domain (we’ll include subdomains automatically)",
-        placeholder="https://example.com"
-    )
+    colA, colB = st.columns([1,1])
+    with colA:
+        site_url = st.text_input("Main domain (subdomains included automatically)", placeholder="https://example.com")
+    with colB:
+        pasted = st.text_area("Optional: paste up to 10 URLs (one per line). If empty, we’ll auto-discover.", height=120, placeholder="https://example.com/\nhttps://blog.example.com/post/...")
+
     map_submit = st.form_submit_button("score, crawl, and map")
 
 download_area = st.empty()
@@ -724,18 +755,22 @@ if map_submit:
     cols = st.session_state.get("kw_cols", {})
     if df_clean is None:
         st.error("Please upload your keyword CSV first.")
-    elif not (site_url or "").strip():
-        st.error("Please enter a main domain.")
+    elif not (site_url or pasted).strip():
+        st.error("Enter a domain or paste URLs.")
     else:
         kw_col = cols.get("kw"); vol_col = cols.get("vol"); kd_col = cols.get("kd")
-        # Score + categorize first (adds Score/Tier/Category; we will use ALL rows for mapping)
         scored = add_scoring_columns(df_clean, vol_col, kd_col, kw_col)
 
-        with st.spinner("Crawling 5 pages & mapping keywords…"):
-            html_map = collect_quick_pages(site_url)
+        with st.spinner("Crawling & mapping…"):
+            html_map = {}
+            if pasted.strip():
+                url_list = [line.strip() for line in pasted.splitlines() if line.strip()]
+                html_map = collect_pages_from_list(url_list)
+            else:
+                html_map = collect_pages_auto(site_url)
 
-        # Prepare export same as before
-        filename_base = f"outrankiq_quickmap_{scoring_mode.lower().replace(' ', '_')}_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
+        # Prepare export (stable sort)
+        filename_base = f"outrankiq_map_{scoring_mode.lower().replace(' ', '_')}_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
         base_cols = ([kw_col] if kw_col else []) + [vol_col, kd_col, "Score", "Tier", "Eligible", "Reason", "Category"]
         export_df = scored[base_cols].copy()
         export_df["Strategy"] = scoring_mode
@@ -747,10 +782,10 @@ if map_submit:
             kind="mergesort"
         ).drop(columns=["_EligibleSort"])
 
-        # Simple, deterministic assignment (≤4 per page; uniqueness across site)
-        mapped_by_index = assign_keywords_page_first(html_map, export_df, kw_col, vol_col)
+        # Do the mapping
+        mapped_by_index, page_summary = assign_keywords_page_first(html_map, export_df, kw_col, vol_col)
 
-        # Mapped URL column (blank for unassigned)
+        # Add Mapped URL column (blank for unassigned)
         export_df["Mapped URL"] = [mapped_by_index.get(idx, "") for idx in export_df.index]
 
         # Persist CSV so it doesn't disappear
@@ -758,15 +793,30 @@ if map_submit:
         st.session_state["last_csv_bytes"] = csv_bytes
         st.session_state["last_csv_name"] = f"{filename_base}.csv"
 
+        # Show a concise summary of what got mapped (URL + topics + 4 picks)
+        if page_summary:
+            st.success(f"Mapped keywords to {sum(1 for s in page_summary if s['picks'])} of {len(page_summary)} pages.")
+            with st.expander("See per-page topics & selected keywords"):
+                for s in page_summary:
+                    st.markdown(f"**{s['url']}**")
+                    topics = ", ".join(s.get("topics") or [])
+                    st.write(f"Page topics: {topics if topics else '—'}")
+                    picks = s.get("picks") or []
+                    if picks:
+                        st.write("Selected keywords: " + "; ".join(picks[:4]))
+                    else:
+                        st.write("No keywords selected.")
+                    st.markdown("---")
+
 # Persistent download button
 if "last_csv_bytes" in st.session_state and "last_csv_name" in st.session_state:
     with download_area:
         st.download_button(
-            label="⬇️ Download scored + quick-mapped CSV",
+            label="⬇️ Download scored + mapped CSV",
             data=st.session_state["last_csv_bytes"],
             file_name=st.session_state["last_csv_name"],
             mime="text/csv",
-            help="Each page gets up to 4 keywords (Primary, Secondary, AIO, VEO). Unassigned keywords remain blank.",
+            help="Each page gets up to 4 keywords (Primary, Secondary, AIO-preferred, VEO-preferred). Unassigned rows are left blank.",
             key="dl_quickmap"
         )
 
