@@ -32,7 +32,10 @@ except Exception:
 # ================== UI SETUP ==================
 st.set_page_config(page_title="OutrankIQ", page_icon="🔎", layout="centered")
 st.title("OutrankIQ")
-st.caption("Score keywords by Search Volume (A) and Keyword Difficulty (B) — then 🚀 crawl 5 pages (domain + subdomains) and map ≤4 keywords per page (Primary, Secondary, AIO, VEO).")
+st.caption(
+    "Score keywords by Search Volume (A) and Keyword Difficulty (B) — then 🚀 crawl 5 pages "
+    "(domain + subdomains) and map ≤4 keywords per page (Primary, Secondary, AIO, VEO)."
+)
 
 # ---------- Helpers ----------
 def find_column(df: pd.DataFrame, candidates) -> str | None:
@@ -49,9 +52,9 @@ LABEL_MAP = {6:"Elite",5:"Excellent",4:"Good",3:"Fair",2:"Low",1:"Very Low",0:"N
 COLOR_MAP = {6:"#2ecc71",5:"#a3e635",4:"#facc15",3:"#fb923c",2:"#f87171",1:"#ef4444",0:"#9ca3af"}
 
 strategy_descriptions = {
-    "Low Hanging Fruit": "Keywords that can be used to rank quickly with minimal effort. Ideal for new content or low-authority sites. Try targeting long-tail keywords, create quick-win content, and build a few internal links.",
-    "In The Game": "Moderate difficulty keywords that are within reach for growing sites. Focus on optimizing content, earning backlinks, and matching search intent to climb the ranks.",
-    "Competitive": "High-volume, high-difficulty keywords dominated by authoritative domains. Requires strong content, domain authority, and strategic SEO to compete. Great for long-term growth.",
+    "Low Hanging Fruit": "Keywords that can be used to rank quickly with minimal effort. Ideal for new content or low-authority sites.",
+    "In The Game": "Moderate difficulty keywords that are within reach for growing sites.",
+    "Competitive": "High-volume, high-difficulty keywords dominated by authoritative domains.",
 }
 
 # ---------- Strategy selector ----------
@@ -82,9 +85,9 @@ st.markdown(
 
 # ---------- Category tagging (multi-label) ----------
 CATEGORY_ORDER = ["SEO", "AIO", "VEO", "GEO", "AEO", "SXO", "LLM"]
-AIO_PAT = re.compile(r"\b(what is|what's|define|definition|how to|is|step[- ]?by[- ]?step|tutorial|guide)\b", re.I)
+AIO_PAT = re.compile(r"\b(what is|what's|define|definition|how to|is|step[- ]?by[- ]?step|tutorial|guide|overview|learn)\b", re.I)
 AEO_PAT = re.compile(r"^\s*(who|what|when|where|why|how|which|can|should)\b", re.I)
-VEO_PAT = re.compile(r"\b(near me|open now|closest|call now|directions|ok google|alexa|siri|hey google)\b", re.I)
+VEO_PAT = re.compile(r"\b(near me|nearby|local|open now|closest|phone|call|directions|address|hours|ok google|alexa|siri|hey google)\b", re.I)
 GEO_PAT = re.compile(r"\b(how to|best way to|steps? to|examples? of|checklist|framework|template)\b", re.I)
 SXO_PAT = re.compile(r"\b(best|top|compare|comparison|vs\.?|review|pricing|cost|cheap|free download|template|examples?)\b", re.I)
 LLM_PAT = re.compile(r"\b(prompt|prompting|prompt[- ]?engineering|chatgpt|gpt[- ]?\d|llm|rag|embedding|vector|few[- ]?shot|zero[- ]?shot)\b", re.I)
@@ -167,7 +170,13 @@ st.markdown("---")
 st.subheader("Bulk Scoring (CSV Upload)")
 
 uploaded = st.file_uploader("Upload CSV", type=["csv"])
-example = pd.DataFrame({"Keyword": ["best running shoes", "seo tools", "crm software"], "Volume": [5400, 880, 12000], "KD": [38, 72, 18]})
+
+# purely illustrative, generic sample shown only in the expander (not used anywhere)
+example = pd.DataFrame({
+    "Keyword": ["best running shoes", "seo tools", "crm software"],
+    "Volume": [5400, 880, 12000],
+    "KD": [38, 72, 18]
+})
 with st.expander("See example CSV format"):
     st.dataframe(example, use_container_width=True)
 
@@ -203,19 +212,19 @@ if uploaded is not None:
 
     if df_raw is not None:
         vol_col = find_column(df_raw, ["volume", "search volume", "sv"])
-        kd_col = find_column(df_raw, ["kd", "difficulty", "keyword difficulty"])
-        kw_col = find_column(df_raw, ["keyword", "query", "term"])
+        kd_col  = find_column(df_raw, ["kd", "difficulty", "keyword difficulty"])
+        kw_col  = find_column(df_raw, ["keyword", "query", "term"])
         missing = []
         if vol_col is None: missing.append("Volume")
-        if kd_col is None: missing.append("Keyword Difficulty")
-        if kw_col is None: missing.append("Keyword")
+        if kd_col  is None: missing.append("Keyword Difficulty")
+        if kw_col  is None: missing.append("Keyword")
         if missing:
             st.error("Missing required column(s): " + ", ".join(missing))
         else:
             df_raw[vol_col] = df_raw[vol_col].astype(str).str.replace(r"[,\s]", "", regex=True).str.replace("%", "", regex=False)
-            df_raw[kd_col] = df_raw[kd_col].astype(str).str.replace(r"[,\s]", "", regex=True).str.replace("%", "", regex=False)
+            df_raw[kd_col]  = df_raw[kd_col].astype(str).str.replace(r"[,\s]", "", regex=True).str.replace("%", "", regex=False)
             df_raw[vol_col] = pd.to_numeric(df_raw[vol_col], errors="coerce")
-            df_raw[kd_col] = pd.to_numeric(df_raw[kd_col], errors="coerce").clip(lower=0, upper=100)
+            df_raw[kd_col]  = pd.to_numeric(df_raw[kd_col], errors="coerce").clip(lower=0, upper=100)
 
             st.session_state["kw_df_clean"] = df_raw
             st.session_state["kw_cols"] = {"kw": kw_col, "vol": vol_col, "kd": kd_col}
@@ -224,7 +233,6 @@ if uploaded is not None:
 # ========== Quick 5-Page Crawl + Mapping (Fast) ==========
 # =========================================================
 MAX_PAGES = 5
-INCLUDE_SUBDOMAINS = True
 TIME_BUDGET_SECS = 8
 CONCURRENCY = 12
 PARTIAL_MAX_BYTES = 150_000
@@ -259,7 +267,7 @@ div[data-testid="stFormSubmitButton"] > button:hover{
 # -------- Tokenization & synonyms --------
 STOPWORDS = set("""
 a an the and or of for to in on at by with from as is are be was were this that these those it its it's your our my we you
-what when where why how which who can should could would will near open now closest call directions ok google alexa siri hey
+what when where why how which who can should could would will near nearby local open now closest call directions ok google alexa siri hey
 """.split())
 SPLIT_RE = re.compile(r"[^a-z0-9]+")
 
@@ -274,8 +282,9 @@ def micro_stem(t: str) -> str:
                 return t[: -len(suf)]
     return t
 
+# tiny synonym net (symmetric)
 _base_syn = {
-    "guide": ["tutorial","how","howto","how-to","walkthrough","step","steps"],
+    "guide": ["tutorial","how","howto","how-to","walkthrough","step","steps","handbook"],
     "compare": ["vs","versus","comparison","against"],
     "cheap": ["affordable","budget","lowcost","low-cost","inexpensive"],
     "pricing": ["price","cost","costs","rates","fees"],
@@ -286,6 +295,7 @@ _base_syn = {
     "free": ["gratis","no-cost","complimentary"],
     "software": ["tool","platform","app","application"],
     "service": ["services","agency","consulting","consultant"],
+    "near": ["nearby","local"],
 }
 from collections import defaultdict as _dd
 SYN = _dd(set)
@@ -423,6 +433,9 @@ def gather_candidates_sync(base: str, root_host: str) -> list[str]:
     return list(dict.fromkeys(out))
 
 # -------- page field extraction & vector + role signals --------
+AIO_HINT_RE = re.compile(r"\b(what|how|why|which|who|guide|tutorial|step|steps|learn|overview)\b", re.I)
+VEO_HINT_RE = re.compile(r"\b(near|nearby|local|location|address|phone|call|hours|contact|directions)\b", re.I)
+
 def extract_text_tag(html: str, tag: str) -> list[str]:
     results = []
     if not html: return results
@@ -456,9 +469,6 @@ def extract_meta_desc(html: str) -> str:
     m = re.search(r'<meta[^>]+property=["\']og:description["\'][^>]*content=["\'](.*?)["\']', html, flags=re.I | re.S)
     return m.group(1).strip() if m else ""
 
-AIO_HINT_RE = re.compile(r"\b(what|how|why|which|who|guide|tutorial|step|steps|learn|overview)\b", re.I)
-VEO_HINT_RE = re.compile(r"\b(near|location|address|phone|call|hours|contact|directions)\b", re.I)
-
 def slug_tokens(url: str) -> list[str]:
     try:
         path = urlparse(url).path or "/"
@@ -471,7 +481,10 @@ def slug_tokens(url: str) -> list[str]:
         return []
 
 def page_vector(url: str, html: str):
-    """Return (weights dict, norm, token_set, has_aio_signal, has_veo_signal)."""
+    """
+    Return: (weights, norm, token_set, has_aio_signal, has_veo_signal, header_main_lower)
+    Weights boosted: title +0.3, slug +0.5
+    """
     title_txt = " ".join(extract_text_tag(html, "title"))
     h1_txt   = " ".join(extract_text_tag(html, "h1"))
     h2_txt   = " ".join(extract_text_tag(html, "h2"))
@@ -480,9 +493,9 @@ def page_vector(url: str, html: str):
     slug_toks = slug_tokens(url)
 
     weights = defaultdict(float)
-    for t in tok(title_txt): weights[t] += 3.0
+    for t in tok(title_txt): weights[t] += 3.3
     for t in tok(h1_txt):    weights[t] += 2.5
-    for t in slug_toks:      weights[t] += 2.0
+    for t in slug_toks:      weights[t] += 2.5
     for t in tok(h2_txt):    weights[t] += 1.5
     for t in tok(h3_txt):    weights[t] += 1.2
     for t in tok(meta_txt):  weights[t] += 1.0
@@ -490,11 +503,12 @@ def page_vector(url: str, html: str):
     norm = math.sqrt(sum(w*w for w in weights.values())) if weights else 0.0
     token_set = set(weights.keys())
 
-    header_blob = " ".join([title_txt, h1_txt, h2_txt, h3_txt, meta_txt]).lower()
-    has_aio_signal = bool(AIO_HINT_RE.search(header_blob))
-    has_veo_signal = bool(VEO_HINT_RE.search(header_blob)) or ("tel:" in (html or "").lower())
+    header_blob = f"{title_txt} {h1_txt}".lower()
+    header_all  = " ".join([title_txt, h1_txt, h2_txt, h3_txt, meta_txt]).lower()
+    has_aio_signal = bool(AIO_HINT_RE.search(header_all))
+    has_veo_signal = bool(VEO_HINT_RE.search(header_all)) or ("tel:" in (html or "").lower())
 
-    return dict(weights), norm, token_set, has_aio_signal, has_veo_signal
+    return dict(weights), norm, token_set, has_aio_signal, has_veo_signal, header_blob
 
 # -------- quick collector (<= 5 pages) --------
 def extract_links(html: str, base_url: str, root_host: str) -> list[str]:
@@ -529,6 +543,49 @@ def extract_links(html: str, base_url: str, root_host: str) -> list[str]:
     links = list(dict.fromkeys(links))
     links.sort(key=score, reverse=True)
     return links[:MAX_PAGES]
+
+async def gather_candidates_async(base: str, root_host: str) -> list[str]:
+    out = []
+    timeout = aiohttp.ClientTimeout(total=FETCH_TIMEOUT_SECS)
+    async with aiohttp.ClientSession(headers=DEFAULT_HEADERS, timeout=timeout) as session:
+        robots_url = base.rstrip("/") + "/robots.txt"
+        robots_txt = await fetch_async_partial(session, robots_url) or ""
+        sm_urls = SITEMAP_RE.findall(robots_txt or "") + [base.rstrip("/") + "/sitemap.xml"]
+
+        tasks = [asyncio.create_task(fetch_async_partial(session, u)) for u in dict.fromkeys(sm_urls)]
+        xmls = await asyncio.gather(*tasks, return_exceptions=True) if tasks else []
+
+        def parse_sitemap(xml: str):
+            if not xml: return []
+            locs = re.findall(r"<loc>(.*?)</loc>", xml, flags=re.I | re.S)
+            return [strip_tracking(l.strip()) for l in locs if l.strip()]
+
+        for xml in xmls:
+            for u in parse_sitemap(xml if isinstance(xml, str) else ""):
+                if len(out) >= MAX_PAGES: break
+                if is_html_like(u) and host_in_scope(u, root_host):
+                    out.append(u)
+    return list(dict.fromkeys(out))
+
+def gather_candidates_sync(base: str, root_host: str) -> list[str]:
+    out = []
+    if HAVE_REQUESTS:
+        robots_url = base.rstrip("/") + "/robots.txt"
+        robots_txt = fetch_sync_partial(robots_url) or ""
+        sm_urls = SITEMAP_RE.findall(robots_txt or "") + [base.rstrip("/") + "/sitemap.xml"]
+
+        def parse_sitemap(xml: str):
+            if not xml: return []
+            locs = re.findall(r"<loc>(.*?)</loc>", xml, flags=re.I | re.S)
+            return [strip_tracking(l.strip()) for l in locs if l.strip()]
+
+        for sm in dict.fromkeys(sm_urls):
+            xml = fetch_sync_partial(sm)
+            for u in parse_sitemap(xml):
+                if len(out) >= MAX_PAGES: break
+                if is_html_like(u) and host_in_scope(u, root_host):
+                    out.append(u)
+    return list(dict.fromkeys(out))
 
 def collect_quick_pages(site: str) -> dict[str, str]:
     base = normalize_site(site)
@@ -600,19 +657,29 @@ def collect_quick_pages(site: str) -> dict[str, str]:
 
     return dict(list(html_map.items())[:MAX_PAGES])
 
-# -------- scoring helpers (role-aware) --------
-def base_kw_page_score(kw_text: str, page_url: str, page_vec: dict[str,float], page_norm: float) -> tuple[float, bool]:
-    kw_tokens = set(tok(kw_text))
-    if not kw_tokens or not page_vec:
+# -------- scoring helpers (role-aware v2.1) --------
+def bigrams(tokens: list[str]) -> list[str]:
+    return [" ".join([tokens[i], tokens[i+1]]) for i in range(len(tokens)-1)]
+
+def base_kw_page_score(kw_text: str, page_url: str, page_vec: dict[str,float], page_norm: float, header_main_lower: str) -> tuple[float, bool]:
+    tokens = tok(kw_text)
+    if not tokens or not page_vec:
         return 0.0, False
+    kw_tokens = set(tokens)
     kw_tokens_exp = expand_kw_tokens(kw_tokens)
     overlap = sum(page_vec.get(t, 0.0) for t in kw_tokens_exp)
     score = overlap / max(page_norm, 1e-9)
+
     slug_hit = any(t in slug_tokens(page_url) for t in kw_tokens)
     if slug_hit:
         score += 0.6
     if any(k in page_url.lower() for k in kw_tokens):
         score += 0.3
+
+    for bg in bigrams(tokens):
+        if bg and bg in header_main_lower:
+            score += 0.25
+            break
     return score, slug_hit
 
 def normalize_series_minmax(s: pd.Series) -> pd.Series:
@@ -624,19 +691,18 @@ def normalize_series_minmax(s: pd.Series) -> pd.Series:
 
 def role_scores(base: float, kw_score_norm: float, kw_vol_norm: float, kw_is_aio: bool, kw_is_veo: bool,
                 has_aio_signal: bool, has_veo_signal: bool) -> dict:
-    # thresholds tuned for lightweight overlap
-    primary = base + 0.20*kw_score_norm + 0.10*kw_vol_norm - (0.20 if (kw_is_aio or kw_is_veo) else 0.0)
-    secondary = base + 0.15*kw_score_norm + 0.10*kw_vol_norm - (0.10 if (kw_is_aio or kw_is_veo) else 0.0)
-    aio = (base + 0.10*kw_score_norm) + (0.20 if has_aio_signal else 0.0)
-    veo = (base + 0.10*kw_vol_norm) + (0.20 if has_veo_signal else 0.0)
+    primary   = base + 0.20*kw_score_norm + 0.10*kw_vol_norm - (0.10 if (kw_is_aio or kw_is_veo) else 0.0)
+    secondary = base + 0.15*kw_score_norm + 0.10*kw_vol_norm - (0.05 if (kw_is_aio or kw_is_veo) else 0.0)
+    aio       = (base + 0.10*kw_score_norm) + (0.25 if has_aio_signal else 0.0)
+    veo       = (base + 0.10*kw_vol_norm)   + (0.25 if has_veo_signal else 0.0)
     return {"P": primary, "S": secondary, "AIO": aio, "VEO": veo}
 
-ROLE_THRESHOLD = {"P": 0.18, "S": 0.18, "AIO": 0.16, "VEO": 0.16}
+ROLE_THRESHOLD = {"P": 0.12, "S": 0.12, "AIO": 0.10, "VEO": 0.10}
+FALLBACK_MIN   = 0.06  # if nothing meets threshold on a role for a page
 
-# -------- assignment: ≤4 keywords per page (P, S, AIO, VEO) --------
 def assign_keywords_to_pages(pages_profiles, export_df, kw_col, vol_col) -> dict:
     """
-    pages_profiles: list of dict(url, vec, norm, aio_flag, veo_flag)
+    pages_profiles: list of dict(url, vec, norm, aio_flag, veo_flag, header_main)
     export_df: scored + categorized + eligibility (sorted)
     returns: mapping {row_index -> mapped_url}
     """
@@ -644,85 +710,104 @@ def assign_keywords_to_pages(pages_profiles, export_df, kw_col, vol_col) -> dict
     if not pages_profiles or kw_col is None:
         return mapped
 
-    # Only Eligible keywords are considered for mapping
     eligible_idx = export_df.index[export_df["Eligible"] == "Yes"].tolist()
     if not eligible_idx:
         return mapped
 
-    # Precompute per-keyword features
-    kw_texts = export_df.loc[eligible_idx, kw_col].astype(str)
+    kw_texts  = export_df.loc[eligible_idx, kw_col].astype(str)
     kw_scores = export_df.loc[eligible_idx, "Score"].fillna(0).astype(float) / 6.0
-    kw_vol_norm = normalize_series_minmax(export_df.loc[eligible_idx, vol_col])
+    kw_vol_nm = normalize_series_minmax(export_df.loc[eligible_idx, vol_col])
+    kw_cats   = export_df.loc[eligible_idx, "Category"].fillna("").astype(str)
+    kw_is_aio = kw_cats.str.contains(r"\bAIO\b")
+    kw_is_veo = kw_cats.str.contains(r"\bVEO\b")
 
-    kw_categories = export_df.loc[eligible_idx, "Category"].fillna("").astype(str)
-    kw_is_aio = kw_categories.str.contains(r"\bAIO\b")
-    kw_is_veo = kw_categories.str.contains(r"\bVEO\b")
-
-    # Page ordering: homepage first, then by descending norm
     def page_sort_key(p):
-        u, vec, norm, aiof, veof = p["url"], p["vec"], p["norm"], p["aio_flag"], p["veo_flag"]
+        u, norm = p["url"], p["norm"]
         is_home = (urlparse(u).path or "/") == "/"
         return (0 if is_home else 1, -norm, u)
 
     pages_sorted = sorted(pages_profiles, key=page_sort_key)
+    used_keyword_ids = set()
 
-    used_keyword_ids = set()  # ensure each keyword is used at most once
+    summary = []
 
-    # For determinism, iterate pages and choose best for each role
     for p in pages_sorted:
-        url, vec, norm, aiof, veof = p["url"], p["vec"], p["norm"], p["aio_flag"], p["veo_flag"]
-        if norm <= 0:  # skip empty pages
+        url, vec, norm = p["url"], p["vec"], p["norm"]
+        aiof, veof, header_main = p["aio_flag"], p["veo_flag"], p["header_main"]
+        if norm <= 0:
             continue
 
-        chosen = {}  # role -> (row_idx, score)
+        chosen = {}
+        role_fallbacks = {}
 
-        # Compute base scores for all eligible, not-yet-used keywords
         for row_idx, text, scn, vnn, is_aio_kw, is_veo_kw in zip(
-            eligible_idx, kw_texts.tolist(), kw_scores.tolist(), kw_vol_norm.tolist(),
+            eligible_idx, kw_texts.tolist(), kw_scores.tolist(), kw_vol_nm.tolist(),
             kw_is_aio.tolist(), kw_is_veo.tolist()
         ):
             if row_idx in used_keyword_ids:
                 continue
 
-            base, _ = base_kw_page_score(text, url, vec, norm)
+            base, slug_hit = base_kw_page_score(text, url, vec, norm, header_main)
             rs = role_scores(base, scn, vnn, is_aio_kw, is_veo_kw, aiof, veof)
 
-            # Role filtering + thresholds
-            candidates = []
-            # Primary: avoid AIO/VEO if possible (penalty already applied)
             if rs["P"] >= ROLE_THRESHOLD["P"]:
-                candidates.append(("P", rs["P"]))
-            # Secondary: similar rules, will ensure different from Primary later
+                if ("P" not in chosen) or (rs["P"] > chosen["P"][1]):
+                    chosen["P"] = (row_idx, rs["P"], base, slug_hit)
+            else:
+                if ("P" not in role_fallbacks) or (base > role_fallbacks["P"][0]):
+                    role_fallbacks["P"] = (base, row_idx, slug_hit)
+
             if rs["S"] >= ROLE_THRESHOLD["S"]:
-                candidates.append(("S", rs["S"]))
-            # AIO: only if keyword is AIO
-            if is_aio_kw and rs["AIO"] >= ROLE_THRESHOLD["AIO"]:
-                candidates.append(("AIO", rs["AIO"]))
-            # VEO: only if keyword is VEO
-            if is_veo_kw and rs["VEO"] >= ROLE_THRESHOLD["VEO"]:
-                candidates.append(("VEO", rs["VEO"]))
+                if ("S" not in chosen) or (rs["S"] > chosen["S"][1]):
+                    chosen["S"] = (row_idx, rs["S"], base, slug_hit)
+            else:
+                if ("S" not in role_fallbacks) or (base > role_fallbacks["S"][0]):
+                    role_fallbacks["S"] = (base, row_idx, slug_hit)
 
-            # Try to place this keyword into the best-scoring available role on this page
-            for role, val in sorted(candidates, key=lambda x: (-x[1], x[0])):
-                # Don't allow Secondary to pick the same keyword as Primary on this page
-                if role == "S" and "P" in chosen and chosen["P"][0] == row_idx:
-                    continue
-                if role not in chosen or val > chosen[role][1]:
-                    chosen[role] = (row_idx, val)
+            if is_aio_kw:
+                if rs["AIO"] >= ROLE_THRESHOLD["AIO"]:
+                    if ("AIO" not in chosen) or (rs["AIO"] > chosen["AIO"][1]):
+                        chosen["AIO"] = (row_idx, rs["AIO"], base, slug_hit)
+                else:
+                    if ("AIO" not in role_fallbacks) or (base > role_fallbacks["AIO"][0]):
+                        role_fallbacks["AIO"] = (base, row_idx, slug_hit)
 
-        # Commit picks with tie-breaks: prioritize roles in order P, S, AIO, VEO
-        assigned_count = 0
+            if is_veo_kw:
+                if rs["VEO"] >= ROLE_THRESHOLD["VEO"]:
+                    if ("VEO" not in chosen) or (rs["VEO"] > chosen["VEO"][1]):
+                        chosen["VEO"] = (row_idx, rs["VEO"], base, slug_hit)
+                else:
+                    if ("VEO" not in role_fallbacks) or (base > role_fallbacks["VEO"][0]):
+                        role_fallbacks["VEO"] = (base, row_idx, slug_hit)
+
+        if "P" in chosen and "S" in chosen and chosen["P"][0] == chosen["S"][0]:
+            del chosen["S"]
+
+        for role in ("P", "S", "AIO", "VEO"):
+            if role not in chosen and role in role_fallbacks:
+                base_val, row_idx, slug_hit = role_fallbacks[role]
+                if slug_hit and base_val >= FALLBACK_MIN:
+                    chosen[role] = (row_idx, ROLE_THRESHOLD[role], base_val, slug_hit)
+                elif base_val >= FALLBACK_MIN:
+                    chosen[role] = (row_idx, ROLE_THRESHOLD[role]-1e-6, base_val, slug_hit)
+
+        assigned = 0
         for role in ("P", "S", "AIO", "VEO"):
             if role in chosen:
-                row_idx, _ = chosen[role]
+                row_idx = chosen[role][0]
                 if row_idx in used_keyword_ids:
-                    continue  # already used by this or earlier page
+                    continue
                 mapped[row_idx] = url
                 used_keyword_ids.add(row_idx)
-                assigned_count += 1
-            if assigned_count >= 4:
-                break  # max 4 per page
+                assigned += 1
+            if assigned >= 4:
+                break
 
+        summary.append({
+            "url": url, "aio_flag": aiof, "veo_flag": veof, "assigned": assigned
+        })
+
+    st.session_state["mapping_summary"] = summary
     return mapped
 
 # =========================================================
@@ -732,7 +817,10 @@ st.markdown("---")
 st.subheader("Site Quick-Map (5 pages)")
 
 with st.form("quickmap_form"):
-    site_url = st.text_input("Main domain (we’ll include subdomains automatically)", placeholder="https://example.com")
+    site_url = st.text_input(
+        "Main domain (we’ll include subdomains automatically)",
+        placeholder="https://example.com"
+    )
     map_submit = st.form_submit_button("score, crawl, and map")
 
 download_area = st.empty()
@@ -746,21 +834,20 @@ if map_submit:
         st.error("Please enter a main domain.")
     else:
         kw_col = cols.get("kw"); vol_col = cols.get("vol"); kd_col = cols.get("kd")
-        # Score + categorize (adds Eligible/Score/Category)
         scored = add_scoring_columns(df_clean, vol_col, kd_col, kw_col)
 
-        # Crawl up to 5 pages (fast)
         with st.spinner("Crawling 5 pages & mapping keywords…"):
             html_map = collect_quick_pages(site_url)
 
-        # Build page profiles (vector + role signals)
         pages_profiles = []
         for u, html in html_map.items():
-            vec, norm, tset, aiof, veof = page_vector(u, html)
+            vec, norm, tset, aiof, veof, header_main = page_vector(u, html)
             if vec and norm > 0.0:
-                pages_profiles.append({"url": u, "vec": vec, "norm": norm, "aio_flag": aiof, "veo_flag": veof})
+                pages_profiles.append({
+                    "url": u, "vec": vec, "norm": norm,
+                    "aio_flag": aiof, "veo_flag": veof, "header_main": header_main
+                })
 
-        # Prepare export (same sorting as before)
         filename_base = f"outrankiq_quickmap_{scoring_mode.lower().replace(' ', '_')}_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
         base_cols = ([kw_col] if kw_col else []) + [vol_col, kd_col, "Score", "Tier", "Eligible", "Reason", "Category"]
         export_df = scored[base_cols].copy()
@@ -773,19 +860,22 @@ if map_submit:
             kind="mergesort"
         ).drop(columns=["_EligibleSort"])
 
-        # ---- NEW: page-first assignment, ≤4 keywords per page ----
         mapped_by_index = assign_keywords_to_pages(pages_profiles, export_df, kw_col, vol_col)
+        export_df["Mapped URL"] = [mapped_by_index.get(idx, "") for idx in export_df.index]
 
-        # Create Mapped URL column (blank by default; fill where selected)
-        mapped_urls = []
-        for idx in export_df.index:
-            mapped_urls.append(mapped_by_index.get(idx, ""))  # blank for unassigned
-        export_df["Mapped URL"] = mapped_urls
-
-        # Persist CSV so it doesn't disappear
         csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")
         st.session_state["last_csv_bytes"] = csv_bytes
         st.session_state["last_csv_name"] = f"{filename_base}.csv"
+
+        summary = st.session_state.get("mapping_summary", [])
+        if summary:
+            assigned_total = sum(s["assigned"] for s in summary)
+            st.success(f"Mapped {assigned_total} keywords across {len(summary)} pages (≤4 per page).")
+            for s in summary:
+                flags = []
+                if s["aio_flag"]: flags.append("AIO")
+                if s["veo_flag"]: flags.append("VEO")
+                st.write(f"- {s['url']} — assigned {s['assigned']} {'(' + ', '.join(flags) + ')' if flags else ''}")
 
 # Persistent download button
 if "last_csv_bytes" in st.session_state and "last_csv_name" in st.session_state:
@@ -806,10 +896,10 @@ if "last_csv_bytes" in st.session_state and st.checkbox("Preview first 10 rows (
         def _row_style(row):
             color = COLOR_MAP.get(int(row.get("Score", 0)) if pd.notna(row.get("Score", 0)) else 0, "#9ca3af")
             return [("background-color:" + color + "; color:black;") if c in ("Score","Tier") else "" for c in row.index]
-        styled = df_preview.head(10).style.apply(_row_style, axis=1)
+        styled = df_preview.head(10).style.apply(_row_style, axis1=1)
         st.dataframe(styled, use_container_width=True)
     except Exception:
         pass
 
 st.markdown("---")
-st.caption("© 2025 OutrankIQ • Page-first keyword mapping: ≤4 keywords per page for tight, intent-aligned site maps.")
+st.caption("© 2025 OutrankIQ • Page-first keyword mapping (≤4 per page), fast 5-page crawl, no hardcoded test data.")
