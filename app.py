@@ -3,7 +3,7 @@ import re
 import math
 import time
 import asyncio
-from collections import defaultdict, deque
+from collections import defaultdict
 from datetime import datetime
 from urllib.parse import urlparse, urljoin, urlunparse, parse_qsl, urlencode
 
@@ -12,7 +12,7 @@ import streamlit as st
 
 # ---------- Optional libs ----------
 try:
-    from bs4 import BeautifulSoup  # for robust parsing if available
+    from bs4 import BeautifulSoup
     HAVE_BS4 = True
 except Exception:
     HAVE_BS4 = False
@@ -61,7 +61,7 @@ if scoring_mode == "Low Hanging Fruit":
     MIN_VALID_VOLUME = 10
     KD_BUCKETS = [(0, 15, 6), (16, 20, 5), (21, 25, 4), (26, 50, 3), (51, 75, 2), (76, 100, 1)]
 elif scoring_mode == "In The Game":
-    MIN_VALID_VOLUME = 1500  # per your correction
+    MIN_VALID_VOLUME = 1500
     KD_BUCKETS = [(0, 30, 6), (31, 45, 5), (46, 60, 4), (61, 70, 3), (71, 80, 2), (81, 100, 1)]
 elif scoring_mode == "Competitive":
     MIN_VALID_VOLUME = 3000
@@ -109,7 +109,6 @@ def categorize_keyword(kw: str) -> list[str]:
 
 # ---------- Scoring ----------
 def calculate_score(volume: float, kd: float) -> int:
-    """Return score 0-6, but ONLY if eligible (volume >= min)."""
     if pd.isna(volume) or pd.isna(kd):
         return 0
     if volume < MIN_VALID_VOLUME:
@@ -122,23 +121,19 @@ def calculate_score(volume: float, kd: float) -> int:
 
 def add_scoring_columns(df: pd.DataFrame, volume_col: str, kd_col: str, kw_col: str | None) -> pd.DataFrame:
     out = df.copy()
-
     def _eligibility_reason(vol, kd):
         if pd.isna(vol) or pd.isna(kd):
             return "No", "Invalid Volume/KD"
         if vol < MIN_VALID_VOLUME:
             return "No", f"Below min volume for {scoring_mode} ({MIN_VALID_VOLUME})"
         return "Yes", ""
-
     eligible, reason = zip(*(_eligibility_reason(v, k) for v, k in zip(out[volume_col], out[kd_col])))
     out["Eligible"] = list(eligible)
     out["Reason"] = list(reason)
     out["Score"] = [calculate_score(v, k) for v, k in zip(out[volume_col], out[kd_col])]
     out["Tier"] = out["Score"].map(LABEL_MAP).fillna("Not rated")
-
     kw_series = out[kw_col] if kw_col else pd.Series([""] * len(out))
     out["Category"] = [", ".join(categorize_keyword(str(k))) for k in kw_series]
-
     ordered = ([kw_col] if kw_col else []) + [volume_col, kd_col, "Score", "Tier", "Eligible", "Reason", "Category"]
     remaining = [c for c in out.columns if c not in ordered]
     out = out[ordered + remaining]
@@ -149,16 +144,15 @@ st.subheader("Single Keyword Score")
 with st.form("single"):
     col1, col2 = st.columns(2)
     with col1:
-        vol_val = st.number_input("Search Volume (A)", min_value=0, step=10, value=0)
+        vol_val = st.number_input("Search Volume (A)", min_value=0, step=10, value=0, key="single_vol")
     with col2:
-        kd_val = st.number_input("Keyword Difficulty (B)", min_value=0, step=1, value=0)
-
-    if st.form_submit_button("Calculate Score"):
+        kd_val = st.number_input("Keyword Difficulty (B)", min_value=0, step=1, value=0, key="single_kd")
+    if st.form_submit_button("Calculate Score", key="single_btn"):
         sc = calculate_score(vol_val, kd_val)
         label = LABEL_MAP.get(sc, "Not rated")
         color = COLOR_MAP.get(sc, "#9ca3af")
         if vol_val < MIN_VALID_VOLUME:
-            st.warning(f"The selected strategy requires a minimum search volume of {MIN_VALID_VOLUME}. Please enter a volume that meets the threshold.")
+            st.warning(f"The selected strategy requires a minimum search volume of {MIN_VALID_VOLUME}.")
         st.markdown(
             f"""
             <div style='background-color:{color}; padding:16px; border-radius:8px; text-align:center;'>
@@ -171,15 +165,12 @@ with st.form("single"):
 st.markdown("---")
 st.subheader("Bulk Scoring (CSV Upload)")
 
-uploaded = st.file_uploader("Upload CSV", type=["csv"])
+uploaded = st.file_uploader("Upload CSV", type=["csv"], key="csv_uploader")
 example = pd.DataFrame({"Keyword": ["best running shoes", "seo tools", "crm software"], "Volume": [5400, 880, 12000], "KD": [38, 72, 18]})
 with st.expander("See example CSV format"):
     st.dataframe(example, use_container_width=True)
 
-# ---------- Robust CSV reader + numeric cleaning ----------
-df = None
-kw_col = vol_col = kd_col = None
-
+# ---------- CSV reader + cleaning (persist to session) ----------
 if uploaded is not None:
     raw = uploaded.getvalue()
 
@@ -204,37 +195,38 @@ if uploaded is not None:
         raise last_err
 
     try:
-        df = try_read(raw)
+        df_raw = try_read(raw)
     except Exception:
-        st.error("Could not read the file. Please ensure it's a CSV (or TSV) exported from Excel/Sheets and try again.")
-        st.stop()
+        st.error("Could not read the file. Please ensure it's a CSV/TSV exported from Excel/Sheets.")
+        df_raw = None
 
-    vol_col = find_column(df, ["volume", "search volume", "sv"])
-    kd_col = find_column(df, ["kd", "difficulty", "keyword difficulty"])
-    kw_col = find_column(df, ["keyword", "query", "term"])
+    if df_raw is not None:
+        vol_col = find_column(df_raw, ["volume", "search volume", "sv"])
+        kd_col = find_column(df_raw, ["kd", "difficulty", "keyword difficulty"])
+        kw_col = find_column(df_raw, ["keyword", "query", "term"])
+        missing = []
+        if vol_col is None: missing.append("Volume")
+        if kd_col is None: missing.append("Keyword Difficulty")
+        if kw_col is None: missing.append("Keyword")
+        if missing:
+            st.error("Missing required column(s): " + ", ".join(missing))
+        else:
+            # Clean numbers
+            df_raw[vol_col] = df_raw[vol_col].astype(str).str.replace(r"[,\s]", "", regex=True).str.replace("%", "", regex=False)
+            df_raw[kd_col] = df_raw[kd_col].astype(str).str.replace(r"[,\s]", "", regex=True).str.replace("%", "", regex=False)
+            df_raw[vol_col] = pd.to_numeric(df_raw[vol_col], errors="coerce")
+            df_raw[kd_col] = pd.to_numeric(df_raw[kd_col], errors="coerce").clip(lower=0, upper=100)
 
-    missing = []
-    if vol_col is None: missing.append("Volume")
-    if kd_col is None: missing.append("Keyword Difficulty")
-    if kw_col is None: missing.append("Keyword")
-    if missing:
-        st.error("Missing required column(s): " + ", ".join(missing))
-        df = None
-    else:
-        # Clean numbers
-        df[vol_col] = df[vol_col].astype(str).str.replace(r"[,\s]", "", regex=True).str.replace("%", "", regex=False)
-        df[kd_col] = df[kd_col].astype(str).str.replace(r"[,\s]", "", regex=True).str.replace("%", "", regex=False)
-        df[vol_col] = pd.to_numeric(df[vol_col], errors="coerce")
-        df[kd_col] = pd.to_numeric(df[kd_col], errors="coerce").clip(lower=0, upper=100)
+            # Persist for later (so the button never disables)
+            st.session_state["kw_df_clean"] = df_raw
+            st.session_state["kw_cols"] = {"kw": kw_col, "vol": vol_col, "kd": kd_col}
 
 # =========================================================
 # ========== Quick 5-Page Crawl + Mapping (Fast) ==========
 # =========================================================
-
-# Hidden crawl defaults
-MAX_PAGES = 5                      # fixed, not shown in UI
-INCLUDE_SUBDOMAINS = True          # always include
-TIME_BUDGET_SECS = 8               # hard cap for entire crawl
+MAX_PAGES = 5
+INCLUDE_SUBDOMAINS = True
+TIME_BUDGET_SECS = 8
 CONCURRENCY = 12
 PARTIAL_MAX_BYTES = 150_000
 FETCH_TIMEOUT_SECS = 4
@@ -247,7 +239,7 @@ DEFAULT_HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
-# 🚀 Rocket button CSS
+# 🚀 Rocket button CSS (affects all form submit buttons)
 st.markdown("""
 <style>
 div[data-testid="stFormSubmitButton"] > button {
@@ -265,13 +257,7 @@ div[data-testid="stFormSubmitButton"] > button:hover{
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown("---")
-st.subheader("Site Quick-Map (5 pages)")
-with st.form("quickmap"):
-    site_url = st.text_input("Main domain (we’ll include subdomains automatically)", placeholder="https://example.com")
-    btn = st.form_submit_button("score, crawl, and map", disabled=not (df is not None and (site_url or "").strip()))
-
-# -------- Tokenization & synonyms (lightweight) --------
+# -------- Tokenization & synonyms --------
 STOPWORDS = set("""
 a an the and or of for to in on at by with from as is are be was were this that these those it its it's your our my we you
 what when where why how which who can should could would will near open now closest call directions ok google alexa siri hey
@@ -289,7 +275,6 @@ def micro_stem(t: str) -> str:
                 return t[: -len(suf)]
     return t
 
-# very small semantic helpers (symmetric map)
 _base_syn = {
     "guide": ["tutorial","how","howto","how-to","walkthrough","step","steps"],
     "compare": ["vs","versus","comparison","against"],
@@ -303,7 +288,8 @@ _base_syn = {
     "software": ["tool","platform","app","application"],
     "service": ["services","agency","consulting","consultant"],
 }
-SYN = defaultdict(set)
+from collections import defaultdict as _dd
+SYN = _dd(set)
 for k, arr in _base_syn.items():
     k2 = micro_stem(k)
     for v in arr:
@@ -394,7 +380,7 @@ def fetch_sync_partial(url: str) -> str | None:
 # -------- minimal sitemap discovery --------
 SITEMAP_RE = re.compile(r"(?i)^\s*sitemap:\s*(\S+)\s*$", re.M)
 
-async def gather_candidates_async(base: str, root_host: str, deadline: float) -> list[str]:
+async def gather_candidates_async(base: str, root_host: str) -> list[str]:
     out = []
     timeout = aiohttp.ClientTimeout(total=FETCH_TIMEOUT_SECS)
     async with aiohttp.ClientSession(headers=DEFAULT_HEADERS, timeout=timeout) as session:
@@ -402,7 +388,6 @@ async def gather_candidates_async(base: str, root_host: str, deadline: float) ->
         robots_txt = await fetch_async_partial(session, robots_url) or ""
         sm_urls = SITEMAP_RE.findall(robots_txt or "") + [base.rstrip("/") + "/sitemap.xml"]
 
-        # fetch sitemaps concurrently
         tasks = [asyncio.create_task(fetch_async_partial(session, u)) for u in dict.fromkeys(sm_urls)]
         xmls = await asyncio.gather(*tasks, return_exceptions=True) if tasks else []
 
@@ -416,7 +401,7 @@ async def gather_candidates_async(base: str, root_host: str, deadline: float) ->
                 if len(out) >= MAX_PAGES: break
                 if is_html_like(u) and host_in_scope(u, root_host):
                     out.append(u)
-        return list(dict.fromkeys(out))  # dedupe, keep order
+    return list(dict.fromkeys(out))
 
 def gather_candidates_sync(base: str, root_host: str) -> list[str]:
     out = []
@@ -438,7 +423,7 @@ def gather_candidates_sync(base: str, root_host: str) -> list[str]:
                     out.append(u)
     return list(dict.fromkeys(out))
 
-# -------- quick link discovery (homepage -> internal links) --------
+# -------- simple link discovery from homepage --------
 def extract_links(html: str, base_url: str, root_host: str) -> list[str]:
     links = []
     if not html: return links
@@ -457,7 +442,7 @@ def extract_links(html: str, base_url: str, root_host: str) -> list[str]:
             url = urljoin(base_url, href.strip())
             if is_html_like(url) and host_in_scope(url, root_host):
                 links.append(strip_tracking(url))
-    # prioritize likely content
+
     def score(u: str) -> int:
         p = urlparse(u)
         path = (p.path or "/").lower()
@@ -518,7 +503,6 @@ def extract_meta_desc(html: str) -> str:
     return m.group(1).strip() if m else ""
 
 def page_vector(url: str, html: str) -> tuple[dict[str,float], float, set[str]]:
-    """Weighted tokens from slug/title/meta/H1–H3 + norm + set of tokens (for overlaps)."""
     title_txt = " ".join(extract_text_tag(html, "title"))
     h1_txt   = " ".join(extract_text_tag(html, "h1"))
     h2_txt   = " ".join(extract_text_tag(html, "h2"))
@@ -547,11 +531,11 @@ def collect_quick_pages(site: str) -> dict[str, str]:
     start = time.time()
     deadline = start + TIME_BUDGET_SECS
 
-    # 1) try sitemap-derived URLs
+    # 1) sitemap candidates
     urls = []
     if HAVE_AIOHTTP:
         try:
-            urls = asyncio.run(gather_candidates_async(base, root_host, deadline))
+            urls = asyncio.run(gather_candidates_async(base, root_host))
         except RuntimeError:
             urls = gather_candidates_sync(base, root_host)
     else:
@@ -559,15 +543,10 @@ def collect_quick_pages(site: str) -> dict[str, str]:
 
     urls = [u for u in urls if host_in_scope(u, root_host)]
     urls = list(dict.fromkeys(urls))
-
-    # Ensure homepage is included at least
     urls = [base] + [u for u in urls if u != base]
     urls = urls[:MAX_PAGES]
 
-    # 2) fetch homepage if we still lack enough URLs, and mine links
-    html_map: dict[str, str] = {}
-
-    # Fetch function (async fast path)
+    # fetchers
     async def fetch_many_async(cands: list[str]) -> dict[str,str]:
         out = {}
         timeout = aiohttp.ClientTimeout(total=FETCH_TIMEOUT_SECS)
@@ -583,7 +562,6 @@ def collect_quick_pages(site: str) -> dict[str, str]:
                 await asyncio.gather(*tasks, return_exceptions=True)
         return out
 
-    # Fetch function (sync fallback)
     def fetch_many_sync(cands: list[str]) -> dict[str,str]:
         out = {}
         for u in cands:
@@ -603,65 +581,50 @@ def collect_quick_pages(site: str) -> dict[str, str]:
     else:
         html_map = fetch_many_sync(cands)
 
-    # mine links from homepage if needed
-    if len(html_map) < MAX_PAGES and base not in html_map and time.time() < deadline:
-        # try to fetch homepage
-        home_html = fetch_sync_partial(base) if not HAVE_AIOHTTP else (html_map.get(base) or fetch_sync_partial(base))
+    # mine homepage links if needed
+    if len(html_map) < MAX_PAGES and base not in html_map:
+        home_html = fetch_sync_partial(base)
         if home_html:
             html_map[base] = home_html
-    if len(html_map) < MAX_PAGES and time.time() < deadline and base in html_map:
-        more_links = extract_links(html_map[base], base, root_host)
-        more_links = [u for u in more_links if u not in html_map]
+    if len(html_map) < MAX_PAGES and base in html_map:
+        more = extract_links(html_map[base], base, root_host)
         need = MAX_PAGES - len(html_map)
-        more_links = more_links[:need]
-        if more_links:
+        more = [u for u in more if u not in html_map][:need]
+        if more:
             if HAVE_AIOHTTP:
                 try:
-                    more = asyncio.run(fetch_many_async(more_links))
+                    extra = asyncio.run(fetch_many_async(more))
                 except RuntimeError:
-                    more = fetch_many_sync(more_links)
+                    extra = fetch_many_sync(more)
             else:
-                more = fetch_many_sync(more_links)
-            html_map.update(more)
+                extra = fetch_many_sync(more)
+            html_map.update(extra)
 
-    # cap to MAX_PAGES and return
-    items = list(html_map.items())[:MAX_PAGES]
-    return dict(items)
+    return dict(list(html_map.items())[:MAX_PAGES])
 
-# -------- scoring keyword->page --------
+# -------- keyword→page scoring --------
 def keyword_page_score(kw_text: str, page_url: str, page_vec: dict[str,float], page_norm: float, page_tokens: set[str]) -> float:
-    # tokens + synonyms
     kw_tokens = set(tok(kw_text))
     kw_tokens_exp = expand_kw_tokens(kw_tokens)
     if not kw_tokens_exp or not page_vec: return 0.0
-
-    # weighted overlap normalized by page norm
     overlap = sum(page_vec.get(t, 0.0) for t in kw_tokens_exp)
-    score = (overlap / max(page_norm, 1e-9))
+    score = overlap / max(page_norm, 1e-9)
 
-    # bonuses
+    # bonuses: slug & URL substring hints
     slug_toks = set(slug_tokens(page_url))
     if kw_tokens & slug_toks: score += 0.6
-    # substring soft check
-    kw_flat = "-".join(sorted(kw_tokens))
-    if any(k in page_url.lower() for k in kw_tokens):
-        score += 0.3
-    elif kw_flat and kw_flat in page_url.lower():
-        score += 0.15
-
+    if any(k in page_url.lower() for k in kw_tokens): score += 0.3
     return score
 
 def choose_best_url_for_keyword(kw_text: str, pages_profiles: list[tuple[str, dict, float, set]]) -> str:
-    # compute scores
     best_url, best_score = "", 0.0
     for url, vec, norm, tset in pages_profiles:
         s = keyword_page_score(kw_text, url, vec, norm, tset)
         if s > best_score:
             best_score, best_url = s, url
-    if best_url:
-        return best_url
+    if best_url: return best_url
 
-    # fallback: jaccard against slug tokens
+    # fallback: Jaccard vs slug
     kwt = set(micro_stem(t) for t in tok(kw_text))
     best_url, best_j = "", 0.0
     for url, vec, norm, tset in pages_profiles:
@@ -672,35 +635,42 @@ def choose_best_url_for_keyword(kw_text: str, pages_profiles: list[tuple[str, di
         j = inter / union
         if j > best_j:
             best_j, best_url = j, url
-    if best_url:
-        return best_url
-
-    # last resort: shortest descriptive path (prefer not-home)
-    def path_score(u: str) -> tuple[int,int]:
-        p = urlparse(u)
-        path = p.path or "/"
-        return (-(path != "/"), len(path))  # prefer non-root, then shorter
-    pages_profiles.sort(key=lambda x: path_score(x[0]))
-    return pages_profiles[0][0] if pages_profiles else ""
+    return best_url or (pages_profiles[0][0] if pages_profiles else "")
 
 # =========================================================
-# ================== Button Action ========================
+# ================== Button + Handler =====================
 # =========================================================
+
+st.markdown("---")
+st.subheader("Site Quick-Map (5 pages)")
+
+with st.form("quickmap"):
+    # Persist URL in session so reruns don't clear it
+    site_url = st.text_input(
+        "Main domain (we’ll include subdomains automatically)",
+        placeholder="https://example.com",
+        key="site_url_val"
+    )
+    # BUTTON IS ALWAYS ENABLED; we validate after click
+    btn = st.form_submit_button("score, crawl, and map", key="quickmap_btn")
 
 download_area = st.empty()  # persistent spot for the download
 
 if btn:
-    if df is None:
+    df_clean = st.session_state.get("kw_df_clean", None)
+    cols = st.session_state.get("kw_cols", {})
+    if df_clean is None:
         st.error("Please upload your keyword CSV first.")
-    elif not (site_url or "").strip():
+    elif not (st.session_state.get("site_url_val") or "").strip():
         st.error("Please enter a main domain.")
     else:
+        kw_col = cols.get("kw"); vol_col = cols.get("vol"); kd_col = cols.get("kd")
         # Score + categorize
-        scored = add_scoring_columns(df, vol_col, kd_col, kw_col)
+        scored = add_scoring_columns(df_clean, vol_col, kd_col, kw_col)
 
-        # Crawl up to 5 pages quickly
+        # Quick crawl up to 5 pages
         with st.spinner("Crawling 5 pages & mapping keywords…"):
-            html_map = collect_quick_pages(site_url)
+            html_map = collect_quick_pages(st.session_state["site_url_val"])
 
         # Build page profiles
         pages_profiles = []
@@ -715,7 +685,6 @@ if btn:
         export_df = scored[base_cols].copy()
         export_df["Strategy"] = scoring_mode
 
-        # Sort (eligible first, KD ↑, Volume ↓) — same as original
         export_df["_EligibleSort"] = export_df["Eligible"].map({"Yes": 1, "No": 0}).fillna(0)
         export_df = export_df.sort_values(
             by=["_EligibleSort", kd_col, vol_col],
@@ -724,10 +693,8 @@ if btn:
         ).drop(columns=["_EligibleSort"])
 
         # Map each keyword to best page (one URL)
-        mapped_urls = []
         if pages_profiles:
-            for kw in export_df[kw_col].astype(str).tolist() if kw_col else [""]*len(export_df):
-                mapped_urls.append(choose_best_url_for_keyword(kw, pages_profiles))
+            mapped_urls = [choose_best_url_for_keyword(str(kw), pages_profiles) for kw in export_df[kw_col].astype(str).tolist()]
         else:
             mapped_urls = [""] * len(export_df)
         export_df["Mapped URL"] = mapped_urls
