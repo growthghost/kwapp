@@ -141,13 +141,14 @@ def add_scoring_columns(df: pd.DataFrame, volume_col: str, kd_col: str, kw_col: 
 
 # ---------- Single keyword ----------
 st.subheader("Single Keyword Score")
-with st.form("single"):
+with st.form("single_form"):
     col1, col2 = st.columns(2)
     with col1:
-        vol_val = st.number_input("Search Volume (A)", min_value=0, step=10, value=0, key="single_vol")
+        vol_val = st.number_input("Search Volume (A)", min_value=0, step=10, value=0)
     with col2:
-        kd_val = st.number_input("Keyword Difficulty (B)", min_value=0, step=1, value=0, key="single_kd")
-    if st.form_submit_button("Calculate Score", key="single_btn"):
+        kd_val = st.number_input("Keyword Difficulty (B)", min_value=0, step=1, value=0)
+    single_submit = st.form_submit_button("Calculate Score")  # keep inside the form, no custom key
+    if single_submit:
         sc = calculate_score(vol_val, kd_val)
         label = LABEL_MAP.get(sc, "Not rated")
         color = COLOR_MAP.get(sc, "#9ca3af")
@@ -165,7 +166,7 @@ with st.form("single"):
 st.markdown("---")
 st.subheader("Bulk Scoring (CSV Upload)")
 
-uploaded = st.file_uploader("Upload CSV", type=["csv"], key="csv_uploader")
+uploaded = st.file_uploader("Upload CSV", type=["csv"])
 example = pd.DataFrame({"Keyword": ["best running shoes", "seo tools", "crm software"], "Volume": [5400, 880, 12000], "KD": [38, 72, 18]})
 with st.expander("See example CSV format"):
     st.dataframe(example, use_container_width=True)
@@ -217,7 +218,7 @@ if uploaded is not None:
             df_raw[vol_col] = pd.to_numeric(df_raw[vol_col], errors="coerce")
             df_raw[kd_col] = pd.to_numeric(df_raw[kd_col], errors="coerce").clip(lower=0, upper=100)
 
-            # Persist for later (so the button never disables)
+            # Persist for mapping step
             st.session_state["kw_df_clean"] = df_raw
             st.session_state["kw_cols"] = {"kw": kw_col, "vol": vol_col, "kd": kd_col}
 
@@ -239,7 +240,7 @@ DEFAULT_HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
-# 🚀 Rocket button CSS (affects all form submit buttons)
+# 🚀 Rocket button CSS (affects form submit buttons)
 st.markdown("""
 <style>
 div[data-testid="stFormSubmitButton"] > button {
@@ -340,7 +341,7 @@ def host_in_scope(url: str, root_host: str) -> bool:
         h = urlparse(url).netloc.lower()
         if not h: return False
         first = h.split(".")[0]
-        if first in STATIC_PREFIXES: return False
+        if first in ("cdn","static","img","images","media","assets"): return False
         return h == root_host or h.endswith("." + root_host)
     except Exception:
         return False
@@ -365,7 +366,7 @@ async def fetch_async_partial(session, url: str) -> str | None:
 def fetch_sync_partial(url: str) -> str | None:
     if not HAVE_REQUESTS: return None
     try:
-        r = requests.get(url, headers=DEFAULT_HEADERS, timeout=FETCH_TIMEOUT_SECS, stream=True)
+        r = requests.get(url, headers={"User-Agent":"OutrankIQQuickBot/1.0"}, timeout=4, stream=True)
         if r.status_code != 200: return None
         if not content_type_ok(r.headers.get("Content-Type", "")): return None
         b = b""
@@ -382,8 +383,8 @@ SITEMAP_RE = re.compile(r"(?i)^\s*sitemap:\s*(\S+)\s*$", re.M)
 
 async def gather_candidates_async(base: str, root_host: str) -> list[str]:
     out = []
-    timeout = aiohttp.ClientTimeout(total=FETCH_TIMEOUT_SECS)
-    async with aiohttp.ClientSession(headers=DEFAULT_HEADERS, timeout=timeout) as session:
+    timeout = aiohttp.ClientTimeout(total=4)
+    async with aiohttp.ClientSession(headers={"User-Agent":"OutrankIQQuickBot/1.0"}, timeout=timeout) as session:
         robots_url = base.rstrip("/") + "/robots.txt"
         robots_txt = await fetch_async_partial(session, robots_url) or ""
         sm_urls = SITEMAP_RE.findall(robots_txt or "") + [base.rstrip("/") + "/sitemap.xml"]
@@ -423,39 +424,9 @@ def gather_candidates_sync(base: str, root_host: str) -> list[str]:
                     out.append(u)
     return list(dict.fromkeys(out))
 
-# -------- simple link discovery from homepage --------
-def extract_links(html: str, base_url: str, root_host: str) -> list[str]:
-    links = []
-    if not html: return links
-    if HAVE_BS4:
-        try:
-            soup = BeautifulSoup(html, "html.parser")
-            for a in soup.find_all("a", href=True):
-                href = a["href"].strip()
-                url = urljoin(base_url, href)
-                if is_html_like(url) and host_in_scope(url, root_host):
-                    links.append(strip_tracking(url))
-        except Exception:
-            pass
-    else:
-        for href in re.findall(r'href=[\'"]?([^\'" >]+)', html):
-            url = urljoin(base_url, href.strip())
-            if is_html_like(url) and host_in_scope(url, root_host):
-                links.append(strip_tracking(url))
-
-    def score(u: str) -> int:
-        p = urlparse(u)
-        path = (p.path or "/").lower()
-        s = 0
-        if "-" in path: s += 2
-        for token in ("blog","post","article","guide","docs","learn","case","study","news"):
-            if f"/{token}/" in path: s += 2
-        if path.count("/") <= 3: s += 1
-        if len(path) <= 80: s += 1
-        return s
-    links = list(dict.fromkeys(links))
-    links.sort(key=score, reverse=True)
-    return links[:MAX_PAGES]
+# -------- page field extraction & vector --------
+def tokify(s: str) -> list[str]:
+    return [t for t in re.split(r"[^a-z0-9]+", (s or "").lower()) if t and t not in STOPWORDS and len(t) > 1]
 
 def slug_tokens(url: str) -> list[str]:
     try:
@@ -463,12 +434,11 @@ def slug_tokens(url: str) -> list[str]:
         parts = [p for p in re.split(r"[\/\-_]+", path) if p]
         toks = []
         for p in parts:
-            toks.extend(tok(p))
+            toks.extend(tokify(p))
         return toks
     except Exception:
         return []
 
-# -------- page field extraction & vector --------
 def extract_text_tag(html: str, tag: str) -> list[str]:
     results = []
     if not html: return results
@@ -511,25 +481,55 @@ def page_vector(url: str, html: str) -> tuple[dict[str,float], float, set[str]]:
     slug_toks = slug_tokens(url)
 
     weights = defaultdict(float)
-    for t in tok(title_txt): weights[t] += 3.0
-    for t in tok(h1_txt):    weights[t] += 2.5
-    for t in slug_toks:      weights[t] += 2.0
-    for t in tok(h2_txt):    weights[t] += 1.5
-    for t in tok(h3_txt):    weights[t] += 1.2
-    for t in tok(meta_txt):  weights[t] += 1.0
+    for t in tokify(title_txt): weights[t] += 3.0
+    for t in tokify(h1_txt):    weights[t] += 2.5
+    for t in slug_toks:         weights[t] += 2.0
+    for t in tokify(h2_txt):    weights[t] += 1.5
+    for t in tokify(h3_txt):    weights[t] += 1.2
+    for t in tokify(meta_txt):  weights[t] += 1.0
 
     norm = math.sqrt(sum(w*w for w in weights.values())) if weights else 0.0
     token_set = set(weights.keys())
     return dict(weights), norm, token_set
 
 # -------- quick collector (<= 5 pages) --------
+def extract_links(html: str, base_url: str, root_host: str) -> list[str]:
+    links = []
+    if not html: return links
+    if HAVE_BS4:
+        try:
+            soup = BeautifulSoup(html, "html.parser")
+            for a in soup.find_all("a", href=True):
+                href = a["href"].strip()
+                url = urljoin(base_url, href)
+                if is_html_like(url) and host_in_scope(url, root_host):
+                    links.append(strip_tracking(url))
+        except Exception:
+            pass
+    else:
+        for href in re.findall(r'href=[\'"]?([^\'" >]+)', html):
+            url = urljoin(base_url, href.strip())
+            if is_html_like(url) and host_in_scope(url, root_host):
+                links.append(strip_tracking(url))
+
+    def score(u: str) -> int:
+        p = urlparse(u)
+        path = (p.path or "/").lower()
+        s = 0
+        if "-" in path: s += 2
+        for token in ("blog","post","article","guide","docs","learn","case","study","news"):
+            if f"/{token}/" in path: s += 2
+        if path.count("/") <= 3: s += 1
+        if len(path) <= 80: s += 1
+        return s
+    links = list(dict.fromkeys(links))
+    links.sort(key=score, reverse=True)
+    return links[:MAX_PAGES]
+
 def collect_quick_pages(site: str) -> dict[str, str]:
     base = normalize_site(site)
     if not base: return {}
     root_host = urlparse(base).netloc.lower()
-
-    start = time.time()
-    deadline = start + TIME_BUDGET_SECS
 
     # 1) sitemap candidates
     urls = []
@@ -549,11 +549,10 @@ def collect_quick_pages(site: str) -> dict[str, str]:
     # fetchers
     async def fetch_many_async(cands: list[str]) -> dict[str,str]:
         out = {}
-        timeout = aiohttp.ClientTimeout(total=FETCH_TIMEOUT_SECS)
-        sem = asyncio.Semaphore(CONCURRENCY)
-        async with aiohttp.ClientSession(headers=DEFAULT_HEADERS, timeout=timeout) as session:
+        timeout = aiohttp.ClientTimeout(total=4)
+        sem = asyncio.Semaphore(12)
+        async with aiohttp.ClientSession(headers={"User-Agent":"OutrankIQQuickBot/1.0"}, timeout=timeout) as session:
             async def go(u: str):
-                if time.time() >= deadline: return
                 async with sem:
                     h = await fetch_async_partial(session, u)
                 if h: out[u] = h
@@ -565,7 +564,6 @@ def collect_quick_pages(site: str) -> dict[str, str]:
     def fetch_many_sync(cands: list[str]) -> dict[str,str]:
         out = {}
         for u in cands:
-            if time.time() >= deadline: break
             h = fetch_sync_partial(u)
             if h: out[u] = h
             if len(out) >= MAX_PAGES: break
@@ -603,14 +601,22 @@ def collect_quick_pages(site: str) -> dict[str, str]:
     return dict(list(html_map.items())[:MAX_PAGES])
 
 # -------- keyword→page scoring --------
+def expand_kw_tokens(tokens: set[str]) -> set[str]:
+    # re-declared here for clarity (uses SYN above)
+    out = set(tokens)
+    for t in list(tokens):
+        t2 = micro_stem(t)
+        out.add(t2)
+        for s in SYN.get(t2, []):
+            out.add(s)
+    return out
+
 def keyword_page_score(kw_text: str, page_url: str, page_vec: dict[str,float], page_norm: float, page_tokens: set[str]) -> float:
-    kw_tokens = set(tok(kw_text))
+    kw_tokens = set(tokify(kw_text))
     kw_tokens_exp = expand_kw_tokens(kw_tokens)
     if not kw_tokens_exp or not page_vec: return 0.0
     overlap = sum(page_vec.get(t, 0.0) for t in kw_tokens_exp)
     score = overlap / max(page_norm, 1e-9)
-
-    # bonuses: slug & URL substring hints
     slug_toks = set(slug_tokens(page_url))
     if kw_tokens & slug_toks: score += 0.6
     if any(k in page_url.lower() for k in kw_tokens): score += 0.3
@@ -623,12 +629,17 @@ def choose_best_url_for_keyword(kw_text: str, pages_profiles: list[tuple[str, di
         if s > best_score:
             best_score, best_url = s, url
     if best_url: return best_url
-
-    # fallback: Jaccard vs slug
-    kwt = set(micro_stem(t) for t in tok(kw_text))
+    # fallback: jaccard vs slug
+    def mstem(t): 
+        if len(t) > 4:
+            for suf in ("ing","ers","ies","ment","tion","s","es","ed"):
+                if t.endswith(suf) and len(t)-len(suf)>=3:
+                    return t[:-len(suf)]
+        return t
+    kwt = set(mstem(t) for t in tokify(kw_text))
     best_url, best_j = "", 0.0
     for url, vec, norm, tset in pages_profiles:
-        stoks = set(micro_stem(t) for t in slug_tokens(url))
+        stoks = set(mstem(t) for t in slug_tokens(url))
         if not stoks: continue
         inter = len(kwt & stoks)
         union = len(kwt | stoks) or 1
@@ -638,30 +649,23 @@ def choose_best_url_for_keyword(kw_text: str, pages_profiles: list[tuple[str, di
     return best_url or (pages_profiles[0][0] if pages_profiles else "")
 
 # =========================================================
-# ================== Button + Handler =====================
+# ================== Quick-Map Form =======================
 # =========================================================
-
 st.markdown("---")
 st.subheader("Site Quick-Map (5 pages)")
 
-with st.form("quickmap"):
-    # Persist URL in session so reruns don't clear it
-    site_url = st.text_input(
-        "Main domain (we’ll include subdomains automatically)",
-        placeholder="https://example.com",
-        key="site_url_val"
-    )
-    # BUTTON IS ALWAYS ENABLED; we validate after click
-    btn = st.form_submit_button("score, crawl, and map", key="quickmap_btn")
+with st.form("quickmap_form"):
+    site_url = st.text_input("Main domain (we’ll include subdomains automatically)", placeholder="https://example.com")
+    map_submit = st.form_submit_button("score, crawl, and map")  # keep inside the form, no custom key
 
-download_area = st.empty()  # persistent spot for the download
+download_area = st.empty()
 
-if btn:
+if map_submit:
     df_clean = st.session_state.get("kw_df_clean", None)
     cols = st.session_state.get("kw_cols", {})
     if df_clean is None:
         st.error("Please upload your keyword CSV first.")
-    elif not (st.session_state.get("site_url_val") or "").strip():
+    elif not (site_url or "").strip():
         st.error("Please enter a main domain.")
     else:
         kw_col = cols.get("kw"); vol_col = cols.get("vol"); kd_col = cols.get("kd")
@@ -670,7 +674,7 @@ if btn:
 
         # Quick crawl up to 5 pages
         with st.spinner("Crawling 5 pages & mapping keywords…"):
-            html_map = collect_quick_pages(st.session_state["site_url_val"])
+            html_map = collect_quick_pages(site_url)
 
         # Build page profiles
         pages_profiles = []
@@ -704,7 +708,7 @@ if btn:
         st.session_state["last_csv_bytes"] = csv_bytes
         st.session_state["last_csv_name"] = f"{filename_base}.csv"
 
-# Persistent download button (survives reruns)
+# Persistent download button
 if "last_csv_bytes" in st.session_state and "last_csv_name" in st.session_state:
     with download_area:
         st.download_button(
