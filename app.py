@@ -1,9 +1,9 @@
-# OutrankIQ — v1.3 (simple, fast mapper + stable CSV join)
-# - Signals: URL/slug, <title>, <h1>-<h3>, meta description
-# - Deterministic mapping: Primary, Secondary, AIO-preferred, VEO-preferred (≤4/page)
-# - Stable "__rowid" ensures "Mapped URL" shows up in the downloaded CSV
-# - Subdomains included automatically; auto-discover up to 5 pages OR paste up to 10 URLs
-# - Rocket button styling, persistent download
+# OutrankIQ — v1.3.2 (deterministic 4-per-page mapper + stable CSV join)
+# - Signals: URL/slug + <title>, <h1>-<h3>, meta description (falls back to slug-only if HTML blocked)
+# - Mapping per page: Primary, Secondary, AIO-preferred, VEO-preferred (unique across site)
+# - Subdomains always included; auto-discover up to 5 pages OR paste up to 10 URLs
+# - Stable "__rowid" ensures "Mapped URL" lands in the CSV even after sorts
+# - Rocket button, fast partial fetch, persistent download
 
 import io
 import re
@@ -79,17 +79,17 @@ elif scoring_mode == "Competitive":
 st.markdown(
     f"""
 <div style='background: linear-gradient(to right, #3b82f6, #60a5fa); padding:16px; border-radius:8px; margin-bottom:16px;'>
-    <div style='margin-bottom:6px; font-size:13px; color:#ffffff;'>
-        Minimum Search Volume Required: <strong>{MIN_VALID_VOLUME}</strong>
-    </div>
-    <strong style='color:#ffffff; font-size:18px;'>{scoring_mode}</strong><br>
-    <span style='color:#ffffff; font-size:15px;'>{strategy_descriptions[scoring_mode]}</span>
+  <div style='margin-bottom:6px; font-size:13px; color:#fff;'>
+    Minimum Search Volume Required: <strong>{MIN_VALID_VOLUME}</strong>
+  </div>
+  <strong style='color:#fff; font-size:18px;'>{scoring_mode}</strong><br>
+  <span style='color:#fff; font-size:15px;'>{strategy_descriptions[scoring_mode]}</span>
 </div>
 """,
     unsafe_allow_html=True,
 )
 
-# ---------- Category tagging (multi-label) ----------
+# ---------- Category tagging (multi-label lite) ----------
 CATEGORY_ORDER = ["SEO", "AIO", "VEO", "GEO", "AEO", "SXO", "LLM"]
 AIO_PAT = re.compile(r"\b(what is|what's|define|definition|how to|is|step[- ]?by[- ]?step|tutorial|guide|overview|learn)\b", re.I)
 AEO_PAT = re.compile(r"^\s*(who|what|when|where|why|how|which|can|should)\b", re.I)
@@ -177,12 +177,12 @@ st.subheader("Bulk Scoring (CSV Upload)")
 
 uploaded = st.file_uploader("Upload CSV", type=["csv"])
 
-# Minimal, generic example for display only (not used in logic)
+# Small example (visual only)
 example = pd.DataFrame({"Keyword": ["example one","example two","example three"], "Volume": [5400, 880, 12000], "KD": [38, 72, 18]})
 with st.expander("See example CSV format"):
     st.dataframe(example, use_container_width=True)
 
-# ---------- CSV reader + cleaning (persist to session) ----------
+# ---------- CSV reader + cleaning ----------
 if uploaded is not None:
     raw = uploaded.getvalue()
 
@@ -223,6 +223,7 @@ if uploaded is not None:
         if missing:
             st.error("Missing required column(s): " + ", ".join(missing))
         else:
+            # Clean numerics
             df_raw[vol_col] = df_raw[vol_col].astype(str).str.replace(r"[,\s]", "", regex=True).str.replace("%", "", regex=False)
             df_raw[kd_col]  = df_raw[kd_col].astype(str).str.replace(r"[,\s]", "", regex=True).str.replace("%", "", regex=False)
             df_raw[vol_col] = pd.to_numeric(df_raw[vol_col], errors="coerce")
@@ -515,6 +516,7 @@ def collect_pages_auto(site: str) -> dict[str, str]:
     else:
         html_map = fetch_many_sync(cands)
 
+    # Ensure at least home + a few links if sitemap was thin
     if len(html_map) < DEFAULT_MAX_PAGES_AUTODISCOVER and base not in html_map:
         home_html = fetch_sync_partial(base)
         if home_html:
@@ -569,7 +571,7 @@ def collect_pages_from_list(urls: list[str]) -> dict[str, str]:
         html_map = fetch_many_sync(urls)
     return html_map
 
-# -------- page vector (ONLY url/slug, title, h1-h3, meta) --------
+# -------- page vector (HTML + slug; falls back to slug-only) --------
 def extract_text_tag(html: str, tag: str) -> list[str]:
     results = []
     if not html: return results
@@ -614,30 +616,33 @@ def slug_tokens(url: str) -> list[str]:
     except Exception:
         return []
 
-def page_vector(url: str, html: str):
-    title_txt = " ".join(extract_text_tag(html, "title"))
-    h1_txt   = " ".join(extract_text_tag(html, "h1"))
-    h2_txt   = " ".join(extract_text_tag(html, "h2"))
-    h3_txt   = " ".join(extract_text_tag(html, "h3"))
-    meta_txt = extract_meta_desc(html)
-    slug_toks = slug_tokens(url)
-
+def page_vector(url: str, html: str | None):
+    # Build from HTML if available; always add slug tokens
     weights = defaultdict(float)
-    for t in tok(title_txt): weights[t] += 3.0
-    for t in tok(h1_txt):    weights[t] += 2.0
-    for t in slug_toks:      weights[t] += 2.5
-    for t in tok(h2_txt):    weights[t] += 1.2
-    for t in tok(h3_txt):    weights[t] += 1.0
-    for t in tok(meta_txt):  weights[t] += 0.8
+
+    # slug tokens
+    for t in slug_tokens(url): 
+        weights[t] += 2.5
+
+    if html:
+        title_txt = " ".join(extract_text_tag(html, "title"))
+        h1_txt   = " ".join(extract_text_tag(html, "h1"))
+        h2_txt   = " ".join(extract_text_tag(html, "h2"))
+        h3_txt   = " ".join(extract_text_tag(html, "h3"))
+        meta_txt = extract_meta_desc(html)
+
+        for t in tok(title_txt): weights[t] += 3.0
+        for t in tok(h1_txt):    weights[t] += 2.0
+        for t in tok(h2_txt):    weights[t] += 1.2
+        for t in tok(h3_txt):    weights[t] += 1.0
+        for t in tok(meta_txt):  weights[t] += 0.8
 
     norm = math.sqrt(sum(w*w for w in weights.values())) if weights else 0.0
     return dict(weights), norm
 
-# -------- similarity + simple page-topics --------
-SPLIT_RE2 = re.compile(r"[^a-z0-9]+")
-
+# -------- similarity + page-topics --------
 def base_kw_page_score(kw_text: str, page_url: str, page_vec: dict[str,float], page_norm: float) -> float:
-    tokens = [t for t in SPLIT_RE2.split(kw_text.lower()) if t and t not in STOPWORDS]
+    tokens = [t for t in SPLIT_RE.split(str(kw_text).lower()) if t and t not in STOPWORDS]
     if not tokens or not page_vec:
         return 0.0
     kw_tokens = set(tokens)
@@ -665,7 +670,7 @@ def is_veo_kw(cat: str) -> bool:
     return isinstance(cat, str) and ("VEO" in cat)
 
 # -------- assignment (stable key): 4 per page when enough keywords exist --------
-def assign_keywords_page_first(pages_html: dict[str, str], export_df: pd.DataFrame, kw_col: str, vol_col: str):
+def assign_keywords_page_first(pages_html: dict[str, str | None], export_df: pd.DataFrame, kw_col: str, vol_col: str):
     """
     Returns:
       mapped_by_rowid: {rowid -> mapped_url}
@@ -678,13 +683,12 @@ def assign_keywords_page_first(pages_html: dict[str, str], export_df: pd.DataFra
     if not pages_html or kw_col is None or "__rowid" not in export_df.columns:
         return mapped, page_summary
 
-    # Precompute page vectors + page topics
+    # Build page vectors & topics (HTML if present, always include slug tokens)
     profiles = []
     for u, html in pages_html.items():
         vec, norm = page_vector(u, html)
         if norm > 0:
             profiles.append((u, vec, norm, top_page_terms(vec)))
-
     if not profiles:
         return mapped, page_summary
 
@@ -699,7 +703,7 @@ def assign_keywords_page_first(pages_html: dict[str, str], export_df: pd.DataFra
     def tie_key(i):
         return (-kw_scores.loc[i], -kw_vols.loc[i], str(kw_texts.loc[i]).lower())
 
-    used = set()  # unique across site; remove if you want reuse across pages
+    used = set()  # unique across site
 
     for (url, vec, norm, topics) in profiles:
         # Rank all unused keywords by similarity to this page
@@ -728,10 +732,10 @@ def assign_keywords_page_first(pages_html: dict[str, str], export_df: pd.DataFra
         p_idx = pick_next()
         s_idx = pick_next()
 
-        # AIO preferred
+        # AIO (prefer AIO-tagged; else best remaining)
         a_idx = pick_next(lambda i: is_aio_kw(kw_cats.loc[i])) or pick_next()
 
-        # VEO preferred
+        # VEO (prefer VEO-tagged; else best remaining)
         v_idx = pick_next(lambda i: is_veo_kw(kw_cats.loc[i])) or pick_next()
 
         picks = [x for x in [p_idx, s_idx, a_idx, v_idx] if x is not None]
@@ -754,8 +758,11 @@ with st.form("quickmap_form"):
     with colA:
         site_url = st.text_input("Main domain (subdomains included automatically)", placeholder="https://example.com")
     with colB:
-        pasted = st.text_area("Optional: paste up to 10 URLs (one per line). If empty, we’ll auto-discover.", height=120, placeholder="https://example.com/\nhttps://blog.example.com/post/...")
-
+        pasted = st.text_area(
+            "Optional: paste up to 10 URLs (one per line). If empty, we’ll auto-discover up to 5.",
+            height=120,
+            placeholder="https://example.com/\nhttps://blog.example.com/post/..."
+        )
     map_submit = st.form_submit_button("score, crawl, and map")
 
 download_area = st.empty()
@@ -774,9 +781,14 @@ if map_submit:
         with st.spinner("Crawling & mapping…"):
             if pasted.strip():
                 url_list = [line.strip() for line in pasted.splitlines() if line.strip()]
-                html_map = collect_pages_from_list(url_list)
+                html_map = collect_pages_from_list(url_list)        # {url: html or None}
+                # Ensure each pasted URL is present even if fetch blocked
+                for u in url_list:
+                    html_map.setdefault(u if "://" in u else "https://" + u, html_map.get(u))
             else:
                 html_map = collect_pages_auto(site_url)
+
+        st.info(f"Pages considered: {len(html_map)}")
 
         # ============ Build export_df with a STABLE ROW KEY ============
         filename_base = f"outrankiq_map_{scoring_mode.lower().replace(' ', '_')}_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
@@ -793,7 +805,7 @@ if map_submit:
             ascending=[False, True, False],
             kind="mergesort"
         ).drop(columns=["_EligibleSort"])
-        # (Do NOT reset_index here; __rowid keeps the original identity)
+        # (Do NOT reset_index here; __rowid keeps original identity)
 
         # Do the mapping (returns mapping keyed by __rowid)
         mapped_by_rowid, page_summary = assign_keywords_page_first(html_map, export_df, kw_col, vol_col)
@@ -806,10 +818,10 @@ if map_submit:
         st.session_state["last_csv_bytes"] = csv_bytes
         st.session_state["last_csv_name"] = f"{filename_base}.csv"
 
-        # Minimal summary UI
+        # Show per-page summary (topics + the 4 picks)
         if page_summary:
             assigned_pages = sum(1 for s in page_summary if s['picks'])
-            st.success(f"Mapped keywords to {assigned_pages} of {len(page_summary)} pages.")
+            st.success(f"Selected keywords for {assigned_pages} of {len(page_summary)} pages.")
             with st.expander("See per-page topics & selected keywords"):
                 for s in page_summary:
                     st.markdown(f"**{s['url']}**")
@@ -847,4 +859,4 @@ if "last_csv_bytes" in st.session_state and st.checkbox("Preview first 10 rows (
         pass
 
 st.markdown("---")
-st.caption("© 2025 OutrankIQ • Stable CSV mapping via __rowid; simple page-first mapping with fast partial crawl.")
+st.caption("© 2025 OutrankIQ • Stable CSV mapping via __rowid; page-first selection with fast partial crawl (slug+headings/meta).")
