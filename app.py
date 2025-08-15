@@ -217,7 +217,6 @@ def _parse_sitemap_xml(xml_text: str) -> tuple[list[str], list[str]]:
         root = ET.fromstring(xml_text)
     except Exception:
         return [], []
-    ns = ""
     if root.tag.endswith("sitemapindex"):
         locs = [e.text.strip() for e in root.findall(".//{*}loc") if e.text]
         return locs, []
@@ -225,9 +224,7 @@ def _parse_sitemap_xml(xml_text: str) -> tuple[list[str], list[str]]:
         urls = [e.text.strip() for e in root.findall(".//{*}loc") if e.text]
         return [], urls
     else:
-        # Try namespace-agnostic find
         locs = [e.text.strip() for e in root.findall(".//{*}loc") if e.text]
-        # Heuristically decide
         if "sitemap" in root.tag:
             return locs, []
         return [], locs
@@ -301,27 +298,22 @@ def _extract_signals_from_html(html_text: str) -> list[str]:
     signals = []
     if HAVE_BS4:
         soup = BeautifulSoup(html_text, "html.parser")
-        # title
         if soup.title and soup.title.string:
             signals.append(soup.title.string.strip())
-        # meta description
         md = soup.find("meta", attrs={"name": "description"})
         if md and md.get("content"):
             signals.append(md["content"].strip())
-        # OG tags (allowed)
         ogt = soup.find("meta", attrs={"property": "og:title"})
         if ogt and ogt.get("content"):
             signals.append(ogt["content"].strip())
         ogd = soup.find("meta", attrs={"property": "og:description"})
         if ogd and ogd.get("content"):
             signals.append(ogd["content"].strip())
-        # H1 + up to 3 H2s
         h1 = soup.find("h1")
         if h1:
             signals.append(h1.get_text(" ", strip=True))
         for h2 in soup.find_all("h2")[:3]:
             signals.append(h2.get_text(" ", strip=True))
-        # first ~120 words from main/article or first paragraph
         main = soup.find("main") or soup.find("article")
         block = main.get_text(" ", strip=True) if main else ""
         if not block:
@@ -333,7 +325,6 @@ def _extract_signals_from_html(html_text: str) -> list[str]:
             short = " ".join(words[:120])
             signals.append(short)
     else:
-        # Minimal regex fallback
         title = re.search(r"<title[^>]*>(.*?)</title>", html_text, re.I | re.S)
         if title:
             signals.append(html.unescape(title.group(1)).strip())
@@ -346,14 +337,12 @@ def _extract_signals_from_html(html_text: str) -> list[str]:
         ogd = re.search(r'<meta[^>]+property=["\']og:description["\'][^>]+content=["\'](.*?)["\']', html_text, re.I | re.S)
         if ogd:
             signals.append(html.unescape(ogd.group(1)).strip())
-        # first ~120 words (super simple)
         text = re.sub(r"<[^>]+>", " ", html_text)
         words = text.split()
         signals.append(" ".join(words[:120]))
     return [s for s in signals if s and s.strip()]
 
 def _fetch_topic_tokens_for_urls(urls: list[str], rate_limit_per_sec: float = 2.0) -> dict[str, set[str]]:
-    """Fetch each URL and return {url: token_set_from_signals}."""
     tokens_by_url = {}
     if not HAVE_REQUESTS:
         return tokens_by_url
@@ -384,7 +373,6 @@ def _jaccard(a: set[str], b: set[str]) -> float:
 
 def _score_keyword(kw_tokens: set[str], topic_tokens: set[str]) -> float:
     base = _jaccard(kw_tokens, topic_tokens)
-    # light length boost capped
     length_boost = min(len(kw_tokens) / 6.0, 0.3)
     return base + length_boost
 
@@ -394,7 +382,6 @@ def _normalize_kw_df_for_mapping(df: pd.DataFrame, kw_col: str, vol_col: str, kd
     out["_kw_lower"] = out[kw_col].str.lower()
     out[vol_col] = pd.to_numeric(out[vol_col], errors="coerce")
     out[kd_col] = pd.to_numeric(out[kd_col], errors="coerce")
-    # Precompute tokens & features
     out["_kw_tokens"] = out[kw_col].map(lambda s: set(_normalize_text_to_tokens(s)))
     out["_is_aio"] = out[kw_col].map(_is_aio)
     out["_is_veo"] = out[kw_col].map(_is_veo)
@@ -410,35 +397,23 @@ def _auto_map_keywords_to_urls(
     dedupe_across_urls: bool = True,
     min_volume: int = 0,
 ) -> dict[str, str]:
-    """
-    Return dict {keyword_lower: url} for the keywords selected as Primary, Secondary, AIO, VEO for each URL.
-    """
     used_kw = set()
     mapping = {}
-
-    # Build a mask for eligibility if honoring thresholds
     if honor_strategy_thresholds:
         eligible_mask = (pd.to_numeric(kw_pool[vol_col], errors="coerce") >= min_volume)
     else:
         eligible_mask = pd.Series([True] * len(kw_pool), index=kw_pool.index)
 
-    # For deterministic tie-breaking
     def _sorted_candidates(df: pd.DataFrame) -> pd.DataFrame:
-        return df.sort_values(
-            by=["_match_score", vol_col, kd_col],
-            ascending=[False, False, True],
-            kind="mergesort",
-        )
+        return df.sort_values(by=["_match_score", vol_col, kd_col],
+                              ascending=[False, False, True], kind="mergesort")
 
     for url, tset in topic_tokens.items():
         if not tset:
             continue
-
-        # Compute per-URL match scores
         local = kw_pool.copy()
         local["_match_score"] = local.apply(lambda r: _score_keyword(r["_kw_tokens"], tset), axis=1)
 
-        # Selection pipeline
         def pick(mask) -> str:
             sub = local[eligible_mask & mask].copy()
             if dedupe_across_urls and used_kw:
@@ -448,31 +423,25 @@ def _auto_map_keywords_to_urls(
             sub = _sorted_candidates(sub)
             return sub.iloc[0]["_kw_lower"]
 
-        # Primary (best non-AIO/VEO)
         prim = pick(mask=(~local["_is_aio"]) & (~local["_is_veo"]))
         if prim:
             mapping[prim] = url
             used_kw.add(prim)
 
-        # Secondary (next best non-AIO/VEO, different from Primary)
         sec = pick(mask=(~local["_is_aio"]) & (~local["_is_veo"]))
         if sec:
             mapping[sec] = url
             used_kw.add(sec)
 
-        # AIO (prefer question/definition/meaning style)
         aio = pick(mask=local["_is_aio"])
         if not aio:
-            # Fallback: any good match
             aio = pick(mask=(local["_match_score"] > 0.05))
         if aio:
             mapping[aio] = url
             used_kw.add(aio)
 
-        # VEO (prefer near me / directions / pickup etc.)
         veo = pick(mask=local["_is_veo"])
         if not veo:
-            # Fallback: any reasonable match
             veo = pick(mask=(local["_match_score"] > 0.02))
         if veo:
             mapping[veo] = url
@@ -480,17 +449,60 @@ def _auto_map_keywords_to_urls(
 
     return mapping
 
-# Session store for mapping artifacts
+# =========================
+# Session store
+# =========================
 if "site_mapping" not in st.session_state:
     st.session_state.site_mapping = {
         "urls": [],
         "tokens_by_url": {},
-        "keyword_url_map": {},  # {keyword_lower: url}
+        "keyword_url_map": {},
+        "signature": None,  # to avoid re-fetching
     }
+
+# =========================
+# ALWAYS-VISIBLE: Site Mapping inputs (no buttons)
+# =========================
+st.markdown("---")
+st.subheader("Site Mapping (optional) — associate keywords to URLs")
+st.caption("Add a website so we can quietly discover pages and map your uploaded keywords to them. The mapping happens automatically in the background once both URLs and a keyword CSV are present.")
+
+colA, colB = st.columns([2, 2])
+with colA:
+    domain_input = st.text_input("Website (domain or any page URL)", placeholder="example.com")
+with colB:
+    pasted_urls = st.text_area("…or paste URLs (one per line)", placeholder="https://example.com/page-1\nhttps://example.com/page-2")
+
+# Hidden defaults (kept in background as requested)
+MAX_PAGES_DEFAULT = 250
+HONOR_THRESHOLDS_DEFAULT = True
+DEDUPE_DEFAULT = True
+
+# Build URL list automatically (prefer pasted list if present)
+urls_new = []
+if pasted_urls and pasted_urls.strip():
+    urls_new = [u.strip() for u in pasted_urls.splitlines() if u.strip()]
+elif domain_input and domain_input.strip():
+    base = _normalize_domain_input(domain_input)
+    if base and HAVE_REQUESTS:
+        try:
+            urls_new = _gather_urls_from_sitemaps(base, max_urls=MAX_PAGES_DEFAULT)
+        except Exception:
+            urls_new = []
+
+# Save URLs if changed
+if urls_new:
+    if urls_new != st.session_state.site_mapping.get("urls", []):
+        st.session_state.site_mapping["urls"] = urls_new
+        # reset tokens & mapping when urls change
+        st.session_state.site_mapping["tokens_by_url"] = {}
+        st.session_state.site_mapping["keyword_url_map"] = {}
+        st.session_state.site_mapping["signature"] = None
 
 # =========================
 # Single keyword (unchanged)
 # =========================
+st.markdown("---")
 st.subheader("Single Keyword Score")
 with st.form("single"):
     col1, col2 = st.columns(2)
@@ -514,6 +526,9 @@ with st.form("single"):
             unsafe_allow_html=True,
         )
 
+# =========================
+# Bulk Scoring (CSV Upload)
+# =========================
 st.markdown("---")
 st.subheader("Bulk Scoring (CSV Upload)")
 
@@ -524,20 +539,20 @@ example = pd.DataFrame(
 with st.expander("See example CSV format"):
     st.dataframe(example, use_container_width=True)
 
-# ---------- Robust CSV reader + numeric cleaning ----------
+# Robust CSV reader + numeric cleaning
 if uploaded is not None:
     raw = uploaded.getvalue()
 
     def try_read(bytes_data: bytes) -> pd.DataFrame:
         trials = [
-            {"encoding": None, "sep": None, "engine": "python"},  # let pandas infer
+            {"encoding": None, "sep": None, "engine": "python"},
             {"encoding": "utf-8", "sep": None, "engine": "python"},
             {"encoding": "utf-8-sig", "sep": None, "engine": "python"},
             {"encoding": "ISO-8859-1", "sep": None, "engine": "python"},
             {"encoding": "cp1252", "sep": None, "engine": "python"},
             {"encoding": "utf-16", "sep": None, "engine": "python"},
-            {"encoding": None, "sep": ",", "engine": "python"},   # force comma
-            {"encoding": None, "sep": "\t", "engine": "python"},  # TSV fallback
+            {"encoding": None, "sep": ",", "engine": "python"},
+            {"encoding": None, "sep": "\t", "engine": "python"},
         ]
         last_err = None
         for t in trials:
@@ -568,7 +583,7 @@ if uploaded is not None:
         st.error("Missing required column(s): " + ", ".join(missing))
         st.stop()
 
-    # Clean numbers (commas, spaces, percents)
+    # Clean numbers
     if vol_col:
         df[vol_col] = df[vol_col].astype(str).str.replace(r"[,\s]", "", regex=True).str.replace("%", "", regex=False)
         df[vol_col] = pd.to_numeric(df[vol_col], errors="coerce")
@@ -576,88 +591,55 @@ if uploaded is not None:
         df[kd_col] = df[kd_col].astype(str).str.replace(r"[,\s]", "", regex=True).str.replace("%", "", regex=False)
         df[kd_col] = pd.to_numeric(df[kd_col], errors="coerce").clip(lower=0, upper=100)
 
-    # Keep a normalized keyword pool for mapping downstream
+    # Prepare keyword pool for mapping
+    kw_pool = None
     if kw_col:
         kw_pool = _normalize_kw_df_for_mapping(df, kw_col=kw_col, vol_col=vol_col, kd_col=kd_col)
         st.session_state["keyword_pool_df"] = kw_pool
         st.session_state["keyword_pool_names"] = {"kw": kw_col, "vol": vol_col, "kd": kd_col}
-    else:
-        kw_pool = None
 
     scored = add_scoring_columns(df, vol_col, kd_col, kw_col)
 
     # =========================
-    # SITE MAPPING (no preview)
+    # BACKGROUND mapping (auto, no buttons)
     # =========================
-    st.markdown("---")
-    st.subheader("Site Mapping (optional) — associate keywords to URLs")
+    urls = st.session_state.site_mapping.get("urls", [])
+    have_urls = bool(urls)
+    have_kw_pool = ("keyword_pool_df" in st.session_state) and (kw_pool is not None)
 
-    colA, colB = st.columns([2, 1])
-    with colA:
-        domain_input = st.text_input("Domain (we’ll fetch sitemaps)", placeholder="example.com")
-        pasted_urls = st.text_area("…or paste URLs (one per line)", placeholder="https://example.com/page-1\nhttps://example.com/page-2")
-    with colB:
-        max_pages = st.number_input("Max pages to map", min_value=1, max_value=5000, value=250, step=50)
-        honor_thresholds = st.checkbox("Honor strategy thresholds when mapping", value=True,
-                                       help=f"Only map keywords with Volume ≥ {MIN_VALID_VOLUME}")
-        dedupe_keywords = st.checkbox("Deduplicate keywords across URLs", value=True,
-                                      help="A keyword can only be assigned to one URL during mapping.")
+    # Create a signature so we don't re-fetch pages unnecessarily
+    sig = (
+        tuple(urls),
+        scoring_mode,
+        MIN_VALID_VOLUME if HONOR_THRESHOLDS_DEFAULT else 0,
+        kw_col or "",
+        len(df),
+    )
 
-    map_actions = st.columns([1, 1, 1, 2])
-    with map_actions[0]:
-        build_from_sitemap = st.button("🧭 Build from Sitemap", use_container_width=True)
-    with map_actions[1]:
-        use_pasted_list = st.button("📄 Use Pasted List", use_container_width=True)
-    with map_actions[2]:
-        auto_map = st.button("✨ Auto-map Keywords to URLs", use_container_width=True)
-    with map_actions[3]:
-        clear_map = st.button("🧹 Clear Mapping", use_container_width=True)
-
-    # --- Handlers (silent; no preview table) ---
-    if clear_map:
-        st.session_state.site_mapping = {"urls": [], "tokens_by_url": {}, "keyword_url_map": {}}
-        st.success("Cleared mapping state.")
-
-    if build_from_sitemap:
-        base = _normalize_domain_input(domain_input)
-        if not base:
-            st.warning("Please enter a valid domain (e.g., example.com).")
-        elif not HAVE_REQUESTS:
-            st.error("The 'requests' package is required to fetch sitemaps.")
+    if have_urls and have_kw_pool and sig != st.session_state.site_mapping.get("signature"):
+        if not HAVE_REQUESTS:
+            st.warning("Mapping skipped: the 'requests' package is required to fetch website pages.")
         else:
-            urls = _gather_urls_from_sitemaps(base, max_urls=int(max_pages))
-            st.session_state.site_mapping["urls"] = urls
-            st.success(f"Discovered {len(urls)} URL(s) from sitemap.")
-    if use_pasted_list:
-        urls = [u.strip() for u in (pasted_urls or "").splitlines() if u.strip()]
-        st.session_state.site_mapping["urls"] = urls[: int(max_pages)]
-        st.success(f"Accepted {len(st.session_state.site_mapping['urls'])} pasted URL(s).")
+            tokens_by_url = st.session_state.site_mapping.get("tokens_by_url", {})
+            if not tokens_by_url:
+                tokens_by_url = _fetch_topic_tokens_for_urls(urls)
+                st.session_state.site_mapping["tokens_by_url"] = tokens_by_url
 
-    if auto_map:
-        urls = st.session_state.site_mapping.get("urls", [])
-        if not urls:
-            st.warning("No URLs to map. Build from sitemap or paste URLs first.")
-        elif "keyword_pool_df" not in st.session_state or not kw_col:
-            st.warning("Upload a keyword CSV first so we can map from your pool.")
-        elif not HAVE_REQUESTS:
-            st.error("The 'requests' package is required to fetch pages for topic extraction.")
-        else:
-            tokens_by_url = _fetch_topic_tokens_for_urls(urls)
-            st.session_state.site_mapping["tokens_by_url"] = tokens_by_url
             pool = st.session_state["keyword_pool_df"]
             names = st.session_state["keyword_pool_names"]
+
             mapping = _auto_map_keywords_to_urls(
                 kw_pool=pool,
                 kw_col=names["kw"],
                 vol_col=names["vol"],
                 kd_col=names["kd"],
                 topic_tokens=tokens_by_url,
-                honor_strategy_thresholds=honor_thresholds,
-                dedupe_across_urls=dedupe_keywords,
-                min_volume=MIN_VALID_VOLUME if honor_thresholds else 0,
+                honor_strategy_thresholds=HONOR_THRESHOLDS_DEFAULT,
+                dedupe_across_urls=DEDUPE_DEFAULT,
+                min_volume=MIN_VALID_VOLUME if HONOR_THRESHOLDS_DEFAULT else 0,
             )
             st.session_state.site_mapping["keyword_url_map"] = mapping
-            st.success(f"Mapped {len(mapping)} keyword(s) across {len(tokens_by_url)} URL(s).")
+            st.session_state.site_mapping["signature"] = sig
 
     # ---------- CSV DOWNLOAD (sorted: Yes first, KD ↑ then Volume ↓) ----------
     filename_base = f"outrankiq_{scoring_mode.lower().replace(' ', '_')}_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
@@ -667,14 +649,16 @@ if uploaded is not None:
     export_df = scored[base_cols].copy()
     export_df["Strategy"] = scoring_mode
 
-    # Inject Mapped URL (if keyword column present and we have a mapping)
+    # Inject Mapped URL column (always present when kw_col exists)
     if kw_col:
         mapping = st.session_state.site_mapping.get("keyword_url_map", {}) or {}
-        # Case-insensitive match
         def _map_kw_to_url(k):
-            kl = str(k).strip().lower()
-            return mapping.get(kl, "")
+            return mapping.get(str(k).strip().lower(), "")
         export_df["Mapped URL"] = export_df[kw_col].map(_map_kw_to_url)
+        # Place "Mapped URL" before Strategy
+        export_cols = base_cols + ["Mapped URL", "Strategy"]
+    else:
+        export_cols = base_cols + ["Strategy"]
 
     export_df["_EligibleSort"] = export_df["Eligible"].map({"Yes": 1, "No": 0}).fillna(0)
     export_df = export_df.sort_values(
@@ -682,9 +666,6 @@ if uploaded is not None:
         ascending=[False, True, False],
         kind="mergesort"
     ).drop(columns=["_EligibleSort"])
-
-    # Control final column order: place "Mapped URL" just before "Strategy" if present
-    export_cols = base_cols + (["Mapped URL"] if "Mapped URL" in export_df.columns else []) + ["Strategy"]
     export_df = export_df[export_cols]
 
     csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")
@@ -697,4 +678,4 @@ if uploaded is not None:
     )
 
 st.markdown("---")
-st.caption("© 2025 OutrankIQ • Select from three scoring strategies and optionally map keywords to URLs via sitemaps or a pasted list.")
+st.caption("© 2025 OutrankIQ • Select from three scoring strategies and optionally map keywords to URLs via domain or a pasted list.")
