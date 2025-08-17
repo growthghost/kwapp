@@ -1,5 +1,6 @@
 import io
 import re
+from pathlib import Path
 import pandas as pd
 import streamlit as st
 from datetime import datetime
@@ -12,7 +13,6 @@ except Exception:
     HAVE_BS4 = False
 
 # ---------- Brand / Theme ----------
-LOGO_PATH = "/mnt/data/OutrankIQ Grey Logo.png"
 BRAND_BG = "#747474"     # background
 BRAND_INK = "#242F40"    # secondary (ink)
 BRAND_ACCENT = "#E1B000" # accent 1
@@ -20,7 +20,7 @@ BRAND_LIGHT = "#FFFFFF"  # accent 2
 
 st.set_page_config(page_title="OutrankIQ", page_icon="🔎", layout="centered")
 
-# ---------- Global CSS (colors, components, uploader/table text colors) ----------
+# ---------- Global CSS ----------
 st.markdown(
     f"""
 <style>
@@ -49,14 +49,14 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
   border-radius: 8px !important;
 }}
 
-/* Give the selectbox an explicit caret cue */
+/* Add a visual cue on the select label */
 .stSelectbox label::after {{
   content: "  ⯆";
   color: var(--light);
   font-weight: 700;
 }}
 
-/* File uploader dropzone (and text) */
+/* File uploader dropzone & text inside */
 [data-testid="stFileUploaderDropzone"] {{
   background: rgba(255,255,255,0.98);
   border: 2px dashed var(--accent);
@@ -64,7 +64,7 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
 }}
 [data-testid="stFileUploader"] * {{ color: var(--ink) !important; }}
 
-/* Tables/dataframes inside bulk CSV area should be dark text for readability */
+/* Tables/dataframes use dark text for readability */
 .stDataFrame, .stDataFrame * , .stTable, .stTable * {{
   color: var(--ink) !important;
 }}
@@ -90,12 +90,47 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
     unsafe_allow_html=True,
 )
 
-# ---------- Header: Logo replaces main title ----------
+# ---------- Robust logo loader (fixes MediaFileStorageError) ----------
+def _load_logo_bytes() -> bytes | str | None:
+    """
+    Returns logo bytes to feed st.image(), or a URL string, or None if not found.
+    Looks in common local paths; falls back to secrets URL if provided.
+    """
+    candidates = [
+        Path("OutrankIQ Grey Logo.png"),
+        Path("assets/OutrankIQ Grey Logo.png"),
+        Path(__file__).with_name("OutrankIQ Grey Logo.png"),
+        Path(__file__).parent / "assets" / "OutrankIQ Grey Logo.png",
+        Path("/mnt/data/OutrankIQ Grey Logo.png"),  # dev/local fallback
+    ]
+    for p in candidates:
+        try:
+            if p.exists():
+                return p.read_bytes()
+        except Exception:
+            pass
+    # Optional remote URL (e.g., set in Streamlit secrets)
+    try:
+        url = st.secrets.get("LOGO_URL", None)
+        if url:
+            return url  # st.image can consume a URL string
+    except Exception:
+        pass
+    return None
+
+# ---------- Header: logo replaces main title ----------
 st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-col_l, col_c, col_r = st.columns([1, 6, 1])
-with col_c:
-    # use_container_width replaces deprecated use_column_width
-    st.image(LOGO_PATH, use_container_width=True)
+c1, c2, c3 = st.columns([1, 6, 1])
+with c2:
+    _logo = _load_logo_bytes()
+    if _logo:
+        st.image(_logo, use_container_width=True)
+    else:
+        # graceful fallback if logo can't be loaded
+        st.markdown(
+            "<h1 style='text-align:center; color: var(--light);'>OutrankIQ</h1>",
+            unsafe_allow_html=True,
+        )
 
 st.caption("Score keywords by Search Volume (A) and Keyword Difficulty (B) — with selectable scoring strategies.")
 
@@ -137,7 +172,7 @@ strategy_descriptions = {
     "Competitive": "High-volume, high-difficulty keywords dominated by authoritative domains. Requires strong content, domain authority, and strategic SEO to compete. Great for long-term growth.",
 }
 
-# ---------- Strategy selector (label shows a caret) ----------
+# ---------- Strategy selector ----------
 scoring_mode = st.selectbox("Choose Scoring Strategy", ["Low Hanging Fruit", "In The Game", "Competitive"])
 
 if scoring_mode == "Low Hanging Fruit":
@@ -354,7 +389,6 @@ if uploaded is not None:
             ).drop(columns=["_EligibleSort"])
 
             def _row_style(row):
-                # keep contrasting text for the colored cells
                 color = COLOR_MAP.get(int(row.get("Score", 0)) if pd.notna(row.get("Score", 0)) else 0, "#9ca3af")
                 return [
                     ("background-color: " + color + "; color: black;") if c in ("Score", "Tier") else ""
