@@ -49,6 +49,7 @@ st.markdown(
   --accent-rgb: 50,150,98;
   --light: {BRAND_LIGHT};
 }}
+/* App background + base text */
 .stApp {{ background-color: var(--bg); }}
 html, body, [class^="css"], [class*=" css"] {{ color: var(--light) !important; }}
 h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
@@ -87,9 +88,27 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
   content:"▾"; position:absolute; right:12px; top:50%; transform:translateY(-50%); color:var(--ink); pointer-events:none; font-size:14px; font-weight:700;
 }}
 
-/* Uploader */
+/* Uploader area + Browse button (BLUE -> WHITE on hover) */
 [data-testid="stFileUploaderDropzone"] {{ background: rgba(255,255,255,0.98); border: 2px dashed var(--accent); }}
 [data-testid="stFileUploader"] * {{ color: var(--ink) !important; }}
+[data-testid="stFileUploaderDropzone"] button,
+[data-testid="stFileUploaderDropzone"] label,
+[data-testid="stFileUploaderDropzone"] [role="button"] {{
+  background-color: var(--ink) !important;
+  color: #ffffff !important;
+  border: 2px solid var(--ink) !important;
+  border-radius: 8px !important;
+  padding: 2px 10px !important;
+  font-weight: 700 !important;
+  transition: background-color .15s ease, color .15s ease, border-color .15s ease;
+}}
+[data-testid="stFileUploaderDropzone"] button:hover,
+[data-testid="stFileUploaderDropzone"] label:hover,
+[data-testid="stFileUploaderDropzone"] [role="button"]:hover {{
+  background-color: var(--light) !important; /* white on hover */
+  color: var(--ink) !important;             /* blue text */
+  border-color: var(--ink) !important;      /* blue border */
+}}
 
 /* Tables */
 .stDataFrame, .stDataFrame *, .stTable, .stTable * {{ color: var(--ink) !important; }}
@@ -247,6 +266,20 @@ def _same_site(url: str, base_host: str, base_root: str, include_subdomains: boo
     except Exception:
         return False
 
+# ---------- URL normalization for stable keys ----------
+def _url_key(u: str) -> str:
+    """Normalize for stable matching (scheme/host lower, trim trailing slash, collapse //)."""
+    try:
+        p = urlparse(u)
+        scheme = 'https' if p.scheme in ('', 'http', 'https') else p.scheme
+        host = p.netloc.lower()
+        path = re.sub(r'/+', '/', p.path or '/')
+        if path != '/' and path.endswith('/'):
+            path = path[:-1]
+        return f"{scheme}://{host}{path}"
+    except Exception:
+        return (u or "").strip().lower()
+
 # ---------- Robots & sitemaps ----------
 @contextlib.contextmanager
 def _session():
@@ -316,7 +349,7 @@ def _collect_sitemap_urls(sm_url: str, session, base_host: str, base_root: str,
 
     if is_index:
         # Re-order CHILD sitemaps: prefer page sitemaps FIRST (Yoast)
-        locs = [u for u in locs if u]  # clean
+        locs = [u for u in locs if u]
         locs.sort(key=_sm_bucket)
         for child in locs:
             if len(out) >= _MAX_PAGES: break
@@ -325,13 +358,13 @@ def _collect_sitemap_urls(sm_url: str, session, base_host: str, base_root: str,
                                       seen, out, srcmap, parent_type=None, depth=depth+1)
         return
 
-    # Leaf: URL set — add URLs; mark their source type from parent sitemap hint if available
+    # Leaf: URL set — add URLs; mark source type from parent or filename hint
     stype = parent_type if parent_type else _sm_classify(sm_url)
     for u in locs:
         if len(out) >= _MAX_PAGES: break
         if _same_site(u, base_host, base_root, include_subdomains):
             out.append(u)
-            srcmap.setdefault(u, stype)
+            srcmap.setdefault(_url_key(u), stype)
 
 def discover_urls_with_sources(base_url: str, include_subdomains: bool, use_sitemap_first: bool) -> Tuple[List[str], Dict[str,str]]:
     base = _normalize_base(base_url)
@@ -355,17 +388,17 @@ def discover_urls_with_sources(base_url: str, include_subdomains: bool, use_site
 
         if not discovered:
             discovered = shallow_crawl(base, include_subdomains)
-            # crawl has no sitemap hint; mark as 'other'
             for u in discovered:
-                srcmap.setdefault(u, "other")
+                srcmap.setdefault(_url_key(u), "other")
 
     # Dedupe & keep pages first within cap
     discovered = list(dict.fromkeys(discovered))
     def _path_depth(u: str) -> int:
         return len([seg for seg in urlparse(u).path.split("/") if seg])
     prio = {"page":0,"post":1,"tax":2,"other":3}
-    discovered.sort(key=lambda u: (prio.get(srcmap.get(u,"other"),3), _path_depth(u)))
-    return discovered[:_MAX_PAGES], {u: srcmap.get(u,"other") for u in discovered[:_MAX_PAGES]}
+    discovered.sort(key=lambda u: (prio.get(srcmap.get(_url_key(u),"other"),3), _path_depth(u)))
+    trimmed = discovered[:_MAX_PAGES]
+    return trimmed, {u: srcmap.get(_url_key(u),"other") for u in trimmed}
 
 # ---------- Shallow crawl ----------
 def _extract_links(html: str, current_url: str) -> List[str]:
@@ -472,14 +505,14 @@ def shallow_crawl(base_url: str, include_subdomains: bool) -> List[str]:
         return out[:_MAX_PAGES]
 
 # ---------- Content profiling ----------
-def _extract_profile(html: str, url: str) -> Dict:
+def _extract_profile(html: str, final_url: str, requested_url: Optional[str] = None) -> Dict:
     title = ""; h1_texts: List[str] = []; h2h3_texts: List[str] = []; body_text = ""; canonical = ""
     if HAVE_BS4 and html:
         try:
             soup = BeautifulSoup(html, "html.parser")
             t = soup.find("title"); title = t.get_text(" ", strip=True) if t else ""
             link = soup.find("link", rel=lambda v: v and "canonical" in (v if isinstance(v,list) else [v]))
-            if link and link.get("href"): canonical = urljoin(url, link["href"])
+            if link and link.get("href"): canonical = urljoin(final_url, link["href"])
             for h in soup.find_all(["h1","h2","h3"]):
                 txt = h.get_text(" ", strip=True)
                 if not txt: continue
@@ -492,7 +525,7 @@ def _extract_profile(html: str, url: str) -> Dict:
     if not title:
         m = re.search(r"<title>(.*?)</title>", html or "", re.I|re.S)
         if m: title = re.sub(r"\s+"," ",m.group(1)).strip()
-    if not canonical: canonical = url
+    if not canonical: canonical = final_url
     if body_text:
         words = body_text.split()
         if len(words) > 800: body_text = " ".join(words[:800])
@@ -506,7 +539,14 @@ def _extract_profile(html: str, url: str) -> Dict:
     for tok in _tokenize(body_text): weights[tok] += 1.0
 
     title_h1 = " ".join([title] + h1_texts)
-    return {"url": canonical or url, "title": title or "", "title_h1": title_h1.lower(), "weights": dict(weights)}
+    return {
+        "url": canonical or final_url,
+        "title": title or "",
+        "title_h1": title_h1.lower(),
+        "weights": dict(weights),
+        "final_url": final_url,
+        "requested_url": requested_url or final_url,
+    }
 
 def _fetch_profiles(urls: List[str]) -> List[Dict]:
     profiles: List[Dict] = []
@@ -527,7 +567,7 @@ def _fetch_profiles(urls: List[str]) -> List[Dict]:
                                 if "html" not in ctype and "text" not in ctype: return None
                                 b = await resp.content.read(_MAX_BYTES)
                                 html = b.decode(errors="ignore")
-                                return _extract_profile(html, str(resp.url))
+                                return _extract_profile(html, str(resp.url), requested_url=u)
                         except Exception:
                             return None
                 results = await asyncio.gather(*[fetch(u) for u in urls], return_exceptions=True)
@@ -547,7 +587,7 @@ def _fetch_profiles(urls: List[str]) -> List[Dict]:
                         ctype = r.headers.get("Content-Type","").lower()
                         if "html" not in ctype and "text" not in ctype: continue
                         html = r.content[:_MAX_BYTES].decode(r.apparent_encoding or "utf-8", errors="ignore")
-                        prof = _extract_profile(html, str(r.url))
+                        prof = _extract_profile(html, str(r.url), requested_url=u)
                         if prof and prof.get("weights"): profiles.append(prof)
                     except Exception:
                         continue
@@ -565,7 +605,7 @@ def _fetch_profiles(urls: List[str]) -> List[Dict]:
                     ctype = r.headers.get("Content-Type","").lower()
                     if "html" not in ctype and "text" not in ctype: continue
                     html = r.content[:_MAX_BYTES].decode(r.apparent_encoding or "utf-8", errors="ignore")
-                    profiles.append(_extract_profile(html, str(r.url)))
+                    profiles.append(_extract_profile(html, str(r.url), requested_url=u))
                 except Exception:
                     continue
         finally:
@@ -628,13 +668,11 @@ def _url_priority_bonus(u: str, is_nav: bool, source_type: Optional[str]) -> flo
     path = urlparse(u).path.lower()
     depth = len([seg for seg in path.split("/") if seg])
     bonus = 0.0
-
-    # Source from sitemap <loc> (top priority signal)
+    # Source from sitemap <loc>
     if source_type == "page": bonus += 0.25
     elif source_type == "post": bonus -= 0.10
     elif source_type == "tax": bonus -= 0.25
-
-    # Heuristic fallback on path (still useful)
+    # Heuristics
     if "/blog/" in path or "/news/" in path: bonus -= 0.15
     if re.search(r"/\d{4}/\d{2}/", path): bonus -= 0.20
     if depth <= 2: bonus += 0.10
@@ -651,9 +689,19 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
     if not profiles:
         return pd.Series([""]*len(df), index=df.index, dtype="string")
 
-    prof_by_url = {p["url"]: p for p in profiles}
-    prof_list = list(prof_by_url.values())
-    nav_links = set(cached_nav_links(base_url))
+    # Build source type by normalized key; match by canonical or requested
+    src_by_key = { _url_key(k): v for k, v in srcmap.items() }
+    def _src_type_for_profile(p: Dict) -> str:
+        return (
+            src_by_key.get(_url_key(p.get("url",""))) or
+            src_by_key.get(_url_key(p.get("final_url",""))) or
+            src_by_key.get(_url_key(p.get("requested_url",""))) or
+            "other"
+        )
+
+    nav_keys = { _url_key(u) for u in cached_nav_links(base_url) }
+    def _is_nav(p: Dict) -> bool:
+        return (_url_key(p.get("url","")) in nav_keys) or (_url_key(p.get("requested_url","")) in nav_keys)
 
     vols = pd.to_numeric(df[vol_col], errors="coerce").fillna(0).clip(lower=0)
     max_log = float((vols + 1).apply(lambda x: math.log(1 + x)).max()) or 1.0
@@ -676,14 +724,31 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
         elif "AIO" in cats: slot = "AIO"
         else: slot = "SEO"
 
-        fits: List[Tuple[str,float]] = []
-        for p in prof_list:
+        fits_page: List[Tuple[str,float]] = []
+        fits_other: List[Tuple[str,float]] = []
+
+        for p in profiles:
             base_fit = _fit_score(kw, p)
-            if base_fit <= 0: continue
-            bonus = _url_priority_bonus(p["url"], (p["url"] in nav_links), srcmap.get(p["url"]))
+            if base_fit <= 0:
+                continue
+            stype = _src_type_for_profile(p)   # 'page' | 'post' | 'tax' | 'other'
+            bonus = _url_priority_bonus(p["url"], _is_nav(p), stype)
             f = max(0.0, min(2.0, base_fit + bonus))
-            if f > 0: fits.append((p["url"], f))
-        fits.sort(key=lambda x: x[1], reverse=True)
+            if f <= 0:
+                continue
+            if stype == "page":
+                fits_page.append((p["url"], f))
+            else:
+                fits_other.append((p["url"], f))
+
+        fits_page.sort(key=lambda x: x[1], reverse=True)
+        fits_other.sort(key=lambda x: x[1], reverse=True)
+
+        # STRICT preference: take pages first; only fall back if no page candidates
+        fits: List[Tuple[str,float]] = []
+        fits.extend(fits_page[:TOP_K])
+        if len(fits) < TOP_K:
+            fits.extend(fits_other[:TOP_K - len(fits)])
 
         kw_candidates[idx] = fits[:TOP_K]
         kw_slot[idx] = slot
@@ -697,7 +762,10 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
         kw_rank[idx] = W_FIT*fit_norm + W_KD*kd_norm + W_VOL*vol_norm
 
     caps = {"VEO":1, "AIO":1, "SEO":2}
-    assigned: Dict[str, Dict[str, List[int] | Optional[int]]] = {p["url"]: {"VEO":None,"AIO":None,"SEO":[]} for p in prof_list}
+    assigned: Dict[str, Dict[str, List[int] | Optional[int]]] = {}
+    for p in profiles:
+        assigned[p["url"]] = {"VEO":None, "AIO":None, "SEO":[]}
+
     mapped = {i:"" for i in df.index}
 
     def assign_slot(slot_name: str):
@@ -716,6 +784,7 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
 
     assign_slot("VEO"); assign_slot("AIO"); assign_slot("SEO")
 
+    # Enforce SEO cap per URL defensively
     for u, slots in assigned.items():
         if isinstance(slots["SEO"], list) and len(slots["SEO"]) > caps["SEO"]:
             for drop_idx in slots["SEO"][caps["SEO"]:]: mapped[drop_idx] = ""
