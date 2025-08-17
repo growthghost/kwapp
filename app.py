@@ -943,36 +943,34 @@ if uploaded is not None:
 
         # -------- URL Mapping (appends last column) --------
         map_series = pd.Series([""] * len(export_df), index=export_df.index, dtype="string")
-if base_site_url.strip():
-    loader = st.empty()
-    loader.markdown(
-        """
-        <div style='display:flex;align-items:center;gap:12px;'>
-          <div style='font-size:28px'>🚀</div>
-          <div style='font-weight:700;'>Mapping keywords to your site…</div>
-        </div>
-        <style>
-          @keyframes bob { from { transform: translateY(0); } to { transform: translateY(-6px); } }
-          div[style*="font-size:28px"] { animation: bob .6s ease-in-out infinite alternate; }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-    with st.spinner("Launching fast crawl & scoring fit…"):
-        map_series = map_keywords_to_urls(
-            export_df,
-            kw_col=kw_col,
-            vol_col=vol_col,
-            base_url=base_site_url.strip(),
-            include_subdomains=include_subdomains,
-            use_sitemap_first=use_sitemap_first,
-        )
-    loader.empty()
-else:
-    st.info("Enter a Base site URL to enable mapping."),
+        if base_site_url.strip():
+            loader = st.empty()
+            loader.markdown(
+                """
+                <div style='display:flex;align-items:center;gap:12px;'>
+                  <div style='font-size:28px'>🚀</div>
+                  <div style='font-weight:700;'>Mapping keywords to your site…</div>
+                </div>
+                <style>
+                  @keyframes bob { from { transform: translateY(0); } to { transform: translateY(-6px); } }
+                  div[style*="font-size:28px"] { animation: bob .6s ease-in-out infinite alternate; }
+                </style>
+                """,
+                unsafe_allow_html=True,
+            )
+            with st.spinner("Launching fast crawl & scoring fit…"):
+                map_series = map_keywords_to_urls(
+                    export_df,
+                    kw_col=kw_col,
+                    vol_col=vol_col,
+                    base_url=base_site_url.strip(),
                     include_subdomains=include_subdomains,
                     use_sitemap_first=use_sitemap_first,
                 )
+            loader.empty()
+        else:
+            st.info("Enter a Base site URL to enable mapping.")
+
         export_df["Map URL"] = map_series
 
         export_cols = base_cols + ["Strategy", "Map URL"]  # Map URL as rightmost column
