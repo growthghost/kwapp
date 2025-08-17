@@ -54,7 +54,7 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
 .stNumberInput input,
 .stNumberInput button {{ cursor: pointer !important; }}
 
-/* Selectbox: caret inside + yellow focus (no red) */
+/* Selectbox: caret inside + yellow focus */
 .stSelectbox div[data-baseweb="select"] > div {{
   border: 2px solid var(--light) !important;
   position: relative;
@@ -94,32 +94,6 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
   background: var(--accent) !important;     /* yellow on interaction */
   color: #000 !important;
   border-color: var(--accent) !important;
-}}
-
-/* Preview checkbox: white box → blue #242F40 checkmark when selected */
-.stCheckbox input[type="checkbox"] {{
-  appearance: none;              /* fully custom */
-  width: 18px; height: 18px;
-  border: 2px solid var(--ink);
-  border-radius: 4px;
-  background: #ffffff;
-  position: relative;
-  cursor: pointer;
-}}
-.stCheckbox input[type="checkbox"]:hover {{
-  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .20);
-}}
-.stCheckbox input[type="checkbox"]:checked {{
-  background: #ffffff;           /* stays white when checked */
-}}
-.stCheckbox input[type="checkbox"]:checked::after {{
-  content: "";
-  position: absolute;
-  left: 4px; top: 0px;
-  width: 6px; height: 12px;
-  border: solid var(--ink);      /* blue checkmark */
-  border-width: 0 3px 3px 0;
-  transform: rotate(45deg);
 }}
 
 /* File uploader dropzone */
@@ -234,13 +208,13 @@ st.markdown(
 )
 
 # ---------- Category tagging (multi-label) ----------
-CATEGORY_ORDER = ["SEO", "AIO", "VEO", "GEO", "AEO", "SXO", "LLM"]
 AIO_PAT = re.compile(r"\b(what is|what's|define|definition|how to|step[- ]?by[- ]?step|tutorial|guide)\b", re.I)
 AEO_PAT = re.compile(r"^\s*(who|what|when|where|why|how|which|can|should)\b", re.I)
 VEO_PAT = re.compile(r"\b(near me|open now|closest|call now|directions|ok google|alexa|siri|hey google)\b", re.I)
 GEO_PAT = re.compile(r"\b(how to|best way to|steps? to|examples? of|checklist|framework|template)\b", re.I)
 SXO_PAT = re.compile(r"\b(best|top|compare|comparison|vs\.?|review|pricing|cost|cheap|free download|template|examples?)\b", re.I)
 LLM_PAT = re.compile(r"\b(prompt|prompting|prompt[- ]?engineering|chatgpt|gpt[- ]?\d|llm|rag|embedding|vector|few[- ]?shot|zero[- ]?shot)\b", re.I)
+CATEGORY_ORDER = ["SEO", "AIO", "VEO", "GEO", "AEO", "SXO", "LLM"]
 
 def categorize_keyword(kw: str) -> list[str]:
     if not isinstance(kw, str) or not kw.strip():
@@ -288,7 +262,7 @@ def add_scoring_columns(df: pd.DataFrame, volume_col: str, kd_col: str, kw_col: 
     remaining = [c for c in out.columns if c not in ordered]
     return out[ordered + remaining]
 
-# ---------- Single keyword ----------
+# ---------- Single Keyword ----------
 st.subheader("Single Keyword Score")
 with st.form("single"):
     c1, c2 = st.columns(2)
@@ -393,23 +367,6 @@ if uploaded is not None:
             mime="text/csv",
             help="Sorted by eligibility (Yes first), KD ascending, Volume descending"
         )
-
-        if st.checkbox("Preview first 10 rows (optional)", value=False):
-            preview_df = scored.copy()
-            preview_df["Strategy"] = scoring_mode
-            preview_df["_EligibleSort"] = preview_df["Eligible"].map({"Yes":1,"No":0}).fillna(0)
-            preview_df = preview_df.sort_values(
-                by=["_EligibleSort", kd_col, vol_col],
-                ascending=[False, True, False],
-                kind="mergesort"
-            ).drop(columns=["_EligibleSort"])
-
-            def _row_style(row):
-                color = COLOR_MAP.get(int(row.get("Score", 0)) if pd.notna(row.get("Score", 0)) else 0, "#9ca3af")
-                return [("background-color: " + color + "; color: black;") if c in ("Score", "Tier") else "" for c in row.index]
-
-            styled = preview_df[export_cols].head(10).style.apply(_row_style, axis1)
-            st.dataframe(styled, use_container_width=True)
 
 st.markdown("---")
 st.caption(f"© {datetime.now().year} OutrankIQ")
