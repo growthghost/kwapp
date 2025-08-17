@@ -677,7 +677,7 @@ def _fetch_profiles(urls: List[str]) -> List[Dict]:
 
 
 # ---------- Fit scoring ----------
-def _fit_score(keyword: str, profile: Dict]) -> float:
+def _fit_score(keyword: str, profile: Dict) -> float:
     tokens = _tokenize(keyword)
     if not tokens:
         return 0.0
