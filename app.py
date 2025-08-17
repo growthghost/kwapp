@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import gzip
 import math
+import hashlib
 from typing import Optional, List, Dict, Tuple
 from collections import defaultdict
 from urllib.parse import urlparse, urljoin
@@ -435,6 +436,9 @@ def _parse_sitemap_xml(xml_text: str) -> List[str]:
     urls = []
     if not xml_text:
         return urls
+    for m in re.finditer("<loc>\s*([^<]+)\s*</loc>", xml_text, re.I):
+        urls.append(m.group(1).strip())
+    return urls
 
 
 def _collect_sitemap_urls(sm_url: str, session, base_host: str, base_root: str, include_subdomains: bool, seen: set, out: List[str], depth: int = 0):
@@ -454,10 +458,7 @@ def _collect_sitemap_urls(sm_url: str, session, base_host: str, base_root: str, 
         else:
             if _same_site(u, base_host, base_root, include_subdomains):
                 out.append(u)
-    # Simple regex fallback to avoid heavy XML edge cases
-    for m in re.finditer(r"<loc>\s*([^<]+)\s*</loc>", xml_text, re.I):
-        urls.append(m.group(1).strip())
-    return urls
+    
 
 
 def discover_urls(base_url: str, include_subdomains: bool, use_sitemap_first: bool) -> List[str]:
@@ -758,6 +759,15 @@ def _fetch_profiles(urls: List[str]) -> List[Dict]:
         return profiles
 
 
+# ---------- Caching wrappers ----------
+@st.cache_data(show_spinner=False, ttl=3600)
+def cached_discover_urls(base_url: str, include_subdomains: bool, use_sitemap_first: bool) -> List[str]:
+    return discover_urls(base_url, include_subdomains=include_subdomains, use_sitemap_first=use_sitemap_first)
+
+@st.cache_data(show_spinner=False, ttl=3600)
+def cached_fetch_profiles(urls: Tuple[str, ...]) -> List[Dict]:
+    return _fetch_profiles(list(urls))
+
 # ---------- Fit scoring ----------
 def _fit_score(keyword: str, profile: Dict) -> float:
     tokens = _tokenize(keyword)
@@ -782,8 +792,8 @@ def _fit_score(keyword: str, profile: Dict) -> float:
 # ---------- Mapping algorithm ----------
 def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, kd_col: str, base_url: str, include_subdomains: bool, use_sitemap_first: bool) -> pd.Series:
     # Discover and profile pages
-    url_list = discover_urls(base_url, include_subdomains=include_subdomains, use_sitemap_first=use_sitemap_first)
-    profiles = _fetch_profiles(url_list)
+    url_list = cached_discover_urls(base_url, include_subdomains=include_subdomains, use_sitemap_first=use_sitemap_first)
+    profiles = cached_fetch_profiles(tuple(url_list))
     profiles = [p for p in profiles if p.get("weights")]
     if not profiles:
         return pd.Series([""] * len(df), index=df.index, dtype="string")
@@ -974,47 +984,46 @@ if uploaded is not None:
         # -------- URL Mapping (appends last column) --------
         map_series = pd.Series([""] * len(export_df), index=export_df.index, dtype="string")
         if base_site_url.strip():
-            loader = st.empty()
-            loader.markdown(
-                """
-                <div style='display:flex;align-items:center;gap:12px;'>
-                  <div style='font-size:28px'>🚀</div>
-                  <div style='font-weight:700;'>Mapping keywords to your site…</div>
-                </div>
-                <style>
-                  @keyframes bob { from { transform: translateY(0); } to { transform: translateY(-6px); } }
-                  div[style*="font-size:28px"] { animation: bob .6s ease-in-out infinite alternate; }
-                </style>
-                """,
-                unsafe_allow_html=True,
-            )
-            with st.spinner("Launching fast crawl & scoring fit…"):
-                map_series = map_keywords_to_urls(
-                    export_df,
-                    kw_col=kw_col,
-                    vol_col=vol_col,
-                    kd_col=kd_col,
-                    base_url=base_site_url.strip(),
-                    include_subdomains=include_subdomains,
-                    use_sitemap_first=use_sitemap_first,
+            # Build a stable signature so we can skip recomputation on reruns (e.g., after download)
+            sig_cols = [c for c in [kw_col, vol_col, kd_col] if c]
+            try:
+                sig_df = export_df[sig_cols].copy()
+            except Exception:
+                sig_df = export_df[[col for col in sig_cols if col in export_df.columns]].copy()
+            sig_csv = sig_df.fillna("").astype(str).to_csv(index=False)
+            sig_base = f"{_normalize_base(base_site_url.strip()).lower()}|{scoring_mode}|{kw_col}|{vol_col}|{kd_col}|{len(export_df)}"
+            signature = hashlib.md5((sig_base + "\n" + sig_csv).encode("utf-8")).hexdigest()
+            if "map_cache" not in st.session_state:
+                st.session_state["map_cache"] = {}
+            cache = st.session_state["map_cache"]
+
+            if signature in cache and len(cache[signature]) == len(export_df):
+                map_series = pd.Series(cache[signature], index=export_df.index, dtype="string")
+            else:
+                loader = st.empty()
+                loader.markdown(
+                    """
+                    <div style='display:flex;align-items:center;gap:12px;'>
+                      <div style='font-size:28px'>🚀</div>
+                      <div style='font-weight:700;'>Mapping keywords to your site…</div>
+                    </div>
+                    <style>
+                      @keyframes bob { from { transform: translateY(0); } to { transform: translateY(-6px); } }
+                      div[style*="font-size:28px"] { animation: bob .6s ease-in-out infinite alternate; }
+                    </style>
+                    """,
+                    unsafe_allow_html=True,
                 )
-            loader.empty()
+                with st.spinner("Launching fast crawl & scoring fit…"):
+                    map_series = map_keywords_to_urls(
+                        export_df,
+                        kw_col=kw_col,
+                        vol_col=vol_col,
+                        kd_col=kd_col,
+                        base_url=base_site_url.strip(),
+                        include_subdomains=include_subdomains,
+                        use_sitemap_first=use_sitemap_first,
+                    )
+                loader.empty()
+                cache[signature] = map_series.fillna("").astype(str).tolist()
         else:
-            st.info("Enter a Base site URL to enable mapping.")
-
-        export_df["Map URL"] = map_series
-
-        export_cols = base_cols + ["Strategy", "Map URL"]  # Map URL as rightmost column
-        export_df = export_df[export_cols]
-
-        csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")
-        st.download_button(
-            label="⬇️ Download scored CSV",
-            data=csv_bytes,
-            file_name=f"{filename_base}.csv",
-            mime="text/csv",
-            help="Sorted by eligibility (Yes first), KD ascending, Volume descending"
-        )
-
-st.markdown("---")
-st.caption(f"© {datetime.now().year} OutrankIQ")
