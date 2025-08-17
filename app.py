@@ -104,6 +104,7 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
 }}
 [data-testid="stFileUploaderDropzone"] button:hover,
 [data-testid="stFileUploaderDropzone"] label:hover,
+[data-testid="stFileUploaderDropzone"] [role="button"]::hover,
 [data-testid="stFileUploaderDropzone"] [role="button"]:hover {{
   background-color: var(--light) !important; /* white on hover */
   color: var(--ink) !important;             /* blue text */
@@ -236,25 +237,85 @@ _THREADS = 12
 _MIN_FIT_THRESHOLD = 0.23  # leave blank if best fit below this
 _ALT_FIT_MIN = 0.2         # allow fallback only if fit >= this
 _DEF_HEADERS = {"User-Agent": "OutrankIQMapper/1.0 (+https://example.com)"}
-_MAPPER_VERSION = "site-map-v5"  # bump to invalidate old map cache
+_MAPPER_VERSION = "site-map-v6-lexicon"  # bump to invalidate old map cache
 
-# ---------- Light normalization / stemming ----------
+# ---------- Synonyms / phrase normalization ----------
+# Multi-word phrase replacements (applied before tokenization)
+PHRASE_MAP = [
+    (re.compile(r"\bget[ -]?in[ -]?touch\b", re.I), "contact"),
+    (re.compile(r"\breach[ -]?out\b", re.I), "contact"),
+    (re.compile(r"\bemail\s*us\b", re.I), "contact"),
+    (re.compile(r"\bcall\s*us\b", re.I), "contact"),
+    (re.compile(r"\bnon[- ]?profit(s)?\b", re.I), "nonprofit"),
+    (re.compile(r"\bnear\s*me\b", re.I), "nearme"),
+    (re.compile(r"\bnear\s*you\b", re.I), "nearyou"),
+]
+
+# Single-token synonym/normalization map
 _SYN_MAP = {
+    # contact/connection
+    "connect":"contact",
+    "connected":"contact",
+    "connecting":"contact",
+    "contacts":"contact",
+    "support":"contact",  # treat generic support as contact intent
+    "helpdesk":"contact",
+    "help-line":"contact",
+    "helpline":"contact",
+    # location intent
+    "nearby":"nearme",
+    "nearyou":"nearme",
+    "directions":"nearme",
+    "address":"nearme",
+    "offices":"locations",
+    "office":"locations",
+    "locations":"locations",
+    "visit":"locations",
+    "findus":"locations",
+    # org
     "organisations":"organization",
     "organisation":"organization",
     "organizations":"organization",
     "orgs":"organization",
     "org":"organization",
-    "disabilities":"disability",
+    "nonprofit":"organization",
+    "ngo":"organization",
+    "charity":"organization",
+    "foundation":"organization",
+    # assist/help
     "assist":"help",
     "assists":"help",
     "assistance":"help",
+    "caregiving":"help",
+    "caregiver":"help",
+    "caregivers":"help",
+    # disability
+    "disabilities":"disability",
+    "disabled":"disability",
+    # services/programs
+    "programs":"program",
+    "programme":"program",
+    "services":"service",
 }
+
+STOPWORDS = {
+    "the","and","for","to","a","an","of","with","in","on","at","by","from","about",
+    "is","are","be","can","should","how","what","who","where","why","when","which",
+    "me","you","us","my","our","your","we","i","it","they","them","near","now","open",
+    "vs","or","and","as"
+}
+
+def _normalize_phrases(text: str) -> str:
+    if not text: return ""
+    out = text
+    for pat, rep in PHRASE_MAP:
+        out = pat.sub(rep, out)
+    return out
 
 def _norm_token(t: str) -> str:
     t = t.lower()
-    if t in _SYN_MAP: return _SYN_MAP[t]
-    # simple verb/number/plural stemming
+    if t in _SYN_MAP: t = _SYN_MAP[t]
+    # simple stemming
     if t.endswith("ies") and len(t) > 3:
         t = t[:-3] + "y"
     elif t.endswith("es") and len(t) > 4:
@@ -271,13 +332,20 @@ def _tokenize(text: str) -> List[str]:
     return TOKEN_RE.findall(text.lower()) if text else []
 
 def _ntokens(text: str) -> List[str]:
+    text = _normalize_phrases(text or "")
     return [_norm_token(t) for t in _tokenize(text)]
 
+# ---------- Domain helpers ----------
 def _derive_roots(base_url: str) -> Tuple[str,str]:
     host = urlparse(base_url).netloc.lower()
     parts = host.split(".")
     base_root = ".".join(parts[-2:]) if len(parts)>=2 else host
     return host, base_root
+
+def _domain_tokens(base_url: str) -> set:
+    host = urlparse(_normalize_base(base_url)).netloc.lower()
+    parts = re.split(r"[.\-]", host)
+    return { _norm_token(p) for p in parts if p and p.isalpha() and len(p) >= 2 }
 
 def _normalize_base(base_url: str) -> str:
     if not base_url: return ""
@@ -302,7 +370,6 @@ def _same_site(url: str, base_host: str, base_root: str, include_subdomains: boo
 
 # ---------- URL normalization & page-like helpers ----------
 def _url_key(u: str) -> str:
-    """Normalize for stable matching (scheme/host lower, trim trailing slash, collapse //)."""
     try:
         p = urlparse(u)
         scheme = 'https' if p.scheme in ('', 'http', 'https') else p.scheme
@@ -324,7 +391,6 @@ def _is_contact_like(u: str) -> bool:
     return any(seg in path for seg in ("/contact", "/contact-us", "/locations", "/find-us", "/visit"))
 
 def _is_page_like(source_type: str, url: str, is_nav: bool) -> bool:
-    """Treat homepage + shallow, non-blog/nav pages as 'page-like' even if not in a page sitemap."""
     if source_type == 'page':
         return True
     path = urlparse(url).path.lower()
@@ -407,9 +473,8 @@ def _collect_sitemap_urls(sm_url: str, session, base_host: str, base_root: str,
     is_index = bool(re.search(r"<sitemapindex", xml, re.I)) or any(u.lower().endswith((".xml",".xml.gz")) for u in locs)
 
     if is_index:
-        # Re-order CHILD sitemaps: prefer page sitemaps FIRST (Yoast)
         locs = [u for u in locs if u]
-        locs.sort(key=_sm_bucket)
+        locs.sort(key=_sm_bucket)  # prefer page sitemaps first
         for child in locs:
             if len(out) >= _MAX_PAGES: break
             if child.lower().endswith((".xml",".xml.gz")):
@@ -417,7 +482,6 @@ def _collect_sitemap_urls(sm_url: str, session, base_host: str, base_root: str,
                                       seen, out, srcmap, parent_type=None, depth=depth+1)
         return
 
-    # Leaf: URL set — add URLs; mark source type from parent or filename hint
     stype = parent_type if parent_type else _sm_classify(sm_url)
     for u in locs:
         if len(out) >= _MAX_PAGES: break
@@ -437,7 +501,6 @@ def discover_urls_with_sources(base_url: str, include_subdomains: bool, use_site
             maps = _extract_sitemaps_from_robots(base, sess)
             if not maps:
                 maps = [urljoin(base + "/", "sitemap.xml"), urljoin(base + "/", "sitemap_index.xml")]
-            # Prefer page sitemaps first at the TOP LEVEL too
             maps.sort(key=_sm_bucket)
             seen = set()
             for sm in maps:
@@ -450,7 +513,6 @@ def discover_urls_with_sources(base_url: str, include_subdomains: bool, use_site
             for u in discovered:
                 srcmap.setdefault(_url_key(u), "other")
 
-    # Dedupe & keep pages first within cap
     discovered = list(dict.fromkeys(discovered))
     def _path_depth(u: str) -> int:
         return len([seg for seg in urlparse(u).path.split("/") if seg])
@@ -682,33 +744,77 @@ def cached_discover_and_sources(base_url: str, include_subdomains: bool, use_sit
 def cached_fetch_profiles(urls: Tuple[str, ...]) -> List[Dict]:
     return _fetch_profiles(list(urls))
 
-def _harvest_nav_links(base_url: str) -> set:
+def _harvest_nav_links(base_url: str) -> Tuple[str, str]:
+    """Return (html, base_home_url) so we can reuse html for lexicon, too."""
     home = _normalize_base(base_url)
-    links = set()
+    html = ""
     with _session() as sess:
-        html = _fetch_text_requests(home, sess, (_CONNECT_TIMEOUT,_READ_TIMEOUT))
-    if not html: return links
+        html = _fetch_text_requests(home, sess, (_CONNECT_TIMEOUT,_READ_TIMEOUT)) or ""
+    return html, home
+
+@st.cache_data(show_spinner=False, ttl=3600)
+def cached_nav_links(base_url: str) -> Tuple[str, ...]:
+    html, home = _harvest_nav_links(base_url)
+    links = set()
+    if not html: return tuple()
     if HAVE_BS4:
         try:
             soup = BeautifulSoup(html, "html.parser")
-            areas = []; areas.extend(soup.find_all("nav"))
+            areas = []
+            areas.extend(soup.find_all("nav"))
             header = soup.find("header"); footer = soup.find("footer")
             if header: areas.append(header)
             if footer: areas.append(footer)
             for area in areas:
                 for a in area.find_all("a", href=True):
                     links.add(urljoin(home, a["href"]))
-            return links
         except Exception:
             pass
-    for m in re.finditer(r'href="([^"]+)"|href=\'([^\']+)\'', html, re.I):
-        href = m.group(1) or m.group(2)
-        if href: links.add(urljoin(home, href))
-    return links
+    else:
+        for m in re.finditer(r'href="([^"]+)"|href=\'([^\']+)\'', html, re.I):
+            href = m.group(1) or m.group(2)
+            if href: links.add(urljoin(home, href))
+    return tuple(sorted(links))
 
-@st.cache_data(show_spinner=False, ttl=3600)
-def cached_nav_links(base_url: str) -> Tuple[str, ...]:
-    return tuple(sorted(_harvest_nav_links(base_url)))
+def _home_nav_tokens(base_url: str) -> set:
+    html, home = _harvest_nav_links(base_url)
+    tokens = set()
+    if not html: return tokens
+    if HAVE_BS4:
+        try:
+            soup = BeautifulSoup(html, "html.parser")
+            # Pull anchor text from nav/header/footer and headings
+            areas = []
+            areas.extend(soup.find_all("nav"))
+            header = soup.find("header"); footer = soup.find("footer")
+            if header: areas.append(header)
+            if footer: areas.append(footer)
+            texts = []
+            for area in areas:
+                for a in area.find_all("a"):
+                    texts.append(a.get_text(" ", strip=True))
+                for h in area.find_all(["h1","h2","h3"]):
+                    texts.append(h.get_text(" ", strip=True))
+            # Add page title and a trimmed body for general lexicon coverage
+            t = soup.find("title")
+            if t: texts.append(t.get_text(" ", strip=True))
+            for tag in soup(["script","style","noscript","template","nav","footer","header","aside"]): tag.extract()
+            body_text = soup.get_text(" ", strip=True)
+            if body_text:
+                words = body_text.split()
+                if len(words) > 500:
+                    body_text = " ".join(words[:500])
+                texts.append(body_text)
+            for txt in texts:
+                tokens.update(_ntokens(txt))
+            return tokens
+        except Exception:
+            pass
+    # Fallback regex extraction
+    for m in re.finditer(r">(.*?)<", html, re.S):
+        s = re.sub(r"\s+"," ", (m.group(1) or "").strip())
+        if s: tokens.update(_ntokens(s))
+    return tokens
 
 # ---------- Fit & priority ----------
 def _fit_score(keyword: str, profile: Dict) -> float:
@@ -729,20 +835,48 @@ def _fit_score(keyword: str, profile: Dict) -> float:
     return max(0.0, min(2.0, overlap))
 
 def _url_priority_bonus(u: str, is_nav: bool, source_type: Optional[str]) -> float:
-    """Bias toward PAGE sitemap + nav + shallow depth; de-prioritize post/tax; keep sitemap <loc> priority."""
     path = urlparse(u).path.lower()
     depth = len([seg for seg in path.split("/") if seg])
     bonus = 0.0
-    # Source from sitemap <loc>
     if source_type == "page": bonus += 0.25
     elif source_type == "post": bonus -= 0.10
     elif source_type == "tax": bonus -= 0.25
-    # Heuristics
     if "/blog/" in path or "/news/" in path: bonus -= 0.15
     if re.search(r"/\d{4}/\d{2}/", path): bonus -= 0.20
     if depth <= 2: bonus += 0.10
     if is_nav: bonus += 0.15
     return bonus
+
+# ---------- Out-of-domain detection ----------
+POL_CONTACT_PAT = re.compile(r"\b(contact|email|call)\s+(senator|representative|rep|governor|mayor|mp|president)\b", re.I)
+
+def _capitalized_tokens(original_kw: str) -> set:
+    caps = set()
+    for m in re.finditer(r"\b[A-Z][a-z]+(?:[-'][A-Za-z]+)?\b", original_kw or ""):
+        caps.add(_norm_token(m.group(0)))
+    return caps
+
+def _looks_out_of_domain(original_kw: str, site_lex: set, base_url: str) -> bool:
+    tokens = _ntokens(original_kw)
+    if not tokens: return False
+    if POL_CONTACT_PAT.search(original_kw or ""):
+        return True
+    domtoks = _domain_tokens(base_url)
+    distinctive = [t for t in tokens if t.isalpha() and len(t) >= 4 and t not in STOPWORDS]
+    unknown = [t for t in distinctive if (t not in site_lex and t not in domtoks)]
+    if not unknown:
+        return False
+    # Proper-noun style unknowns (from capitalization) – strong signal
+    cap = _capitalized_tokens(original_kw)
+    if any(t in unknown for t in cap):
+        return True
+    # "contact + unknown" – block
+    if "contact" in tokens and unknown:
+        return True
+    # Many unknown distinctive tokens – likely out-of-domain
+    if len(unknown) >= 2:
+        return True
+    return False
 
 # ---------- Mapping ----------
 def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, kd_col: str,
@@ -753,6 +887,15 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
     profiles = [p for p in profiles if p.get("weights")]
     if not profiles:
         return pd.Series([""]*len(df), index=df.index, dtype="string")
+
+    # Build site lexicon (tokens from profiles + homepage/nav + domain tokens)
+    site_lex = set()
+    for p in profiles:
+        site_lex.update(p.get("weights", {}).keys())
+        site_lex.update((p.get("title_h1_norm") or "").split())
+        site_lex.update(_ntokens(p.get("title","") or ""))
+    site_lex.update(_home_nav_tokens(base_url))
+    site_lex.update(_domain_tokens(base_url))
 
     src_by_key = { _url_key(k): v for k, v in srcmap.items() }
     def _src_type_for_profile(p: Dict) -> str:
@@ -783,6 +926,13 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
 
     for idx, row in df.iterrows():
         kw = str(row.get(kw_col, "")) if kw_col else str(row.get("Keyword",""))
+        # Out-of-domain/entity gate
+        if _looks_out_of_domain(kw, site_lex, base_url):
+            kw_candidates[idx] = []
+            kw_slot[idx] = "SEO"
+            kw_rank[idx] = 0.0
+            continue
+
         cats = set(categorize_keyword(kw))
         if "VEO" in cats: slot = "VEO"
         elif "AIO" in cats: slot = "AIO"
@@ -795,13 +945,13 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
             base_fit = _fit_score(kw, p)
             if base_fit <= 0:
                 continue
-            stype = _src_type_for_profile(p)   # 'page' | 'post' | 'tax' | 'other'
+            stype = _src_type_for_profile(p)
             is_nav = _is_nav(p)
 
             bonus = _url_priority_bonus(p["url"], is_nav, stype)
             f = base_fit + bonus
 
-            # VEO steering: prefer homepage/contact/locations; downweight news/blog
+            # VEO steering
             if slot == "VEO":
                 if _is_home(p["url"]) or _is_contact_like(p["url"]):
                     f += 0.15
@@ -830,7 +980,7 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
         fits_page.sort(key=lambda x: x[1], reverse=True)
         fits_other.sort(key=lambda x: x[1], reverse=True)
 
-        # STRICT preference: take page-like first; only fall back if needed
+        # STRICT preference: page-like first; fallback if needed
         fits: List[Tuple[str,float]] = []
         fits.extend(fits_page[:TOP_K])
         if len(fits) < TOP_K:
@@ -877,7 +1027,7 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
             if not choices: continue
             for j, (u, fit) in enumerate(choices):
                 if slot_name in {"VEO","AIO"}:
-                    if assigned[u]["VEO" if slot_name=="VEO" else "AIO"] is None and (j == 0 or fit >= _ALT_FIT_MIN):
+                    if assigned[u][slot_name] is None and (j == 0 or fit >= _ALT_FIT_MIN):
                         assigned[u][slot_name] = i; mapped[i] = u; break
                 else:
                     if (len(assigned[u]["SEO"]) < caps["SEO"]) and (j == 0 or fit >= _ALT_FIT_MIN) and _seo_allowed(u, fit):
