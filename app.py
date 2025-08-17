@@ -21,7 +21,7 @@ except Exception:
 
 try:
     import requests  # type: ignore
-except Exception:  # Streamlit Cloud has requests preinstalled; this is a guard
+except Exception:
     requests = None  # type: ignore
 
 try:
@@ -298,7 +298,6 @@ def calculate_score(volume: float, kd: float) -> int:
             return score
     return 0
 
-
 def add_scoring_columns(df: pd.DataFrame, volume_col: str, kd_col: str, kw_col: Optional[str]) -> pd.DataFrame:
     out = df.copy()
 
@@ -343,6 +342,21 @@ _DEF_HEADERS = {
 def _tokenize(text: str) -> List[str]:
     return TOKEN_RE.findall(text.lower()) if text else []
 
+def _derive_roots(base_url: str) -> Tuple[str, str]:
+    """Return (base_host, base_root) where base_root is eTLD+1-ish."""
+    host = urlparse(base_url).netloc.lower()
+    parts = host.split(".")
+    base_root = ".".join(parts[-2:]) if len(parts) >= 2 else host
+    return host, base_root
+
+def _normalize_base(base_url: str) -> str:
+    if not base_url:
+        return ""
+    u = base_url.strip()
+    if not u.startswith("http://") and not u.startswith("https://"):
+        u = "https://" + u
+    p = urlparse(u)
+    return f"{p.scheme}://{p.netloc}"
 
 def _same_site(url: str, base_host: str, base_root: str, include_subdomains: bool) -> bool:
     try:
@@ -360,31 +374,6 @@ def _same_site(url: str, base_host: str, base_root: str, include_subdomains: boo
     except Exception:
         return False
 
-
-def _derive_roots(base_url: str) -> Tuple[str, str]:
-    """Return (base_host, base_root) where base_root is eTLD+1-ish.
-    We avoid extra deps; simple heuristic: last two labels.
-    """
-    host = urlparse(base_url).netloc.lower()
-    parts = host.split(".")
-    if len(parts) >= 2:
-        base_root = ".".join(parts[-2:])
-    else:
-        base_root = host
-    return host, base_root
-
-
-def _normalize_base(base_url: str) -> str:
-    if not base_url:
-        return ""
-    u = base_url.strip()
-    if not u.startswith("http://") and not u.startswith("https://"):
-        u = "https://" + u
-    # remove path/query/fragment to stay at site root for discovery
-    p = urlparse(u)
-    return f"{p.scheme}://{p.netloc}"
-
-
 # ---------- URL discovery ----------
 @contextlib.contextmanager
 def _session():
@@ -392,7 +381,6 @@ def _session():
         yield None  # aiohttp created inside async
     else:
         yield requests.Session() if requests else None
-
 
 def _fetch_text_requests(url: str, session, timeout: Tuple[int, int]) -> Optional[str]:
     try:
@@ -405,7 +393,6 @@ def _fetch_text_requests(url: str, session, timeout: Tuple[int, int]) -> Optiona
         ctype = resp.headers.get("Content-Type", "").lower()
         if resp.status_code >= 400:
             return None
-        # Accept HTML, text, XML, and gzipped sitemaps
         raw = resp.content[:_MAX_BYTES]
         if ("gzip" in ctype) or url.lower().endswith(".gz"):
             with contextlib.suppress(Exception):
@@ -416,7 +403,6 @@ def _fetch_text_requests(url: str, session, timeout: Tuple[int, int]) -> Optiona
         return raw.decode(resp.apparent_encoding or "utf-8", errors="ignore")
     except Exception:
         return None
-
 
 def _extract_sitemaps_from_robots(base_root_url: str, session) -> List[str]:
     robots_url = urljoin(base_root_url + "/", "robots.txt")
@@ -431,16 +417,13 @@ def _extract_sitemaps_from_robots(base_root_url: str, session) -> List[str]:
                 maps.append(sm)
     return maps
 
-
 def _parse_sitemap_xml(xml_text: str) -> List[str]:
-    urls = []
+    urls: List[str] = []
     if not xml_text:
         return urls
-    # robust raw-string pattern for <loc>...</loc>
     for m in re.finditer(r"<loc>\s*([^<]+)\s*</loc>", xml_text, re.I):
         urls.append(m.group(1).strip())
     return urls
-
 
 def _collect_sitemap_urls(sm_url: str, session, base_host: str, base_root: str, include_subdomains: bool, seen: set, out: List[str], depth: int = 0):
     if depth > 3 or len(out) >= _MAX_PAGES or sm_url in seen:
@@ -459,7 +442,6 @@ def _collect_sitemap_urls(sm_url: str, session, base_host: str, base_root: str, 
         else:
             if _same_site(u, base_host, base_root, include_subdomains):
                 out.append(u)
-    
 
 def discover_urls(base_url: str, include_subdomains: bool, use_sitemap_first: bool) -> List[str]:
     base = _normalize_base(base_url)
@@ -472,22 +454,39 @@ def discover_urls(base_url: str, include_subdomains: bool, use_sitemap_first: bo
         if use_sitemap_first:
             maps = _extract_sitemaps_from_robots(base, sess)
             if not maps:
-                # Try common sitemap paths
                 maps = [
                     urljoin(base + "/", "sitemap.xml"),
                     urljoin(base + "/", "sitemap_index.xml"),
                 ]
+            # Prefer "page" sitemaps first (Yoast-style)
+            def _sm_bucket(u: str) -> int:
+                ul = u.lower()
+                if "page" in ul: return 0
+                if "post" in ul or "blog" in ul or "news" in ul: return 1
+                if "category" in ul or "tag" in ul or "author" in ul or "archive" in ul: return 2
+                return 3
+            maps.sort(key=_sm_bucket)
+
             seen = set()
             for sm in maps:
                 if len(discovered) >= _MAX_PAGES:
                     break
                 _collect_sitemap_urls(sm, sess, base_host, base_root, include_subdomains, seen, discovered, depth=0)
-        # Fallback shallow crawl if still empty
+
         if not discovered:
             discovered = shallow_crawl(base, include_subdomains)
 
+    # Dedupe and favor page-like URLs (so the cap keeps more pages)
+    discovered = list(dict.fromkeys(discovered))
+    def _classify_url_type(u: str) -> str:
+        path = urlparse(u).path.lower()
+        if re.search(r"/\d{4}/\d{2}/", path): return "post"
+        if any(h in path for h in ("/category/", "/tag/", "/author/", "/topic/", "/taxonomy/")): return "tax"
+        if any(h in path for h in ("/blog/", "/news/", "/post/", "/article/", "/articles/")): return "post"
+        return "page"
+    prio = {"page": 0, "post": 1, "tax": 2, "other": 3}
+    discovered.sort(key=lambda u: (prio.get(_classify_url_type(u), 3), len([seg for seg in urlparse(u).path.split("/") if seg])))
     return discovered[:_MAX_PAGES]
-
 
 # ---------- Shallow crawl (depth ≤ 2) ----------
 def _extract_links(html: str, current_url: str) -> List[str]:
@@ -502,13 +501,11 @@ def _extract_links(html: str, current_url: str) -> List[str]:
             return links
         except Exception:
             pass
-    # regex fallback
-    for m in re.finditer(r"href=\"([^\"]+)\"|href='([^']+)'", html, re.I):
+    for m in re.finditer(r'href="([^"]+)"|href=\'([^\']+)\'', html, re.I):
         href = m.group(1) or m.group(2)
         if href:
             links.append(urljoin(current_url, href))
     return links
-
 
 def shallow_crawl(base_url: str, include_subdomains: bool) -> List[str]:
     base = _normalize_base(base_url)
@@ -533,10 +530,8 @@ def shallow_crawl(base_url: str, include_subdomains: bool) -> List[str]:
             timeout = aiohttp.ClientTimeout(total=_TOTAL_BUDGET_SECS, sock_connect=_CONNECT_TIMEOUT, sock_read=_READ_TIMEOUT)
             conn = aiohttp.TCPConnector(limit=_CONCURRENCY, ssl=False)
             async with aiohttp.ClientSession(timeout=timeout, connector=conn, headers=_DEF_HEADERS) as session:
-                idx = 0
                 while frontier and len(out) < _MAX_PAGES:
                     url, depth = frontier.pop(0)
-                    idx += 1
                     try:
                         async with session.get(url, allow_redirects=True) as resp:
                             if resp.status >= 400:
@@ -558,7 +553,6 @@ def shallow_crawl(base_url: str, include_subdomains: bool) -> List[str]:
         try:
             return asyncio.run(_run())[:_MAX_PAGES]
         except RuntimeError:
-            # Fallback to requests crawl when an event loop is already running
             if not requests:
                 return [base]
             sess = requests.Session()
@@ -611,7 +605,6 @@ def shallow_crawl(base_url: str, include_subdomains: bool) -> List[str]:
             sess.close()
         return out[:_MAX_PAGES]
 
-
 # ---------- Content profiling ----------
 def _extract_profile(html: str, url: str) -> Dict:
     title = ""
@@ -623,14 +616,11 @@ def _extract_profile(html: str, url: str) -> Dict:
     if HAVE_BS4 and html:
         try:
             soup = BeautifulSoup(html, "html.parser")
-            # Title
             t = soup.find("title")
             title = t.get_text(" ", strip=True) if t else ""
-            # Canonical
             link = soup.find("link", rel=lambda v: v and "canonical" in (v if isinstance(v, list) else [v]))
             if link and link.get("href"):
-                canonical = urljoin(url, link["href"])  # resolve relative
-            # Headings
+                canonical = urljoin(url, link["href"])
             for h in soup.find_all(["h1", "h2", "h3"]):
                 txt = h.get_text(" ", strip=True)
                 if not txt:
@@ -639,13 +629,11 @@ def _extract_profile(html: str, url: str) -> Dict:
                     h1_texts.append(txt)
                 else:
                     h2h3_texts.append(txt)
-            # Body (first ~800 words)
             for tag in soup(["script", "style", "noscript", "template", "nav", "footer", "header", "aside"]):
                 tag.extract()
             body_text = soup.get_text(" ", strip=True)
         except Exception:
             pass
-    # Fallback naive extraction
     if not title:
         m = re.search(r"<title>(.*?)</title>", html or "", re.I | re.S)
         if m:
@@ -653,7 +641,6 @@ def _extract_profile(html: str, url: str) -> Dict:
     if not canonical:
         canonical = url
 
-    # Trim body to ~800 words
     if body_text:
         words = body_text.split()
         if len(words) > 800:
@@ -680,7 +667,6 @@ def _extract_profile(html: str, url: str) -> Dict:
         "weights": dict(weights),
     }
 
-
 def _fetch_profiles(urls: List[str]) -> List[Dict]:
     profiles: List[Dict] = []
     if not urls:
@@ -706,8 +692,7 @@ def _fetch_profiles(urls: List[str]) -> List[Dict]:
                                 return _extract_profile(html, str(resp.url))
                         except Exception:
                             return None
-                tasks = [fetch(u) for u in urls]
-                results = await asyncio.gather(*tasks, return_exceptions=True)
+                results = await asyncio.gather(*[fetch(u) for u in urls], return_exceptions=True)
                 for r in results:
                     if isinstance(r, dict):
                         profiles.append(r)
@@ -715,7 +700,6 @@ def _fetch_profiles(urls: List[str]) -> List[Dict]:
         try:
             return asyncio.run(_run())
         except RuntimeError:
-            # Fallback to requests when an event loop is already running
             if not requests:
                 return profiles
             sess = requests.Session()
@@ -758,7 +742,6 @@ def _fetch_profiles(urls: List[str]) -> List[Dict]:
             sess.close()
         return profiles
 
-
 # ---------- Caching wrappers ----------
 @st.cache_data(show_spinner=False, ttl=3600)
 def cached_discover_urls(base_url: str, include_subdomains: bool, use_sitemap_first: bool) -> List[str]:
@@ -768,6 +751,38 @@ def cached_discover_urls(base_url: str, include_subdomains: bool, use_sitemap_fi
 def cached_fetch_profiles(urls: Tuple[str, ...]) -> List[Dict]:
     return _fetch_profiles(list(urls))
 
+def _harvest_nav_links(base_url: str) -> set:
+    """Collect header/nav/footer links from homepage and resolve them absolute."""
+    home = _normalize_base(base_url)
+    links = set()
+    with _session() as sess:
+        html = _fetch_text_requests(home, sess, (_CONNECT_TIMEOUT, _READ_TIMEOUT))
+    if not html:
+        return links
+    if HAVE_BS4:
+        try:
+            soup = BeautifulSoup(html, "html.parser")
+            areas = []
+            areas.extend(soup.find_all("nav"))
+            header = soup.find("header");  footer = soup.find("footer")
+            if header: areas.append(header)
+            if footer: areas.append(footer)
+            for area in areas:
+                for a in area.find_all("a", href=True):
+                    links.add(urljoin(home, a["href"]))
+            return links
+        except Exception:
+            pass
+    for m in re.finditer(r'href="([^"]+)"|href=\'([^\']+)\'', html, re.I):
+        href = m.group(1) or m.group(2)
+        if href:
+            links.add(urljoin(home, href))
+    return links
+
+@st.cache_data(show_spinner=False, ttl=3600)
+def cached_nav_links(base_url: str) -> Tuple[str, ...]:
+    return tuple(sorted(_harvest_nav_links(base_url)))
+
 # ---------- Fit scoring ----------
 def _fit_score(keyword: str, profile: Dict) -> float:
     tokens = _tokenize(keyword)
@@ -776,22 +791,41 @@ def _fit_score(keyword: str, profile: Dict) -> float:
     w = profile.get("weights", {})
     overlap = sum(w.get(t, 0.0) for t in tokens) / max(1, len(tokens))
     title_h1 = profile.get("title_h1", "")
-    # Title/H1 boosts
     covered = sum(1 for t in tokens if t in title_h1)
     if covered == len(tokens):
         overlap += 0.25
     elif covered / len(tokens) >= 0.5:
         overlap += 0.10
-    # Phrase hint
     phrase = " ".join(tokens)
     if phrase and phrase in title_h1:
         overlap += 0.15
     return max(0.0, min(2.0, overlap))
 
+def _url_priority_bonus(u: str, is_nav: bool) -> float:
+    """Bias toward main pages: page-sitemap lookalikes, nav links, shallow depth; de-prioritize posts/tax."""
+    path = urlparse(u).path.lower()
+    depth = len([seg for seg in path.split("/") if seg])
+    bonus = 0.0
+    # Classify roughly
+    is_tax = any(x in path for x in ("/category/", "/tag/", "/author/", "/topic/", "/taxonomy/"))
+    is_postish = any(x in path for x in ("/blog/", "/news/", "/post/", "/article/", "/articles/")) or bool(re.search(r"/\d{4}/\d{2}/", path))
+    if is_tax:
+        bonus -= 0.25
+    elif is_postish:
+        bonus -= 0.15  # posts aren't forbidden, just slightly less priority
+    else:
+        bonus += 0.20  # feels like a page
+    if depth <= 2:
+        bonus += 0.10
+    if re.search(r"/\d{4}/\d{2}/", path):
+        bonus -= 0.20
+    if is_nav:
+        bonus += 0.15
+    return bonus
 
 # ---------- Mapping algorithm ----------
 def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, kd_col: str, base_url: str, include_subdomains: bool, use_sitemap_first: bool) -> pd.Series:
-    # Discover and profile pages
+    # Discover & profile
     url_list = cached_discover_urls(base_url, include_subdomains=include_subdomains, use_sitemap_first=use_sitemap_first)
     profiles = cached_fetch_profiles(tuple(url_list))
     profiles = [p for p in profiles if p.get("weights")]
@@ -800,6 +834,7 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
 
     prof_by_url = {p["url"]: p for p in profiles}
     prof_list = list(prof_by_url.values())
+    nav_links = set(cached_nav_links(base_url))
 
     vols = pd.to_numeric(df[vol_col], errors="coerce").fillna(0).clip(lower=0)
     max_log = float((vols + 1).apply(lambda x: math.log(1 + x)).max()) or 1.0
@@ -828,14 +863,21 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
             slot = "AIO"
         else:
             slot = "SEO"
+
         fits: List[Tuple[str, float]] = []
         for p in prof_list:
-            f = _fit_score(kw, p)
+            base_fit = _fit_score(kw, p)
+            if base_fit <= 0:
+                continue
+            bonus = _url_priority_bonus(p["url"], (p["url"] in nav_links))
+            f = max(0.0, min(2.0, base_fit + bonus))
             if f > 0:
                 fits.append((p["url"], f))
         fits.sort(key=lambda x: x[1], reverse=True)
+
         kw_candidates[idx] = fits[:TOP_K]
         kw_slot[idx] = slot
+
         best_fit = fits[0][1] if fits else 0.0
         kd_val = float(pd.to_numeric(row.get(kd_col, 0), errors="coerce") or 0)
         vol_val = float(pd.to_numeric(row.get(vol_col, 0), errors="coerce") or 0)
@@ -881,7 +923,6 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
             slots["SEO"] = slots["SEO"][:caps["SEO"]]
 
     return pd.Series([mapped[i] for i in df.index], index=df.index, dtype="string")
-
 
 # ---------- Single Keyword ----------
 st.subheader("Single Keyword Score")
