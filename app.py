@@ -14,7 +14,7 @@ except Exception:
 # ---------- Brand / Theme ----------
 BRAND_BG = "#747474"     # background
 BRAND_INK = "#242F40"    # blue/ink
-BRAND_ACCENT = "#E1B000" # yellow
+BRAND_ACCENT = "#329662" # accent (green, replaces yellow)
 BRAND_LIGHT = "#FFFFFF"  # white
 
 st.set_page_config(page_title="OutrankIQ", page_icon="🔎", layout="centered")
@@ -27,7 +27,7 @@ st.markdown(
   --bg: {BRAND_BG};
   --ink: {BRAND_INK};
   --accent: {BRAND_ACCENT};
-  --accent-rgb: 225,176,0;
+  --accent-rgb: 50,150,98; /* #329662 */
   --light: {BRAND_LIGHT};
 }}
 /* App background */
@@ -54,7 +54,7 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
 .stNumberInput input,
 .stNumberInput button {{ cursor: pointer !important; }}
 
-/* Selectbox: caret inside + yellow focus */
+/* Selectbox: caret inside + green focus */
 .stSelectbox div[data-baseweb="select"] > div {{
   border: 2px solid var(--light) !important;
   position: relative;
@@ -75,7 +75,7 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
   font-weight: 700;
 }}
 
-/* Number inputs: ensure YELLOW focus + blue steppers */
+/* Number inputs: ensure GREEN focus + blue steppers */
 .stNumberInput input {{
   border: 2px solid var(--light) !important;
   outline: none !important;
@@ -98,7 +98,7 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
 .stNumberInput button:hover,
 .stNumberInput button:active,
 .stNumberInput button:focus-visible {{
-  background: var(--accent) !important;     /* yellow on interaction */
+  background: var(--accent) !important;     /* green on interaction */
   color: #000 !important;
   border-color: var(--accent) !important;
 }}
@@ -136,7 +136,7 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
 
 /* Action buttons (download & calculate) — transparent on hover */
 .stButton > button, .stDownloadButton > button {{
-  background-color: var(--accent) !important;
+  background-color: var(--accent) !important;  /* green default */
   color: var(--ink) !important;
   border: 2px solid var(--light) !important;
   border-radius: 10px !important;
@@ -185,7 +185,7 @@ LABEL_MAP = {
     0: "Not rated",
 }
 
-# Used for the single-word color card
+# Used for the single-word color card (unchanged, since these represent tiers)
 COLOR_MAP = {
     6: "#2ecc71",
     5: "#a3e635",
@@ -238,7 +238,7 @@ LLM_PAT = re.compile(r"\b(prompt|prompting|prompt[- ]?engineering|chatgpt|gpt[- 
 CATEGORY_ORDER = ["SEO", "AIO", "VEO", "GEO", "AEO", "SXO", "LLM"]
 
 def categorize_keyword(kw: str) -> list[str]:
-    if not isinstance(kw, str) or not kw.strip():  # <-- fixed line
+    if not isinstance(kw, str) or not kw.strip():
         return ["SEO"]
     text = kw.strip().lower()
     cats = set()
@@ -345,6 +345,16 @@ if uploaded is not None:
         st.stop()
 
     # Find relevant columns
+    def find_column(df: pd.DataFrame, candidates) -> str | None:
+        cols_lower = {c.lower(): c for c in df.columns}
+        for cand in candidates:
+            if cand.lower() in cols_lower:
+                return cols_lower[cand.lower()]
+        for c in df.columns:
+            if any(k in c.lower() for k in candidates):
+                return c
+        return None
+
     vol_col = find_column(df, ["volume","search volume","sv"])
     kd_col  = find_column(df, ["kd","difficulty","keyword difficulty"])
     kw_col  = find_column(df, ["keyword","query","term"])
