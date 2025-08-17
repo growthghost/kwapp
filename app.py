@@ -75,9 +75,16 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
   font-weight: 700;
 }}
 
-/* Number inputs: blue steppers; yellow on hover/active/focus */
+/* Number inputs: ensure YELLOW focus (never red) + blue steppers */
 .stNumberInput input {{
   border: 2px solid var(--light) !important;
+  outline: none !important;
+}}
+.stNumberInput input:focus,
+.stNumberInput input:focus-visible {{
+  outline: none !important;
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .35) !important;
 }}
 .stNumberInput:focus-within input {{
   border-color: var(--accent) !important;
@@ -103,22 +110,31 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
 }}
 /* Text in uploader area is dark for readability */
 [data-testid="stFileUploader"] * {{ color: var(--ink) !important; }}
-/* “Browse files” control: blue background, white text */
+
+/* “Browse files” button: blue default, transparent on hover (like Calculate) */
 [data-testid="stFileUploaderDropzone"] button,
 [data-testid="stFileUploaderDropzone"] label,
 [data-testid="stFileUploaderDropzone"] [role="button"] {{
   background-color: var(--ink) !important;  /* #242F40 */
   color: #ffffff !important;
-  border: 1px solid var(--light) !important;
+  border: 2px solid var(--ink) !important;
   border-radius: 8px !important;
   padding: 2px 10px !important;
   font-weight: 700 !important;
+  transition: background-color .15s ease, color .15s ease, border-color .15s ease;
+}}
+[data-testid="stFileUploaderDropzone"] button:hover,
+[data-testid="stFileUploaderDropzone"] label:hover,
+[data-testid="stFileUploaderDropzone"] [role="button"]:hover {{
+  background-color: transparent !important; /* transparent hover */
+  color: var(--ink) !important;
+  border-color: var(--ink) !important;
 }}
 
 /* Tables/readability */
 .stDataFrame, .stDataFrame * , .stTable, .stTable * {{ color: var(--ink) !important; }}
 
-/* Action buttons (download etc.) */
+/* Action buttons (download & calculate) — transparent on hover */
 .stButton > button, .stDownloadButton > button {{
   background-color: var(--accent) !important;
   color: var(--ink) !important;
@@ -126,8 +142,13 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
   border-radius: 10px !important;
   font-weight: 700 !important;
   box-shadow: 0 2px 0 rgba(0,0,0,.15);
+  transition: background-color .15s ease, color .15s ease, border-color .15s ease;
 }}
-.stButton > button:hover, .stDownloadButton > button:hover {{ filter: brightness(1.05); }}
+.stButton > button:hover, .stDownloadButton > button:hover {{
+  background-color: transparent !important; /* transparent on hover */
+  color: var(--light) !important;
+  border-color: var(--accent) !important;
+}}
 
 /* Strategy banner helper */
 .info-banner {{
@@ -217,7 +238,7 @@ LLM_PAT = re.compile(r"\b(prompt|prompting|prompt[- ]?engineering|chatgpt|gpt[- 
 CATEGORY_ORDER = ["SEO", "AIO", "VEO", "GEO", "AEO", "SXO", "LLM"]
 
 def categorize_keyword(kw: str) -> list[str]:
-    if not isinstance(kw, str) or not kw.strip():
+    if not isinstance(kw: = str) or not kw.strip():
         return ["SEO"]
     text = kw.strip().lower()
     cats = set()
