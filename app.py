@@ -49,25 +49,43 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
   border-radius: 8px !important;
 }}
 
-/* Add a visual cue on the select label */
-.stSelectbox label::after {{
-  content: "  ⯆";
-  color: var(--light);
+/* Put a caret INSIDE the select box (not the label) */
+.stSelectbox div[data-baseweb="select"] > div {{
+  position: relative;
+}}
+.stSelectbox div[data-baseweb="select"] > div::after {{
+  content: "▾";
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--ink);
+  pointer-events: none;
+  font-size: 14px;
   font-weight: 700;
 }}
 
-/* File uploader dropzone & text inside */
+/* File uploader dropzone background */
 [data-testid="stFileUploaderDropzone"] {{
   background: rgba(255,255,255,0.98);
   border: 2px dashed var(--accent);
-  color: var(--ink) !important;
 }}
+/* Bulk CSV zone text should be dark */
 [data-testid="stFileUploader"] * {{ color: var(--ink) !important; }}
+/* Make the 'Browse files' control look like a button with white text */
+[data-testid="stFileUploaderDropzone"] button,
+[data-testid="stFileUploaderDropzone"] label,
+[data-testid="stFileUploaderDropzone"] [role="button"] {{
+  background-color: var(--accent) !important;
+  color: #ffffff !important;               /* <- white text as requested */
+  border: 1px solid var(--light) !important;
+  border-radius: 8px !important;
+  padding: 2px 10px !important;
+  font-weight: 700 !important;
+}}
 
 /* Tables/dataframes use dark text for readability */
-.stDataFrame, .stDataFrame * , .stTable, .stTable * {{
-  color: var(--ink) !important;
-}}
+.stDataFrame, .stDataFrame * , .stTable, .stTable * {{ color: var(--ink) !important; }}
 
 /* Buttons (including download) */
 .stButton > button, .stDownloadButton > button {{
@@ -90,49 +108,36 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
     unsafe_allow_html=True,
 )
 
-# ---------- Robust logo loader (fixes MediaFileStorageError) ----------
-def _load_logo_bytes() -> bytes | str | None:
-    """
-    Returns logo bytes to feed st.image(), or a URL string, or None if not found.
-    Looks in common local paths; falls back to secrets URL if provided.
-    """
-    candidates = [
+# ---------- Logo (top-left) ----------
+def _load_logo_bytes() -> bytes | None:
+    for p in [
+        Path("/mnt/data/OutrankIQ Grey Logo.png"),
         Path("OutrankIQ Grey Logo.png"),
         Path("assets/OutrankIQ Grey Logo.png"),
-        Path(__file__).with_name("OutrankIQ Grey Logo.png"),
-        Path(__file__).parent / "assets" / "OutrankIQ Grey Logo.png",
-        Path("/mnt/data/OutrankIQ Grey Logo.png"),  # dev/local fallback
-    ]
-    for p in candidates:
+    ]:
         try:
             if p.exists():
                 return p.read_bytes()
         except Exception:
             pass
-    # Optional remote URL (e.g., set in Streamlit secrets)
-    try:
-        url = st.secrets.get("LOGO_URL", None)
-        if url:
-            return url  # st.image can consume a URL string
-    except Exception:
-        pass
     return None
 
-# ---------- Header: logo replaces main title ----------
-st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-c1, c2, c3 = st.columns([1, 6, 1])
-with c2:
-    _logo = _load_logo_bytes()
-    if _logo:
-        st.image(_logo, use_container_width=True)
-    else:
-        # graceful fallback if logo can't be loaded
-        st.markdown(
-            "<h1 style='text-align:center; color: var(--light);'>OutrankIQ</h1>",
-            unsafe_allow_html=True,
+header = st.container()
+with header:
+    left, right = st.columns([2, 8])
+    with left:
+        logo_bytes = _load_logo_bytes()
+        if logo_bytes:
+            st.image(logo_bytes, width=220)  # explicit width, no deprecated arg
+        else:
+            st.markdown(
+                "<h1 style='margin:0; color: var(--light);'>OutrankIQ</h1>",
+                unsafe_allow_html=True,
+            )
+    with right:
+        st.caption(
+            "Score keywords by Search Volume (A) and Keyword Difficulty (B) — with selectable scoring strategies."
         )
-
-st.caption("Score keywords by Search Volume (A) and Keyword Difficulty (B) — with selectable scoring strategies.")
 
 # ---------- Helpers ----------
 def find_column(df: pd.DataFrame, candidates) -> str | None:
@@ -145,15 +150,7 @@ def find_column(df: pd.DataFrame, candidates) -> str | None:
             return c
     return None
 
-LABEL_MAP = {
-    6: "Elite",
-    5: "Excellent",
-    4: "Good",
-    3: "Fair",
-    2: "Low",
-    1: "Very Low",
-    0: "Not rated",
-}
+LABEL_MAP = {6: "Elite", 5: "Excellent", 4: "Good", 3: "Fair", 2: "Low", 1: "Very Low", 0: "Not rated"}
 
 # Used for card + preview styling only (NOT exported)
 COLOR_MAP = {
@@ -241,7 +238,7 @@ def calculate_score(volume: float, kd: float) -> int:
 def add_scoring_columns(df: pd.DataFrame, volume_col: str, kd_col: str, kw_col: str | None) -> pd.DataFrame:
     out = df.copy()
 
-    # Eligibility + Reason (Option A)
+    # Eligibility + Reason
     def _eligibility_reason(vol, kd):
         if pd.isna(vol) or pd.isna(kd):
             return "No", "Invalid Volume/KD"
@@ -259,7 +256,7 @@ def add_scoring_columns(df: pd.DataFrame, volume_col: str, kd_col: str, kw_col: 
     kw_series = out[kw_col] if kw_col else pd.Series([""] * len(out))
     out["Category"] = [", ".join(categorize_keyword(str(k))) for k in kw_series]
 
-    # Order columns (no color column shown)
+    # Order columns
     ordered = ([kw_col] if kw_col else []) + [volume_col, kd_col, "Score", "Tier", "Eligible", "Reason", "Category"]
     remaining = [c for c in out.columns if c not in ordered]
     out = out[ordered + remaining]
@@ -277,10 +274,12 @@ with st.form("single"):
     if st.form_submit_button("Calculate Score"):
         sc = calculate_score(vol_val, kd_val)
         label = LABEL_MAP.get(sc, "Not rated")
+        # ✅ Restore the colored score card using COLOR_MAP
+        color = COLOR_MAP.get(sc, "#9ca3af")
         st.markdown(
             f"""
-            <div style='background: linear-gradient(90deg, {BRAND_ACCENT}, {BRAND_INK}); padding:16px; border-radius:12px; text-align:center;'>
-                <span style='font-size:22px; font-weight:bold; color:{BRAND_LIGHT};'>Score: {sc} • Tier: {label}</span>
+            <div style='background-color:{color}; padding:16px; border-radius:12px; text-align:center;'>
+                <span style='font-size:22px; font-weight:bold; color:#000;'>Score: {sc} • Tier: {label}</span>
             </div>
             """,
             unsafe_allow_html=True,
@@ -304,14 +303,14 @@ if uploaded is not None:
 
     def try_read(bytes_data: bytes) -> pd.DataFrame:
         trials = [
-            {"encoding": None, "sep": None, "engine": "python"},  # let pandas infer
+            {"encoding": None, "sep": None, "engine": "python"},
             {"encoding": "utf-8", "sep": None, "engine": "python"},
             {"encoding": "utf-8-sig", "sep": None, "engine": "python"},
             {"encoding": "ISO-8859-1", "sep": None, "engine": "python"},
             {"encoding": "cp1252", "sep": None, "engine": "python"},
             {"encoding": "utf-16", "sep": None, "engine": "python"},
-            {"encoding": None, "sep": ",", "engine": "python"},   # force comma
-            {"encoding": None, "sep": "\t", "engine": "python"},  # TSV fallback
+            {"encoding": None, "sep": ",", "engine": "python"},
+            {"encoding": None, "sep": "\t", "engine": "python"},
         ]
         last_err = None
         for t in trials:
@@ -377,7 +376,7 @@ if uploaded is not None:
             help="Sorted by eligibility (Yes first), KD ascending, Volume descending"
         )
 
-        # Optional preview (same sorting; colorized Score/Tier cells only)
+        # Optional preview
         if st.checkbox("Preview first 10 rows (optional)", value=False):
             preview_df = scored.copy()
             preview_df["Strategy"] = scoring_mode
@@ -390,10 +389,7 @@ if uploaded is not None:
 
             def _row_style(row):
                 color = COLOR_MAP.get(int(row.get("Score", 0)) if pd.notna(row.get("Score", 0)) else 0, "#9ca3af")
-                return [
-                    ("background-color: " + color + "; color: black;") if c in ("Score", "Tier") else ""
-                    for c in row.index
-                ]
+                return [("background-color: " + color + "; color: black;") if c in ("Score", "Tier") else "" for c in row.index]
 
             preview_cols = export_cols  # same columns as CSV
             styled = preview_df[preview_cols].head(10).style.apply(_row_style, axis=1)
