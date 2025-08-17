@@ -317,7 +317,7 @@ _READ_TIMEOUT = 8
 _TOTAL_BUDGET_SECS = 60
 _CONCURRENCY = 16  # aiohttp
 _THREADS = 12      # requests fallback
-_MIN_FIT_THRESHOLD = 0.12
+_MIN_FIT_THRESHOLD = 0.05
 
 _DEF_HEADERS = {
     "User-Agent": "OutrankIQMapper/1.0 (+https://example.com)"
@@ -375,9 +375,12 @@ def _session():
 
 def _fetch_text_requests(url: str, session, timeout: Tuple[int, int]) -> Optional[str]:
     try:
-        if not session:
+        if session is not None:
+            resp = session.get(url, headers=_DEF_HEADERS, timeout=timeout, stream=True, allow_redirects=True)
+        elif requests is not None:
+            resp = requests.get(url, headers=_DEF_HEADERS, timeout=timeout, stream=True, allow_redirects=True)
+        else:
             return None
-        resp = session.get(url, headers=_DEF_HEADERS, timeout=timeout, stream=True, allow_redirects=True)
         ctype = resp.headers.get("Content-Type", "").lower()
         if resp.status_code >= 400:
             return None
@@ -520,8 +523,32 @@ def shallow_crawl(base_url: str, include_subdomains: bool) -> List[str]:
         try:
             return asyncio.run(_run())[:_MAX_PAGES]
         except RuntimeError:
-            # If already in event loop (e.g., some Streamlit contexts)
-            return out
+            # Fallback to requests crawl when an event loop is already running
+            if not requests:
+                return [base]
+            sess = requests.Session()
+            try:
+                while frontier and len(out) < _MAX_PAGES:
+                    url, depth = frontier.pop(0)
+                    try:
+                        r = sess.get(url, headers=_DEF_HEADERS, timeout=(_CONNECT_TIMEOUT, _READ_TIMEOUT), allow_redirects=True)
+                        if r.status_code >= 400:
+                            continue
+                        ctype = r.headers.get("Content-Type", "").lower()
+                        if "html" not in ctype and "text" not in ctype:
+                            continue
+                        html = r.content[:_MAX_BYTES].decode(r.apparent_encoding or "utf-8", errors="ignore")
+                    except Exception:
+                        continue
+                    out.append(url)
+                    if depth < 2 and len(out) < _MAX_PAGES:
+                        for link in _extract_links(html, url):
+                            if link not in seen and ok(link):
+                                seen.add(link)
+                                frontier.append((link, depth + 1))
+            finally:
+                sess.close()
+            return out[:_MAX_PAGES]
     else:
         if not requests:
             return [base]
@@ -653,6 +680,27 @@ def _fetch_profiles(urls: List[str]) -> List[Dict]:
         try:
             return asyncio.run(_run())
         except RuntimeError:
+            # Fallback to requests when an event loop is already running
+            if not requests:
+                return profiles
+            sess = requests.Session()
+            try:
+                for u in urls[:_MAX_PAGES]:
+                    try:
+                        r = sess.get(u, headers=_DEF_HEADERS, timeout=(_CONNECT_TIMEOUT, _READ_TIMEOUT), allow_redirects=True)
+                        if r.status_code >= 400:
+                            continue
+                        ctype = r.headers.get("Content-Type", "").lower()
+                        if "html" not in ctype and "text" not in ctype:
+                            continue
+                        html = r.content[:_MAX_BYTES].decode(r.apparent_encoding or "utf-8", errors="ignore")
+                        prof = _extract_profile(html, str(r.url))
+                        if prof and prof.get("weights"):
+                            profiles.append(prof)
+                    except Exception:
+                        continue
+            finally:
+                sess.close()
             return profiles
     else:
         if not requests:
@@ -707,7 +755,7 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
         return pd.Series([""] * len(df), index=df.index, dtype="string")
 
     # Precompute best URL per keyword
-    best_for_kw: Dict[int, Tuple[str, float]] = {}
+    best_for_kw: Dict[int, Tuple[str, float, str]] = {}
 
     for idx, row in df.iterrows():
         kw = str(row.get(kw_col, "")) if kw_col else str(row.get("Keyword", ""))
@@ -824,10 +872,8 @@ st.subheader("Bulk Scoring (CSV Upload)")
 
 # Mapping controls (minimal UI)
 base_site_url = st.text_input("Base site URL (for URL mapping)", placeholder="https://example.com")
-map_enable = st.checkbox("Map keywords to site URLs (fast crawl)", value=True)
-with st.expander("Advanced (optional)"):
-    use_sitemap_first = st.checkbox("Use sitemap first", value=True)
-    include_subdomains = st.checkbox("Include subdomains", value=True)
+use_sitemap_first = True
+include_subdomains = True
 
 uploaded = st.file_uploader("Upload CSV", type=["csv"])
 example = pd.DataFrame({"Keyword":["best running shoes","seo tools","crm software"], "Volume":[5400,880,12000], "KD":[38,72,18]})
@@ -897,15 +943,33 @@ if uploaded is not None:
 
         # -------- URL Mapping (appends last column) --------
         map_series = pd.Series([""] * len(export_df), index=export_df.index, dtype="string")
-        if map_enable:
-            if not base_site_url.strip():
-                st.info("Enter a Base site URL to enable mapping.")
-            else:
-                map_series = map_keywords_to_urls(
-                    export_df,
-                    kw_col=kw_col,
-                    vol_col=vol_col,
-                    base_url=base_site_url.strip(),
+if base_site_url.strip():
+    loader = st.empty()
+    loader.markdown(
+        """
+        <div style='display:flex;align-items:center;gap:12px;'>
+          <div style='font-size:28px'>🚀</div>
+          <div style='font-weight:700;'>Mapping keywords to your site…</div>
+        </div>
+        <style>
+          @keyframes bob { from { transform: translateY(0); } to { transform: translateY(-6px); } }
+          div[style*="font-size:28px"] { animation: bob .6s ease-in-out infinite alternate; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    with st.spinner("Launching fast crawl & scoring fit…"):
+        map_series = map_keywords_to_urls(
+            export_df,
+            kw_col=kw_col,
+            vol_col=vol_col,
+            base_url=base_site_url.strip(),
+            include_subdomains=include_subdomains,
+            use_sitemap_first=use_sitemap_first,
+        )
+    loader.empty()
+else:
+    st.info("Enter a Base site URL to enable mapping."),
                     include_subdomains=include_subdomains,
                     use_sitemap_first=use_sitemap_first,
                 )
