@@ -14,9 +14,9 @@ except Exception:
 
 # ---------- Brand / Theme ----------
 BRAND_BG = "#747474"     # background
-BRAND_INK = "#242F40"    # secondary (ink / blue)
-BRAND_ACCENT = "#E1B000" # accent 1 (yellow)
-BRAND_LIGHT = "#FFFFFF"  # accent 2 (white)
+BRAND_INK = "#242F40"    # secondary (blue/ink)
+BRAND_ACCENT = "#E1B000" # accent (yellow)
+BRAND_LIGHT = "#FFFFFF"  # light (white)
 
 st.set_page_config(page_title="OutrankIQ", page_icon="🔎", layout="centered")
 
@@ -28,7 +28,7 @@ st.markdown(
   --bg: {BRAND_BG};
   --ink: {BRAND_INK};
   --accent: {BRAND_ACCENT};
-  --accent-rgb: 225,176,0; /* for focus rings */
+  --accent-rgb: 225,176,0;
   --light: {BRAND_LIGHT};
 }}
 /* App background */
@@ -40,7 +40,7 @@ html, body, [class^="css"], [class*=" css"] {{ color: var(--light) !important; }
 /* Headings */
 h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
 
-/* Inputs / selects / numbers: base surface is white with ink text */
+/* Inputs / selects / numbers base */
 .stTextInput > div > div > input,
 .stTextArea textarea,
 .stNumberInput input,
@@ -50,7 +50,7 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
   border-radius: 8px !important;
 }}
 
-/* Selectbox border + focus ring in accent (fixes red outline) */
+/* Selectbox: caret INSIDE + yellow focus (no red) */
 .stSelectbox div[data-baseweb="select"] > div {{
   border: 2px solid var(--light) !important;
   position: relative;
@@ -59,7 +59,6 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
   border-color: var(--accent) !important;
   box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .35) !important;
 }}
-/* Caret INSIDE the select box */
 .stSelectbox div[data-baseweb="select"] > div::after {{
   content: "▾";
   position: absolute;
@@ -72,23 +71,23 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
   font-weight: 700;
 }}
 
-/* Number inputs: focus + steppers highlight to yellow (not red) */
+/* Number inputs: blue steppers; yellow on hover/active/focus */
 .stNumberInput input {{
   border: 2px solid var(--light) !important;
 }}
-.stNumberInput input:focus {{
-  outline: none !important;
+.stNumberInput:focus-within input {{
   border-color: var(--accent) !important;
   box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .35) !important;
 }}
 .stNumberInput button {{
-  background: var(--light) !important;
-  color: var(--ink) !important;
-  border: 1px solid var(--light) !important;
+  background: var(--ink) !important;        /* blue by default */
+  color: #ffffff !important;
+  border: 1px solid var(--ink) !important;
 }}
 .stNumberInput button:hover,
-.stNumberInput button:focus {{
-  background: var(--accent) !important;
+.stNumberInput button:active,
+.stNumberInput button:focus-visible {{
+  background: var(--accent) !important;     /* yellow on interaction */
   color: #000 !important;
   border-color: var(--accent) !important;
 }}
@@ -98,9 +97,9 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
   background: rgba(255,255,255,0.98);
   border: 2px dashed var(--accent);
 }}
-/* Text in uploader area is ink/dark */
+/* Text in uploader area is dark for readability */
 [data-testid="stFileUploader"] * {{ color: var(--ink) !important; }}
-/* “Browse files” button: blue background with white text */
+/* “Browse files” control: blue background, white text */
 [data-testid="stFileUploaderDropzone"] button,
 [data-testid="stFileUploaderDropzone"] label,
 [data-testid="stFileUploaderDropzone"] [role="button"] {{
@@ -137,30 +136,49 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
 )
 
 # ---------- Logo (top-left, robust loading) ----------
-def _load_logo_bytes() -> bytes | None:
-    for p in [
-        Path("/mnt/data/OutrankIQ Grey Logo.png"),
-        Path("OutrankIQ Grey Logo.png"),
-        Path("assets/OutrankIQ Grey Logo.png"),
-    ]:
+def _load_logo() -> tuple[bytes | str | None, list[str]]:
+    tried = []
+    candidates = [
+        Path("assets/OutrankIQ Grey Logo.png"),          # preferred repo path
+        Path("OutrankIQ Grey Logo.png"),                 # project root fallback
+        Path("/mnt/data/OutrankIQ Grey Logo.png"),       # dev fallback
+    ]
+    for p in candidates:
+        tried.append(str(p))
         try:
             if p.exists():
-                return p.read_bytes()
+                return p.read_bytes(), tried
         except Exception:
             pass
-    return None
+    # Optional URL via secrets
+    try:
+        url = st.secrets.get("LOGO_URL", None)
+        if url:
+            return url, tried + ["st.secrets['LOGO_URL']"]
+    except Exception:
+        pass
+    return None, tried
 
 top = st.container()
 with top:
     left, right = st.columns([2, 8])
     with left:
-        logo_bytes = _load_logo_bytes()
-        if logo_bytes:
-            st.image(logo_bytes, width=220)  # top-left, fixed size
+        logo, tried_paths = _load_logo()
+        if logo:
+            st.image(logo, width=220)  # top-left logo (doesn't replace title)
         else:
-            st.markdown("<h1 style='margin:0; color: var(--light);'>OutrankIQ</h1>", unsafe_allow_html=True)
+            st.info(
+                "Logo not found. Searched: " + " • ".join(tried_paths) +
+                ". Add the PNG to your repo or set LOGO_URL in Secrets."
+            )
     with right:
-        st.caption("Score keywords by Search Volume (A) and Keyword Difficulty (B) — with selectable scoring strategies.")
+        st.write("")  # keep empty for clean header
+
+# ---- Title stays as text ----
+st.title("OutrankIQ")
+
+# ---- Tagline sits directly above the scoring selector ----
+st.caption("Score keywords by Search Volume (A) and Keyword Difficulty (B) — with selectable scoring strategies.")
 
 # ---------- Helpers ----------
 def find_column(df: pd.DataFrame, candidates) -> str | None:
@@ -183,15 +201,15 @@ LABEL_MAP = {
     0: "Not rated",
 }
 
-# Used for card + preview styling only (NOT exported)
+# Used for the single-word color card
 COLOR_MAP = {
-    6: "#2ecc71",  # bright green
-    5: "#a3e635",  # lime
-    4: "#facc15",  # yellow
-    3: "#fb923c",  # orange
-    2: "#f87171",  # tomato
-    1: "#ef4444",  # red
-    0: "#9ca3af",  # gray
+    6: "#2ecc71",
+    5: "#a3e635",
+    4: "#facc15",
+    3: "#fb923c",
+    2: "#f87171",
+    1: "#ef4444",
+    0: "#9ca3af",
 }
 
 strategy_descriptions = {
@@ -207,9 +225,9 @@ if scoring_mode == "Low Hanging Fruit":
     MIN_VALID_VOLUME = 10
     KD_BUCKETS = [(0, 15, 6), (16, 20, 5), (21, 25, 4), (26, 50, 3), (51, 75, 2), (76, 100, 1)]
 elif scoring_mode == "In The Game":
-    MIN_VALID_VOLUME = 1500  # per your correction
+    MIN_VALID_VOLUME = 1500
     KD_BUCKETS = [(0, 30, 6), (31, 45, 5), (46, 60, 4), (61, 70, 3), (71, 80, 2), (81, 100, 1)]
-elif scoring_mode == "Competitive":
+else:
     MIN_VALID_VOLUME = 3000
     KD_BUCKETS = [(0, 40, 6), (41, 60, 5), (61, 75, 4), (76, 85, 3), (86, 95, 2), (96, 100, 1)]
 
@@ -249,12 +267,12 @@ def categorize_keyword(kw: str) -> list[str]:
     if not cats:
         cats.add("SEO")
     else:
-        if "LLM" not in cats: cats.add("SEO")
+        if "LLM" not in cats:
+            cats.add("SEO")
     return [c for c in CATEGORY_ORDER if c in cats]
 
 # ---------- Scoring ----------
 def calculate_score(volume: float, kd: float) -> int:
-    """Return score 0-6, but ONLY if eligible (volume >= min)."""
     if pd.isna(volume) or pd.isna(kd):
         return 0
     if volume < MIN_VALID_VOLUME:
@@ -268,12 +286,12 @@ def calculate_score(volume: float, kd: float) -> int:
 def add_scoring_columns(df: pd.DataFrame, volume_col: str, kd_col: str, kw_col: str | None) -> pd.DataFrame:
     out = df.copy()
     def _eligibility_reason(vol, kd):
-        if pd.isna(vol) or pd.isna(kd): return "No", "Invalid Volume/KD"
+        if pd.isna(vol) or pd.isna(kd): return "No","Invalid Volume/KD"
         if vol < MIN_VALID_VOLUME: return "No", f"Below min volume for {scoring_mode} ({MIN_VALID_VOLUME})"
-        return "Yes", ""
-    eligible, reason = zip(*(_eligibility_reason(v, k) for v, k in zip(out[volume_col], out[kd_col])))
+        return "Yes",""
+    eligible, reason = zip(*(_eligibility_reason(v,k) for v,k in zip(out[volume_col], out[kd_col])))
     out["Eligible"] = list(eligible); out["Reason"] = list(reason)
-    out["Score"] = [calculate_score(v, k) for v, k in zip(out[volume_col], out[kd_col])]
+    out["Score"] = [calculate_score(v,k) for v,k in zip(out[volume_col], out[kd_col])]
     out["Tier"]  = out["Score"].map(LABEL_MAP).fillna("Not rated")
     kw_series = out[kw_col] if kw_col else pd.Series([""]*len(out))
     out["Category"] = [", ".join(categorize_keyword(str(k))) for k in kw_series]
@@ -281,7 +299,7 @@ def add_scoring_columns(df: pd.DataFrame, volume_col: str, kd_col: str, kw_col: 
     remaining = [c for c in out.columns if c not in ordered]
     return out[ordered + remaining]
 
-# ---------- Single keyword ----------
+# ---------- Single Keyword ----------
 st.subheader("Single Keyword Score")
 with st.form("single"):
     c1, c2 = st.columns(2)
@@ -362,7 +380,7 @@ if uploaded is not None:
 
         scored = add_scoring_columns(df, vol_col, kd_col, kw_col)
 
-        # ---------- CSV DOWNLOAD (sorted: Yes first, KD ↑ then Volume ↓) ----------
+        # ---------- CSV DOWNLOAD ----------
         filename_base = f"outrankiq_{scoring_mode.lower().replace(' ', '_')}_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
         base_cols = ([kw_col] if kw_col else []) + [vol_col, kd_col, "Score", "Tier", "Eligible", "Reason", "Category"]
         export_df = scored[base_cols].copy()
