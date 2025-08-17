@@ -75,7 +75,7 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
   font-weight: 700;
 }}
 
-/* Number inputs: ensure YELLOW focus (never red) + blue steppers */
+/* Number inputs: ensure YELLOW focus + blue steppers */
 .stNumberInput input {{
   border: 2px solid var(--light) !important;
   outline: none !important;
@@ -126,7 +126,7 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
 [data-testid="stFileUploaderDropzone"] button:hover,
 [data-testid="stFileUploaderDropzone"] label:hover,
 [data-testid="stFileUploaderDropzone"] [role="button"]:hover {{
-  background-color: transparent !important; /* transparent hover */
+  background-color: transparent !important; /* transparent on hover */
   color: var(--ink) !important;
   border-color: var(--ink) !important;
 }}
@@ -238,7 +238,7 @@ LLM_PAT = re.compile(r"\b(prompt|prompting|prompt[- ]?engineering|chatgpt|gpt[- 
 CATEGORY_ORDER = ["SEO", "AIO", "VEO", "GEO", "AEO", "SXO", "LLM"]
 
 def categorize_keyword(kw: str) -> list[str]:
-    if not isinstance(kw: = str) or not kw.strip():
+    if not isinstance(kw, str) or not kw.strip():  # <-- fixed line
         return ["SEO"]
     text = kw.strip().lower()
     cats = set()
