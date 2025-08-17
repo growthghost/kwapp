@@ -121,17 +121,17 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
 }}
 
 /* Text inputs: ensure GREEN focus */
-.stTextInput input {
+.stTextInput input {{
   border: 2px solid var(--light) !important;
   outline: none !important;
   border-radius: 8px !important;
-}
+}}
 .stTextInput input:focus,
-.stTextInput input:focus-visible {
+.stTextInput input:focus-visible {{
   border-color: var(--accent) !important;
   box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .35) !important;
   outline: none !important;
-}
+}}
 
 /* File uploader dropzone */
 [data-testid="stFileUploaderDropzone"] {{
