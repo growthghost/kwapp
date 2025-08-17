@@ -180,6 +180,7 @@ VEO_PAT = re.compile(r"\b(near me|open now|closest|call now|directions|ok google
 GEO_PAT = re.compile(r"\b(how to|best way to|steps? to|examples? of|checklist|framework|template)\b", re.I)
 SXO_PAT = re.compile(r"\b(best|top|compare|comparison|vs\.?|review|pricing|cost|cheap|free download|template|examples?)\b", re.I)
 LLM_PAT = re.compile(r"\b(prompt|prompting|prompt[- ]?engineering|chatgpt|gpt[- ]?\d|llm|rag|embedding|vector|few[- ]?shot|zero[- ]?shot)\b", re.I)
+AIO_PAGE_SIG = re.compile(r"\b(what is|how to|guide|tutorial|step[- ]?by[- ]?step|checklist|framework|template|examples?)\b", re.I)
 CATEGORY_ORDER = ["SEO","AIO","VEO","GEO","AEO","SXO","LLM"]
 
 def categorize_keyword(kw: str) -> List[str]:
@@ -232,13 +233,45 @@ _READ_TIMEOUT = 8
 _TOTAL_BUDGET_SECS = 60
 _CONCURRENCY = 16
 _THREADS = 12
-_MIN_FIT_THRESHOLD = 0.0
-_ALT_FIT_MIN = 0.2
+_MIN_FIT_THRESHOLD = 0.23  # leave blank if best fit below this
+_ALT_FIT_MIN = 0.2         # allow fallback only if fit >= this
 _DEF_HEADERS = {"User-Agent": "OutrankIQMapper/1.0 (+https://example.com)"}
-_MAPPER_VERSION = "site-map-v4"  # bump to invalidate old map cache
+_MAPPER_VERSION = "site-map-v5"  # bump to invalidate old map cache
+
+# ---------- Light normalization / stemming ----------
+_SYN_MAP = {
+    "organisations":"organization",
+    "organisation":"organization",
+    "organizations":"organization",
+    "orgs":"organization",
+    "org":"organization",
+    "disabilities":"disability",
+    "assist":"help",
+    "assists":"help",
+    "assistance":"help",
+}
+
+def _norm_token(t: str) -> str:
+    t = t.lower()
+    if t in _SYN_MAP: return _SYN_MAP[t]
+    # simple verb/number/plural stemming
+    if t.endswith("ies") and len(t) > 3:
+        t = t[:-3] + "y"
+    elif t.endswith("es") and len(t) > 4:
+        t = t[:-2]
+    elif t.endswith("s") and len(t) > 3:
+        t = t[:-1]
+    if t.endswith("ing") and len(t) > 5:
+        t = t[:-3]
+    elif t.endswith("ed") and len(t) > 4:
+        t = t[:-2]
+    return t
 
 def _tokenize(text: str) -> List[str]:
     return TOKEN_RE.findall(text.lower()) if text else []
+
+def _ntokens(text: str) -> List[str]:
+    return [_norm_token(t) for t in _tokenize(text)]
 
 def _derive_roots(base_url: str) -> Tuple[str,str]:
     host = urlparse(base_url).netloc.lower()
@@ -286,6 +319,10 @@ def _is_home(u: str) -> bool:
     path = re.sub(r'/+', '/', p.path or '/')
     return path == '/'
 
+def _is_contact_like(u: str) -> bool:
+    path = urlparse(u).path.lower()
+    return any(seg in path for seg in ("/contact", "/contact-us", "/locations", "/find-us", "/visit"))
+
 def _is_page_like(source_type: str, url: str, is_nav: bool) -> bool:
     """Treat homepage + shallow, non-blog/nav pages as 'page-like' even if not in a page sitemap."""
     if source_type == 'page':
@@ -293,12 +330,10 @@ def _is_page_like(source_type: str, url: str, is_nav: bool) -> bool:
     path = urlparse(url).path.lower()
     if _is_home(url):
         return True
-    # nav items that are not clearly blog/news/tax
     if is_nav and not any(seg in path for seg in ('/blog/', '/news/', '/category/', '/tag/', '/author/', '/archive/')):
         depth = len([seg for seg in path.split('/') if seg])
         if depth <= 2:
             return True
-    # shallow, non-blog paths (e.g., /about, /services)
     depth = len([seg for seg in path.split('/') if seg])
     if depth <= 1 and not re.search(r"/\d{4}/\d{2}/", path) and not any(s in path for s in ('/blog/', '/news/')):
         return True
@@ -555,18 +590,20 @@ def _extract_profile(html: str, final_url: str, requested_url: Optional[str] = N
         if len(words) > 800: body_text = " ".join(words[:800])
 
     weights: Dict[str,float] = defaultdict(float)
-    for tok in _tokenize(title): weights[tok] += 3.0
+    for tok in _ntokens(title): weights[tok] += 3.0
     for t in h1_texts:
-        for tok in _tokenize(t): weights[tok] += 2.0
+        for tok in _ntokens(t): weights[tok] += 2.0
     for t in h2h3_texts:
-        for tok in _tokenize(t): weights[tok] += 1.5
-    for tok in _tokenize(body_text): weights[tok] += 1.0
+        for tok in _ntokens(t): weights[tok] += 1.5
+    for tok in _ntokens(body_text): weights[tok] += 1.0
 
     title_h1 = " ".join([title] + h1_texts)
+    title_h1_norm = " ".join(_ntokens(title_h1))
     return {
         "url": canonical or final_url,
         "title": title or "",
         "title_h1": title_h1.lower(),
+        "title_h1_norm": title_h1_norm,
         "weights": dict(weights),
         "final_url": final_url,
         "requested_url": requested_url or final_url,
@@ -675,16 +712,20 @@ def cached_nav_links(base_url: str) -> Tuple[str, ...]:
 
 # ---------- Fit & priority ----------
 def _fit_score(keyword: str, profile: Dict) -> float:
-    tokens = _tokenize(keyword)
+    tokens = _ntokens(keyword)
     if not tokens: return 0.0
     w = profile.get("weights", {})
     overlap = sum(w.get(t, 0.0) for t in tokens) / max(1, len(tokens))
-    title_h1 = profile.get("title_h1","")
-    covered = sum(1 for t in tokens if t in title_h1)
+    title_tokens = set((profile.get("title_h1_norm") or "").split())
+    covered = sum(1 for t in tokens if t in title_tokens)
     if covered == len(tokens): overlap += 0.25
     elif covered/len(tokens) >= 0.5: overlap += 0.10
     phrase = " ".join(tokens)
-    if phrase and phrase in title_h1: overlap += 0.15
+    thn = profile.get("title_h1_norm","")
+    if phrase and phrase in thn: overlap += 0.25  # stronger phrase boost
+    # Penalize if nothing in Title/H1 (except homepage/contact)
+    if covered == 0 and not _is_home(profile.get("url","")) and not _is_contact_like(profile.get("url","")):
+        overlap -= 0.20
     return max(0.0, min(2.0, overlap))
 
 def _url_priority_bonus(u: str, is_nav: bool, source_type: Optional[str]) -> float:
@@ -713,7 +754,6 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
     if not profiles:
         return pd.Series([""]*len(df), index=df.index, dtype="string")
 
-    # Build source type by normalized key; match by canonical or requested
     src_by_key = { _url_key(k): v for k, v in srcmap.items() }
     def _src_type_for_profile(p: Dict) -> str:
         return (
@@ -731,12 +771,12 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
     max_log = float((vols + 1).apply(lambda x: math.log(1 + x)).max()) or 1.0
 
     def strat_weights():
-        if scoring_mode == "Low Hanging Fruit": return 0.20, 0.45, 0.35
+        if scoring_mode == "Low Hanging Fruit": return 0.30, 0.40, 0.30  # ↑fit, ↓KD a bit
         elif scoring_mode == "In The Game":     return 0.30, 0.35, 0.35
         else:                                    return 0.30, 0.20, 0.50
     W_FIT, W_KD, W_VOL = strat_weights()
 
-    TOP_K = 3
+    TOP_K = 5
     kw_candidates: Dict[int, List[Tuple[str,float]]] = {}
     kw_slot: Dict[int,str] = {}
     kw_rank: Dict[int,float] = {}
@@ -763,11 +803,20 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
 
             # VEO steering: prefer homepage/contact/locations; downweight news/blog
             if slot == "VEO":
-                path = urlparse(p["url"]).path.lower()
-                if _is_home(p["url"]) or any(s in path for s in ("/contact", "/contact-us", "/locations", "/find-us", "/visit")):
+                if _is_home(p["url"]) or _is_contact_like(p["url"]):
                     f += 0.15
+                path = urlparse(p["url"]).path.lower()
                 if "/blog/" in path or "/news/" in path:
                     f -= 0.25
+                depth = len([seg for seg in path.split("/") if seg])
+                if depth >= 3 and not is_nav and not _is_home(p["url"]) and not _is_contact_like(p["url"]):
+                    f -= 0.10
+
+            # AIO page cues in Title/H1
+            if slot == "AIO":
+                th = p.get("title_h1","")
+                if AIO_PAGE_SIG.search(th): f += 0.15
+                else: f -= 0.15
 
             f = max(0.0, min(2.0, f))
             if f <= 0:
@@ -787,10 +836,17 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
         if len(fits) < TOP_K:
             fits.extend(fits_other[:TOP_K - len(fits)])
 
+        # Minimum fit gate — leave unmapped when too weak
+        if not fits or (fits[0][1] < _MIN_FIT_THRESHOLD):
+            kw_candidates[idx] = []
+            kw_slot[idx] = slot
+            kw_rank[idx] = 0.0
+            continue
+
         kw_candidates[idx] = fits[:TOP_K]
         kw_slot[idx] = slot
 
-        best_fit = fits[0][1] if fits else 0.0
+        best_fit = fits[0][1]
         kd_val = float(pd.to_numeric(row.get(kd_col,0), errors="coerce") or 0)
         vol_val = float(pd.to_numeric(row.get(vol_col,0), errors="coerce") or 0)
         fit_norm = best_fit / 2.0
@@ -799,11 +855,19 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
         kw_rank[idx] = W_FIT*fit_norm + W_KD*kd_norm + W_VOL*vol_norm
 
     caps = {"VEO":1, "AIO":1, "SEO":2}
-    assigned: Dict[str, Dict[str, List[int] | Optional[int]]] = {}
+    assigned: Dict[str, Dict[str, object]] = {}
     for p in profiles:
         assigned[p["url"]] = {"VEO":None, "AIO":None, "SEO":[]}
 
     mapped = {i:"" for i in df.index}
+
+    def _seo_allowed(u: str, fit: float) -> bool:
+        stype = src_by_key.get(_url_key(u))
+        path = urlparse(u).path.lower()
+        bloglike = (stype == "post") or ("/blog/" in path) or ("/news/" in path) or bool(re.search(r"/\d{4}/\d{2}/", path))
+        if bloglike and fit < 0.35:
+            return False
+        return True
 
     def assign_slot(slot_name: str):
         ids = [i for i,s in kw_slot.items() if s == slot_name]
@@ -813,10 +877,10 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
             if not choices: continue
             for j, (u, fit) in enumerate(choices):
                 if slot_name in {"VEO","AIO"}:
-                    if assigned[u][slot_name] is None and (j == 0 or fit >= _ALT_FIT_MIN):
+                    if assigned[u]["VEO" if slot_name=="VEO" else "AIO"] is None and (j == 0 or fit >= _ALT_FIT_MIN):
                         assigned[u][slot_name] = i; mapped[i] = u; break
                 else:
-                    if len(assigned[u]["SEO"]) < caps["SEO"] and (j == 0 or fit >= _ALT_FIT_MIN):
+                    if (len(assigned[u]["SEO"]) < caps["SEO"]) and (j == 0 or fit >= _ALT_FIT_MIN) and _seo_allowed(u, fit):
                         assigned[u]["SEO"].append(i); mapped[i] = u; break
 
     assign_slot("VEO"); assign_slot("AIO"); assign_slot("SEO")
