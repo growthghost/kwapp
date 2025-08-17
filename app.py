@@ -3,6 +3,7 @@ import re
 import asyncio
 import contextlib
 import gzip
+import math
 from typing import Optional, List, Dict, Tuple
 from collections import defaultdict
 from urllib.parse import urlparse, urljoin
@@ -332,6 +333,7 @@ _TOTAL_BUDGET_SECS = 60
 _CONCURRENCY = 16  # aiohttp
 _THREADS = 12      # requests fallback
 _MIN_FIT_THRESHOLD = 0.0
+_ALT_FIT_MIN = 0.2  # min fit when assigning to a non-top URL choice
 
 _DEF_HEADERS = {
     "User-Agent": "OutrankIQMapper/1.0 (+https://example.com)"
@@ -346,11 +348,14 @@ def _same_site(url: str, base_host: str, base_root: str, include_subdomains: boo
         host = urlparse(url).netloc.lower()
         if not host:
             return False
+        apex = base_root
+        www_host = f"www.{base_root}"
         if include_subdomains:
-            # Compare against the exact base host; include any subdomain of it
-            return host == base_host or host.endswith("." + base_host)
+            if host in {base_host, apex, www_host}:
+                return True
+            return host.endswith("." + base_root)
         else:
-            return host == base_host
+            return host in {base_host, apex, www_host}
     except Exception:
         return False
 
@@ -430,6 +435,25 @@ def _parse_sitemap_xml(xml_text: str) -> List[str]:
     urls = []
     if not xml_text:
         return urls
+
+
+def _collect_sitemap_urls(sm_url: str, session, base_host: str, base_root: str, include_subdomains: bool, seen: set, out: List[str], depth: int = 0):
+    if depth > 3 or len(out) >= _MAX_PAGES or sm_url in seen:
+        return
+    seen.add(sm_url)
+    xml = _fetch_text_requests(sm_url, session, (_CONNECT_TIMEOUT, _READ_TIMEOUT))
+    if not xml:
+        return
+    locs = _parse_sitemap_xml(xml)
+    is_index = bool(re.search(r"<sitemapindex", xml, re.I)) or any(u.lower().endswith((".xml", ".xml.gz")) for u in locs)
+    for u in locs:
+        if len(out) >= _MAX_PAGES:
+            break
+        if is_index or u.lower().endswith((".xml", ".xml.gz")):
+            _collect_sitemap_urls(u, session, base_host, base_root, include_subdomains, seen, out, depth + 1)
+        else:
+            if _same_site(u, base_host, base_root, include_subdomains):
+                out.append(u)
     # Simple regex fallback to avoid heavy XML edge cases
     for m in re.finditer(r"<loc>\s*([^<]+)\s*</loc>", xml_text, re.I):
         urls.append(m.group(1).strip())
@@ -456,17 +480,7 @@ def discover_urls(base_url: str, include_subdomains: bool, use_sitemap_first: bo
             for sm in maps:
                 if len(discovered) >= _MAX_PAGES:
                     break
-                xml = _fetch_text_requests(sm, sess, (_CONNECT_TIMEOUT, _READ_TIMEOUT))
-                if not xml:
-                    continue
-                for u in _parse_sitemap_xml(xml):
-                    if u in seen:
-                        continue
-                    if _same_site(u, base_host, base_root, include_subdomains):
-                        seen.add(u)
-                        discovered.append(u)
-                        if len(discovered) >= _MAX_PAGES:
-                            break
+                _collect_sitemap_urls(sm, sess, base_host, base_root, include_subdomains, seen, discovered, depth=0)
         # Fallback shallow crawl if still empty
         if not discovered:
             discovered = shallow_crawl(base, include_subdomains)
@@ -766,99 +780,95 @@ def _fit_score(keyword: str, profile: Dict) -> float:
 
 
 # ---------- Mapping algorithm ----------
-def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, base_url: str, include_subdomains: bool, use_sitemap_first: bool) -> pd.Series:
-    # Prepare pages
+def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, kd_col: str, base_url: str, include_subdomains: bool, use_sitemap_first: bool) -> pd.Series:
+    # Discover and profile pages
     url_list = discover_urls(base_url, include_subdomains=include_subdomains, use_sitemap_first=use_sitemap_first)
     profiles = _fetch_profiles(url_list)
     profiles = [p for p in profiles if p.get("weights")]
     if not profiles:
         return pd.Series([""] * len(df), index=df.index, dtype="string")
 
-    # Precompute best URL per keyword
-    best_for_kw: Dict[int, Tuple[str, float, str]] = {}
+    prof_by_url = {p["url"]: p for p in profiles}
+    prof_list = list(prof_by_url.values())
+
+    vols = pd.to_numeric(df[vol_col], errors="coerce").fillna(0).clip(lower=0)
+    max_log = float((vols + 1).apply(lambda x: math.log(1 + x)).max()) or 1.0
+
+    def strat_weights():
+        if scoring_mode == "Low Hanging Fruit":
+            return 0.20, 0.45, 0.35  # fit, kd_norm, vol
+        elif scoring_mode == "In The Game":
+            return 0.30, 0.35, 0.35
+        else:
+            return 0.30, 0.20, 0.50
+
+    W_FIT, W_KD, W_VOL = strat_weights()
+
+    TOP_K = 3
+    kw_candidates: Dict[int, List[Tuple[str, float]]] = {}
+    kw_slot: Dict[int, str] = {}
+    kw_rank: Dict[int, float] = {}
 
     for idx, row in df.iterrows():
         kw = str(row.get(kw_col, "")) if kw_col else str(row.get("Keyword", ""))
         cats = set(categorize_keyword(kw))
-        # Slot priority: VEO > AIO > SEO
         if "VEO" in cats:
             slot = "VEO"
         elif "AIO" in cats:
             slot = "AIO"
         else:
             slot = "SEO"
-        best_url = ""
-        best_fit = 0.0
-        for p in profiles:
+        fits: List[Tuple[str, float]] = []
+        for p in prof_list:
             f = _fit_score(kw, p)
-            if f > best_fit:
-                best_fit = f
-                best_url = p.get("url", "")
-        if best_fit >= _MIN_FIT_THRESHOLD and best_url:
-            best_for_kw[idx] = (best_url, best_fit, slot)
-        else:
-            best_for_kw[idx] = ("", 0.0, slot)
+            if f > 0:
+                fits.append((p["url"], f))
+        fits.sort(key=lambda x: x[1], reverse=True)
+        kw_candidates[idx] = fits[:TOP_K]
+        kw_slot[idx] = slot
+        best_fit = fits[0][1] if fits else 0.0
+        kd_val = float(pd.to_numeric(row.get(kd_col, 0), errors="coerce") or 0)
+        vol_val = float(pd.to_numeric(row.get(vol_col, 0), errors="coerce") or 0)
+        fit_norm = best_fit / 2.0
+        kd_norm = max(0.0, 1.0 - kd_val / 100.0)
+        vol_norm = math.log(1 + max(0.0, vol_val)) / max_log
+        kw_rank[idx] = W_FIT * fit_norm + W_KD * kd_norm + W_VOL * vol_norm
 
-    # Build candidate buckets per URL
-    candidates = defaultdict(lambda: {"VEO": [], "AIO": [], "SEO": []})
-    for idx, (u, f, slot) in best_for_kw.items():
-        if not u:
-            continue
-        score = float(df.loc[idx, "Score"]) if "Score" in df.columns else 0.0
-        vol = float(df.loc[idx, vol_col]) if vol_col in df.columns else 0.0
-        candidates[u][slot].append((idx, f, score, vol))
-
+    caps = {"VEO": 1, "AIO": 1, "SEO": 2}
     assigned: Dict[str, Dict[str, List[int] | Optional[int]]] = {}
-    for u in candidates.keys():
-        assigned[u] = {"VEO": None, "AIO": None, "SEO": []}
+    for p in prof_list:
+        assigned[p["url"]] = {"VEO": None, "AIO": None, "SEO": []}
 
     mapped = {i: "" for i in df.index}
 
-    # VEO pass
-    for u, bucket in candidates.items():
-        veos = sorted(bucket["VEO"], key=lambda x: (-x[1], -x[2], -x[3]))
-        if veos:
-            idx, *_ = veos[0]
-            assigned[u]["VEO"] = idx
-            mapped[idx] = u
+    def assign_slot(slot_name: str):
+        ids = [i for i, s in kw_slot.items() if s == slot_name]
+        ids.sort(key=lambda i: (-kw_rank.get(i, 0.0), i))
+        for i in ids:
+            choices = kw_candidates.get(i, [])
+            if not choices:
+                continue
+            for j, (u, fit) in enumerate(choices):
+                if slot_name in {"VEO", "AIO"}:
+                    if assigned[u][slot_name] is None and (j == 0 or fit >= _ALT_FIT_MIN):
+                        assigned[u][slot_name] = i
+                        mapped[i] = u
+                        break
+                else:  # SEO
+                    if len(assigned[u]["SEO"]) < caps["SEO"] and (j == 0 or fit >= _ALT_FIT_MIN):
+                        assigned[u]["SEO"].append(i)
+                        mapped[i] = u
+                        break
 
-    # AIO pass
-    for u, bucket in candidates.items():
-        if assigned[u]["VEO"] is not None and len(candidates[u]["SEO"]) >= 2:
-            # capacity check later; still allow AIO if room remains after SEO
-            pass
-        aios = sorted(bucket["AIO"], key=lambda x: (-x[1], -x[2], -x[3]))
-        if aios:
-            idx, *_ = aios[0]
-            # ensure not already used by VEO assignment elsewhere (a keyword can only map once)
-            if not mapped.get(idx):
-                assigned[u]["AIO"] = idx
-                mapped[idx] = u
+    assign_slot("VEO")
+    assign_slot("AIO")
+    assign_slot("SEO")
 
-    # SEO pass (Primary + Secondary per URL)
-    for u, bucket in candidates.items():
-        seos = sorted(bucket["SEO"], key=lambda x: (-x[2], -x[1], -x[3]))  # Score desc, then fit desc, then volume desc
-        take = []
-        for item in seos:
-            if len(take) >= 2:
-                break
-            idx = item[0]
-            if not mapped.get(idx):
-                take.append(idx)
-        assigned[u]["SEO"] = take
-        for idx in take:
-            mapped[idx] = u
-
-    # Capacity check: max 4 per URL (1 VEO, 1 AIO, 2 SEO). If exceeded (shouldn't), trim SEO extras.
-    for u in list(assigned.keys()):
-        cnt = (1 if assigned[u]["VEO"] is not None else 0) + (1 if assigned[u]["AIO"] is not None else 0) + len(assigned[u]["SEO"])  # type: ignore
-        if cnt > 4:
-            # Trim SEO
-            extras = cnt - 4
-            while extras > 0 and assigned[u]["SEO"]:
-                drop_idx = assigned[u]["SEO"].pop()  # type: ignore
+    for u, slots in assigned.items():
+        if isinstance(slots["SEO"], list) and len(slots["SEO"]) > caps["SEO"]:
+            for drop_idx in slots["SEO"][caps["SEO"]:]:
                 mapped[drop_idx] = ""
-                extras -= 1
+            slots["SEO"] = slots["SEO"][:caps["SEO"]]
 
     return pd.Series([mapped[i] for i in df.index], index=df.index, dtype="string")
 
@@ -983,6 +993,7 @@ if uploaded is not None:
                     export_df,
                     kw_col=kw_col,
                     vol_col=vol_col,
+                    kd_col=kd_col,
                     base_url=base_site_url.strip(),
                     include_subdomains=include_subdomains,
                     use_sitemap_first=use_sitemap_first,
