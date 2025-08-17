@@ -233,16 +233,19 @@ _READ_TIMEOUT = 8
 _TOTAL_BUDGET_SECS = 60
 _CONCURRENCY = 16
 _THREADS = 12
-# per-class minimums (page vs post)
-_MIN_SEO_PAGE = 0.25
-_MIN_SEO_POST = 0.55
-_MIN_AIO_PAGE = 0.18
-_MIN_AIO_POST = 0.22
-_MIN_VEO_PAGE = 0.18
-_MIN_VEO_POST = 0.30
-_ALT_FIT_MIN = 0.22
+
+# per-class minimums (page vs post) — RELAXED
+_MIN_SEO_PAGE = 0.20   # was 0.25
+_MIN_SEO_POST = 0.50   # was 0.55
+_MIN_AIO_PAGE = 0.16   # was 0.18
+_MIN_AIO_POST = 0.22   # unchanged
+_MIN_VEO_PAGE = 0.16   # was 0.18
+_MIN_VEO_POST = 0.28   # was 0.30
+
+_ALT_FIT_MIN = 0.20    # was 0.22
+
 _DEF_HEADERS = {"User-Agent": "OutrankIQMapper/1.3 (+https://example.com)"}
-_MAPPER_VERSION = "site-map-v12-pages-first"
+_MAPPER_VERSION = "site-map-v12-pages-first-soften-1"
 
 # ---------- Synonyms / phrase normalization ----------
 PHRASE_MAP = [
@@ -845,10 +848,6 @@ def cached_discover_and_sources(base_url: str, include_subdomains: bool, use_sit
 def cached_fetch_profiles(urls: Tuple[str, ...]) -> List[Dict]:
     return _fetch_profiles(list(urls))
 
-@st.cache_data(show_spinner=False, ttl=3600)
-def cached_nav(base_url: str) -> Tuple[Dict[str, Set[str]], Set[str]]:
-    return _harvest_nav(base_url)
-
 # ---------- Fit & priority ----------
 def _fit_score(keyword: str, profile: Dict) -> float:
     tokens = _ntokens(keyword)
@@ -872,23 +871,23 @@ def _fit_score(keyword: str, profile: Dict) -> float:
     return max(0.0, min(2.0, overlap))
 
 def _url_priority_bonus(u: str, is_nav: bool, source_type: Optional[str]) -> float:
-    """Stronger page-first bias."""
+    """Page-first bias (kept from previous guardrails)."""
     path = urlparse(u).path.lower()
     depth = len([seg for seg in path.split("/") if seg])
     bonus = 0.0
     if source_type == "page":
-        bonus += 0.35       # ↑ from 0.25
-        bonus += 0.05       # sitemap page extra
+        bonus += 0.35       # page sitemap bonus retained
+        bonus += 0.05
     elif source_type == "post":
-        bonus -= 0.20       # ↓ from -0.10
+        bonus -= 0.20
     elif source_type == "tax":
         bonus -= 0.25
     if "/blog/" in path or "/news/" in path:
-        bonus -= 0.20       # ↓ from -0.15
+        bonus -= 0.20
     if re.search(r"/\d{4}/\d{2}/", path):
         bonus -= 0.20
     if depth <= 1:
-        bonus += 0.12       # ↑ shallow path preference
+        bonus += 0.12
     if is_nav:
         bonus += 0.15
     return bonus
@@ -1022,15 +1021,16 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
                 return True
         return False
 
+    # RELAXED penalties
     def _post_heavy_penalty(tokens: List[str]) -> float:
         cnt = sum(1 for t in tokens if post_heavy.get(t, False))
-        if cnt >= 2: return -0.30
-        if cnt == 1: return -0.20
+        if cnt >= 2: return -0.25   # was -0.30
+        if cnt == 1: return -0.15   # was -0.20
         return 0.0
 
     def _commonness_penalty(tokens: List[str]) -> float:
         cnt = sum(1 for t in tokens if very_common.get(t, False))
-        return -0.05 * cnt
+        return -0.03 * cnt          # was -0.05 * cnt
 
     TOP_K = 5
     kw_candidates: Dict[int, List[Tuple[str,float,float,str,float]]] = {}
@@ -1056,7 +1056,18 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
         head = _head_noun(tokens_norm)
         head_noun_by_kw[idx] = head
 
-        if slot in {"SEO","VEO"} and not _has_core_token(tokens_norm):
+        # ----- RELAXED core requirement -----
+        # SEO: core OR head present in nav/domain; VEO: no core requirement; AIO: keep core
+        need_core = False
+        if slot == "SEO":
+            in_core = _has_core_token(tokens_norm)
+            head_ok = bool(head) and (head in all_nav_tokens or head in domain_toks)
+            need_core = not (in_core or head_ok)
+        elif slot == "VEO":
+            need_core = False
+        else:
+            need_core = not _has_core_token(tokens_norm)
+        if need_core:
             kw_candidates[idx] = []
             kw_slot[idx] = slot
             kw_rank[idx] = 0.0
@@ -1112,12 +1123,11 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
 
             f = max(0.0, min(2.0, base_fit + bonus + a_bonus + v_bonus))
 
-            # VEO soft gate
+            # VEO soft gate — RELAXED threshold 0.52 (from 0.60)
             if slot == "VEO" and not v_intent:
                 f = max(0.0, f - 0.20)
-                if f < 0.60:
+                if f < 0.52:
                     if is_page_like:
-                        # still record probe for page-forcing
                         if (best_page_probe is None) or (f > best_page_probe[1]):
                             best_page_probe = (p["url"], f, covered_ratio, stype, a_score)
                     continue
@@ -1134,16 +1144,18 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
                 if lead_cov < 0.10 and v_intent and covered_ratio < 0.33:
                     passed = False
 
-            # Stronger head rule (SEO only)
+            # SEO head rule — SOFTER
             if passed and slot == "SEO" and head:
-                if (head not in title_tokens) and (head not in slug_toks):
-                    phrase = " ".join(tokens_norm)
-                    if not phrase or phrase not in (p.get("title_h1_norm") or "") or f < 0.70:
-                        passed = False
+                phrase = " ".join(tokens_norm)
+                head_in_nav = head in nav_anchor_map.get(_url_key(p["url"]), set())
+                if (head not in title_tokens) and (head not in slug_toks) and not head_in_nav:
+                    # allow if phrase present OR decent coverage OR decent fit
+                    if not phrase or phrase not in (p.get("title_h1_norm") or ""):
+                        if (covered_ratio < 0.45) and (f < 0.60):
+                            passed = False
 
             if not passed:
                 if is_page_like:
-                    # keep best page even if gated (for forced include later)
                     if (best_page_probe is None) or (f > best_page_probe[1]):
                         best_page_probe = (p["url"], f, covered_ratio, stype, a_score)
                 continue
@@ -1156,35 +1168,30 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
         fits_page.sort(key=lambda x: x[1], reverse=True)
         fits_other.sort(key=lambda x: x[1], reverse=True)
 
-        # ---------- Forced include: ensure at least one PAGE candidate ----------
+        # ---------- Forced include: ensure at least one PAGE candidate (RELAXED) ----------
         if not fits_page and fits_other and best_page_probe is not None:
             best_fit = fits_other[0][1]
             page_fit = best_page_probe[1]
-            # page must be reasonably close and above (class_min - 0.03)
-            def _class_min_for(slot_name: str, is_post: bool) -> float:
-                if slot_name == "SEO": return _MIN_SEO_POST if is_post else _MIN_SEO_PAGE
-                if slot_name == "AIO": return _MIN_AIO_POST if is_post else _MIN_AIO_PAGE
-                return _MIN_VEO_POST if is_post else _MIN_VEO_PAGE
-            page_min = _class_min_for(slot, False)
-            if (page_fit >= 0.50 * best_fit) and (page_fit >= (page_min - 0.03)):
+            # was: >= 50% and >= (min - 0.03)
+            if (page_fit >= 0.45 * best_fit) and (page_fit >= (_MIN_SEO_PAGE - 0.05 if slot=="SEO" else _MIN_AIO_PAGE - 0.05)):
                 fits_page = [best_page_probe]
 
         # ----- Selection with class-aware epsilon -----
         fits: List[Tuple[str,float,float,str,float]] = []
         if slot == "AIO" and fits_page and fits_other:
             best_page = fits_page[0][1]
-            aio_posts = [t for t in fits_other if _is_post_like(t[3], t[0]) and t[4] >= 0.35]  # a_score >= 0.35
+            # AIO post can win if a_score >= 0.33 (was 0.35) and fit >= page + 0.06 (was +0.08)
+            aio_posts = [t for t in fits_other if _is_post_like(t[3], t[0]) and t[4] >= 0.33]
             if aio_posts:
                 aio_posts.sort(key=lambda x: x[1], reverse=True)
                 best_post = aio_posts[0][1]
-                # post must be materially better than page
-                if best_post >= (best_page + 0.08):
+                if best_post >= (best_page + 0.06):
                     fits.extend(aio_posts[:TOP_K])
                     if len(fits) < TOP_K:
                         fits.extend(fits_page[:TOP_K - len(fits)])
                 else:
-                    # prefer page when close (page-first epsilon 0.10)
-                    if best_page >= (best_post - 0.10):
+                    # prefer page when close (epsilon widened lightly to 0.12)
+                    if best_page >= (best_post - 0.12):
                         fits.extend(fits_page[:TOP_K])
                         if len(fits) < TOP_K:
                             fits.extend(fits_other[:TOP_K - len(fits)])
@@ -1193,22 +1200,20 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
                         if len(fits) < TOP_K:
                             fits.extend(fits_other[:TOP_K - len(fits)])
             else:
-                # no strong AIO posts; prefer pages, but keep others as fallbacks
                 fits.extend(fits_page[:TOP_K])
                 if len(fits) < TOP_K:
                     fits.extend(fits_other[:TOP_K - len(fits)])
         else:
-            # Non-AIO: page-first with epsilon 0.10
+            # Non-AIO: page-first with epsilon widened to 0.14 (was 0.10)
             if fits_page and fits_other:
                 best_page = fits_page[0][1]
                 best_other = fits_other[0][1]
                 best_overall = max(best_page, best_other)
-                if best_page >= (best_overall - 0.10):
+                if best_page >= (best_overall - 0.14):
                     fits.extend(fits_page[:TOP_K])
                     if len(fits) < TOP_K:
                         fits.extend(fits_other[:TOP_K - len(fits)])
                 else:
-                    # still keep pages first to give them a chance under caps
                     fits.extend(fits_page[:TOP_K])
                     if len(fits) < TOP_K:
                         fits.extend(fits_other[:TOP_K - len(fits)])
@@ -1262,7 +1267,7 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
         else:
             kw_rank[idx] = 0.40*fit_norm + 0.20*kd_norm + 0.40*vol_norm
 
-        # --- class-specific minimum fit (consider any candidate, not just top) ---
+        # --- class-specific minimum fit across candidates (RELAXED mins already set) ---
         def _class_min_for_type(slot_name: str, is_post: bool) -> float:
             if slot_name == "SEO": return _MIN_SEO_POST if is_post else _MIN_SEO_PAGE
             if slot_name == "AIO": return _MIN_AIO_POST if is_post else _MIN_AIO_PAGE
@@ -1288,8 +1293,11 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
 
     def _seo_allowed(stype: str, u: str, fit: float, covered_ratio: float, head: str, title_tokens: Set[str]) -> bool:
         if _is_post_like(stype, u):
-            # Posts only allowed for SEO when clearly superior
-            if covered_ratio >= 0.60 and fit >= 0.80 and head and (head in title_tokens or head in _slug_tokens(u)):
+            # slightly looser than before, but still tough
+            strong = (covered_ratio >= 0.58 and fit >= 0.78)
+            head_ok = head and (head in title_tokens or head in _slug_tokens(u))
+            phrase_ok = (head is None) or (head == "")  # if no obvious head noun
+            if strong and (head_ok or phrase_ok):
                 return True
             return False
         return True
