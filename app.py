@@ -11,7 +11,78 @@ try:
 except Exception:
     HAVE_BS4 = False
 
+# ---------- Brand / Theme ----------
+LOGO_PATH = "/mnt/data/OutrankIQ Grey Logo.png"
+BRAND_BG = "#747474"     # background
+BRAND_INK = "#242F40"    # secondary
+BRAND_ACCENT = "#E1B000" # accent 1
+BRAND_LIGHT = "#FFFFFF"  # accent 2
+
 st.set_page_config(page_title="OutrankIQ", page_icon="🔎", layout="centered")
+
+# ---------- Global CSS (logo + colors) ----------
+st.markdown(
+    f"""
+<style>
+:root {{
+  --bg: {BRAND_BG};
+  --ink: {BRAND_INK};
+  --accent: {BRAND_ACCENT};
+  --light: {BRAND_LIGHT};
+}}
+/* App background */
+.stApp {{ background-color: var(--bg); }}
+
+/* Base text on dark bg */
+html, body, [class^="css"], [class*=" css"] {{ color: var(--light) !important; }}
+
+/* Headings */
+h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
+
+/* Inputs / selects / numbers */
+.stTextInput > div > div > input,
+.stTextArea textarea,
+.stNumberInput input,
+.stSelectbox div[data-baseweb="select"] > div {{
+  background-color: var(--light) !important;
+  color: var(--ink) !important;
+  border-radius: 8px !important;
+}}
+
+/* File uploader */
+[data-testid="stFileUploaderDropzone"] {{
+  background: rgba(255,255,255,0.95);
+  border: 2px dashed var(--accent);
+  color: var(--ink);
+}}
+
+/* Buttons (including download) */
+.stButton > button, .stDownloadButton > button {{
+  background-color: var(--accent) !important;
+  color: var(--ink) !important;
+  border: 2px solid var(--light) !important;
+  border-radius: 10px !important;
+  font-weight: 700 !important;
+  box-shadow: 0 2px 0 rgba(0,0,0,.15);
+}}
+.stButton > button:hover, .stDownloadButton > button:hover {{ filter: brightness(1.05); }}
+
+/* Tables readable on dark bg */
+.stDataFrame, .stDataFrame div, .stDataFrame table, .stTable {{ color: var(--ink) !important; }}
+</style>
+""",
+    unsafe_allow_html=True,
+)
+
+# ---------- Header with logo ----------
+try:
+    spacer = "<div style='height:8px'></div>"
+    st.markdown(spacer, unsafe_allow_html=True)
+    c1, c2, c3 = st.columns([1,6,1])
+    with c2:
+        st.image(LOGO_PATH, use_column_width=True)
+except Exception:
+    pass
 
 st.title("OutrankIQ")
 st.caption("Score keywords by Search Volume (A) and Keyword Difficulty (B) — with selectable scoring strategies.")
@@ -67,14 +138,15 @@ elif scoring_mode == "Competitive":
     MIN_VALID_VOLUME = 3000
     KD_BUCKETS = [(0, 40, 6), (41, 60, 5), (61, 75, 4), (76, 85, 3), (86, 95, 2), (96, 100, 1)]
 
+# Branded strategy banner
 st.markdown(
     f"""
-<div style='background: linear-gradient(to right, #3b82f6, #60a5fa); padding:16px; border-radius:8px; margin-bottom:16px;'>
-    <div style='margin-bottom:6px; font-size:13px; color:#ffffff;'>
+<div style='background: linear-gradient(90deg, {BRAND_INK} 0%, {BRAND_ACCENT} 100%); padding:16px; border-radius:12px; margin-bottom:16px;'>
+    <div style='margin-bottom:6px; font-size:13px; color:{BRAND_LIGHT};'>
         Minimum Search Volume Required: <strong>{MIN_VALID_VOLUME}</strong>
     </div>
-    <strong style='color:#ffffff; font-size:18px;'>{scoring_mode}</strong><br>
-    <span style='color:#ffffff; font-size:15px;'>{strategy_descriptions[scoring_mode]}</span>
+    <strong style='color:{BRAND_LIGHT}; font-size:18px;'>{scoring_mode}</strong><br>
+    <span style='color:{BRAND_LIGHT}; font-size:15px;'>{strategy_descriptions[scoring_mode]}</span>
 </div>
 """,
     unsafe_allow_html=True,
@@ -159,17 +231,18 @@ with st.form("single"):
     if st.form_submit_button("Calculate Score"):
         sc = calculate_score(vol_val, kd_val)
         label = LABEL_MAP.get(sc, "Not rated")
-        color = COLOR_MAP.get(sc, "#9ca3af")
-        if vol_val < MIN_VALID_VOLUME:
-            st.warning(f"The selected strategy requires a minimum search volume of {MIN_VALID_VOLUME}. Please enter a volume that meets the threshold.")
+        color = "#ffffff"  # text color inside the card
+        # Colored badge using brand accent/ink instead of the old palette
         st.markdown(
             f"""
-            <div style='background-color:{color}; padding:16px; border-radius:8px; text-align:center;'>
-                <span style='font-size:22px; font-weight:bold; color:#000;'>Score: {sc} • Tier: {label}</span>
+            <div style='background: linear-gradient(90deg, {BRAND_ACCENT}, {BRAND_INK}); padding:16px; border-radius:12px; text-align:center;'>
+                <span style='font-size:22px; font-weight:bold; color:{BRAND_LIGHT};'>Score: {sc} • Tier: {label}</span>
             </div>
             """,
             unsafe_allow_html=True,
         )
+        if vol_val < MIN_VALID_VOLUME:
+            st.warning(f"The selected strategy requires a minimum search volume of {MIN_VALID_VOLUME}. Please enter a volume that meets the threshold.")
 
 st.markdown("---")
 st.subheader("Bulk Scoring (CSV Upload)")
@@ -272,15 +345,13 @@ if uploaded is not None:
             ).drop(columns=["_EligibleSort"])
 
             def _row_style(row):
-                color = COLOR_MAP.get(int(row.get("Score", 0)) if pd.notna(row.get("Score", 0)) else 0, "#9ca3af")
-                return [
-                    ("background-color: " + color + "; color: black;") if c in ("Score", "Tier") else ""
-                    for c in row.index
-                ]
+                # keep the score coloring but text stays dark for contrast
+                color = "#ffffff"
+                return [("background-color: " + color + "; color: black;") if c in ("Score", "Tier") else "" for c in row.index]
 
             preview_cols = export_cols  # same columns as CSV
             styled = preview_df[preview_cols].head(10).style.apply(_row_style, axis=1)
             st.dataframe(styled, use_container_width=True)
 
 st.markdown("---")
-st.caption("© 2025 OutrankIQ • Select from three scoring strategies to target different types of keyword opportunities.")
+st.caption("© 2025 OutrankIQ • Brand colors: bg #747474 • ink #242F40 • accent #E1B000 • light #FFFFFF.")
