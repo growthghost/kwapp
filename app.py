@@ -14,9 +14,9 @@ except Exception:
 
 # ---------- Brand / Theme ----------
 BRAND_BG = "#747474"     # background
-BRAND_INK = "#242F40"    # secondary (ink)
-BRAND_ACCENT = "#E1B000" # accent 1
-BRAND_LIGHT = "#FFFFFF"  # accent 2
+BRAND_INK = "#242F40"    # secondary (ink / blue)
+BRAND_ACCENT = "#E1B000" # accent 1 (yellow)
+BRAND_LIGHT = "#FFFFFF"  # accent 2 (white)
 
 st.set_page_config(page_title="OutrankIQ", page_icon="🔎", layout="centered")
 
@@ -28,18 +28,19 @@ st.markdown(
   --bg: {BRAND_BG};
   --ink: {BRAND_INK};
   --accent: {BRAND_ACCENT};
+  --accent-rgb: 225,176,0; /* for focus rings */
   --light: {BRAND_LIGHT};
 }}
 /* App background */
 .stApp {{ background-color: var(--bg); }}
 
-/* Default text on dark bg */
+/* Base text on dark bg */
 html, body, [class^="css"], [class*=" css"] {{ color: var(--light) !important; }}
 
 /* Headings */
 h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
 
-/* Inputs / selects / numbers */
+/* Inputs / selects / numbers: base surface is white with ink text */
 .stTextInput > div > div > input,
 .stTextArea textarea,
 .stNumberInput input,
@@ -49,10 +50,16 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
   border-radius: 8px !important;
 }}
 
-/* Put a caret INSIDE the select box (not the label) */
+/* Selectbox border + focus ring in accent (fixes red outline) */
 .stSelectbox div[data-baseweb="select"] > div {{
+  border: 2px solid var(--light) !important;
   position: relative;
 }}
+.stSelectbox div[data-baseweb="select"]:focus-within > div {{
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .35) !important;
+}}
+/* Caret INSIDE the select box */
 .stSelectbox div[data-baseweb="select"] > div::after {{
   content: "▾";
   position: absolute;
@@ -65,29 +72,50 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
   font-weight: 700;
 }}
 
-/* File uploader dropzone background */
+/* Number inputs: focus + steppers highlight to yellow (not red) */
+.stNumberInput input {{
+  border: 2px solid var(--light) !important;
+}}
+.stNumberInput input:focus {{
+  outline: none !important;
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .35) !important;
+}}
+.stNumberInput button {{
+  background: var(--light) !important;
+  color: var(--ink) !important;
+  border: 1px solid var(--light) !important;
+}}
+.stNumberInput button:hover,
+.stNumberInput button:focus {{
+  background: var(--accent) !important;
+  color: #000 !important;
+  border-color: var(--accent) !important;
+}}
+
+/* File uploader dropzone */
 [data-testid="stFileUploaderDropzone"] {{
   background: rgba(255,255,255,0.98);
   border: 2px dashed var(--accent);
 }}
-/* Bulk CSV zone text should be dark */
+/* Text in uploader area is ink/dark */
 [data-testid="stFileUploader"] * {{ color: var(--ink) !important; }}
-/* Make the 'Browse files' control look like a button with white text */
+/* “Browse files” button: blue background with white text */
 [data-testid="stFileUploaderDropzone"] button,
 [data-testid="stFileUploaderDropzone"] label,
 [data-testid="stFileUploaderDropzone"] [role="button"] {{
-  background-color: var(--accent) !important;
-  color: #ffffff !important;               /* <- white text as requested */
+  background-color: var(--ink) !important;
+  color: #ffffff !important;
   border: 1px solid var(--light) !important;
   border-radius: 8px !important;
   padding: 2px 10px !important;
   font-weight: 700 !important;
 }}
 
-/* Tables/dataframes use dark text for readability */
+/* Tables/dataframes readable on dark bg */
 .stDataFrame, .stDataFrame * , .stTable, .stTable * {{ color: var(--ink) !important; }}
 
-/* Buttons (including download) */
+/* Action buttons (download etc.) */
 .stButton > button, .stDownloadButton > button {{
   background-color: var(--accent) !important;
   color: var(--ink) !important;
@@ -108,7 +136,7 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
     unsafe_allow_html=True,
 )
 
-# ---------- Logo (top-left) ----------
+# ---------- Logo (top-left, robust loading) ----------
 def _load_logo_bytes() -> bytes | None:
     for p in [
         Path("/mnt/data/OutrankIQ Grey Logo.png"),
@@ -122,22 +150,17 @@ def _load_logo_bytes() -> bytes | None:
             pass
     return None
 
-header = st.container()
-with header:
+top = st.container()
+with top:
     left, right = st.columns([2, 8])
     with left:
         logo_bytes = _load_logo_bytes()
         if logo_bytes:
-            st.image(logo_bytes, width=220)  # explicit width, no deprecated arg
+            st.image(logo_bytes, width=220)  # top-left, fixed size
         else:
-            st.markdown(
-                "<h1 style='margin:0; color: var(--light);'>OutrankIQ</h1>",
-                unsafe_allow_html=True,
-            )
+            st.markdown("<h1 style='margin:0; color: var(--light);'>OutrankIQ</h1>", unsafe_allow_html=True)
     with right:
-        st.caption(
-            "Score keywords by Search Volume (A) and Keyword Difficulty (B) — with selectable scoring strategies."
-        )
+        st.caption("Score keywords by Search Volume (A) and Keyword Difficulty (B) — with selectable scoring strategies.")
 
 # ---------- Helpers ----------
 def find_column(df: pd.DataFrame, candidates) -> str | None:
@@ -150,7 +173,15 @@ def find_column(df: pd.DataFrame, candidates) -> str | None:
             return c
     return None
 
-LABEL_MAP = {6: "Elite", 5: "Excellent", 4: "Good", 3: "Fair", 2: "Low", 1: "Very Low", 0: "Not rated"}
+LABEL_MAP = {
+    6: "Elite",
+    5: "Excellent",
+    4: "Good",
+    3: "Fair",
+    2: "Low",
+    1: "Very Low",
+    0: "Not rated",
+}
 
 # Used for card + preview styling only (NOT exported)
 COLOR_MAP = {
@@ -218,8 +249,7 @@ def categorize_keyword(kw: str) -> list[str]:
     if not cats:
         cats.add("SEO")
     else:
-        if "LLM" not in cats:
-            cats.add("SEO")
+        if "LLM" not in cats: cats.add("SEO")
     return [c for c in CATEGORY_ORDER if c in cats]
 
 # ---------- Scoring ----------
@@ -237,44 +267,32 @@ def calculate_score(volume: float, kd: float) -> int:
 
 def add_scoring_columns(df: pd.DataFrame, volume_col: str, kd_col: str, kw_col: str | None) -> pd.DataFrame:
     out = df.copy()
-
-    # Eligibility + Reason
     def _eligibility_reason(vol, kd):
-        if pd.isna(vol) or pd.isna(kd):
-            return "No", "Invalid Volume/KD"
-        if vol < MIN_VALID_VOLUME:
-            return "No", f"Below min volume for {scoring_mode} ({MIN_VALID_VOLUME})"
+        if pd.isna(vol) or pd.isna(kd): return "No", "Invalid Volume/KD"
+        if vol < MIN_VALID_VOLUME: return "No", f"Below min volume for {scoring_mode} ({MIN_VALID_VOLUME})"
         return "Yes", ""
-
     eligible, reason = zip(*(_eligibility_reason(v, k) for v, k in zip(out[volume_col], out[kd_col])))
-    out["Eligible"] = list(eligible)
-    out["Reason"] = list(reason)
+    out["Eligible"] = list(eligible); out["Reason"] = list(reason)
     out["Score"] = [calculate_score(v, k) for v, k in zip(out[volume_col], out[kd_col])]
-    out["Tier"] = out["Score"].map(LABEL_MAP).fillna("Not rated")
-
-    # Category (multi-label)
-    kw_series = out[kw_col] if kw_col else pd.Series([""] * len(out))
+    out["Tier"]  = out["Score"].map(LABEL_MAP).fillna("Not rated")
+    kw_series = out[kw_col] if kw_col else pd.Series([""]*len(out))
     out["Category"] = [", ".join(categorize_keyword(str(k))) for k in kw_series]
-
-    # Order columns
     ordered = ([kw_col] if kw_col else []) + [volume_col, kd_col, "Score", "Tier", "Eligible", "Reason", "Category"]
     remaining = [c for c in out.columns if c not in ordered]
-    out = out[ordered + remaining]
-    return out
+    return out[ordered + remaining]
 
 # ---------- Single keyword ----------
 st.subheader("Single Keyword Score")
 with st.form("single"):
-    col1, col2 = st.columns(2)
-    with col1:
+    c1, c2 = st.columns(2)
+    with c1:
         vol_val = st.number_input("Search Volume (A)", min_value=0, step=10, value=0)
-    with col2:
-        kd_val = st.number_input("Keyword Difficulty (B)", min_value=0, step=1, value=0)
+    with c2:
+        kd_val  = st.number_input("Keyword Difficulty (B)", min_value=0, step=1, value=0)
 
     if st.form_submit_button("Calculate Score"):
         sc = calculate_score(vol_val, kd_val)
         label = LABEL_MAP.get(sc, "Not rated")
-        # ✅ Restore the colored score card using COLOR_MAP
         color = COLOR_MAP.get(sc, "#9ca3af")
         st.markdown(
             f"""
@@ -291,9 +309,7 @@ st.markdown("---")
 st.subheader("Bulk Scoring (CSV Upload)")
 
 uploaded = st.file_uploader("Upload CSV", type=["csv"])
-example = pd.DataFrame(
-    {"Keyword": ["best running shoes", "seo tools", "crm software"], "Volume": [5400, 880, 12000], "KD": [38, 72, 18]}
-)
+example = pd.DataFrame({"Keyword":["best running shoes","seo tools","crm software"], "Volume":[5400,880,12000], "KD":[38,72,18]})
 with st.expander("See example CSV format"):
     st.dataframe(example, use_container_width=True)
 
@@ -315,8 +331,7 @@ if uploaded is not None:
         last_err = None
         for t in trials:
             try:
-                kwargs = {k: v for k, v in t.items() if v is not None}
-                return pd.read_csv(io.BytesIO(bytes_data), **kwargs)
+                return pd.read_csv(io.BytesIO(bytes_data), **{k:v for k,v in t.items() if v is not None})
             except Exception as e:
                 last_err = e
         raise last_err
@@ -328,36 +343,32 @@ if uploaded is not None:
         st.stop()
 
     # Find relevant columns
-    vol_col = find_column(df, ["volume", "search volume", "sv"])
-    kd_col = find_column(df, ["kd", "difficulty", "keyword difficulty"])
-    kw_col = find_column(df, ["keyword", "query", "term"])
+    vol_col = find_column(df, ["volume","search volume","sv"])
+    kd_col  = find_column(df, ["kd","difficulty","keyword difficulty"])
+    kw_col  = find_column(df, ["keyword","query","term"])
 
     missing = []
-    if vol_col is None:
-        missing.append("Volume")
-    if kd_col is None:
-        missing.append("Keyword Difficulty")
+    if vol_col is None: missing.append("Volume")
+    if kd_col  is None: missing.append("Keyword Difficulty")
 
     if missing:
         st.error("Missing required column(s): " + ", ".join(missing))
     else:
-        # Clean numbers (commas, spaces, percents)
-        df[vol_col] = df[vol_col].astype(str).str.replace(r"[,\s]", "", regex=True).str.replace("%", "", regex=False)
-        df[kd_col] = df[kd_col].astype(str).str.replace(r"[,\s]", "", regex=True).str.replace("%", "", regex=False)
+        # Clean numbers
+        df[vol_col] = df[vol_col].astype(str).str.replace(r"[,\s]","",regex=True).str.replace("%","",regex=False)
+        df[kd_col] = df[kd_col].astype(str).str.replace(r"[,\s]","",regex=True).str.replace("%","",regex=False)
         df[vol_col] = pd.to_numeric(df[vol_col], errors="coerce")
-        df[kd_col] = pd.to_numeric(df[kd_col], errors="coerce").clip(lower=0, upper=100)
+        df[kd_col]  = pd.to_numeric(df[kd_col], errors="coerce").clip(lower=0, upper=100)
 
         scored = add_scoring_columns(df, vol_col, kd_col, kw_col)
 
         # ---------- CSV DOWNLOAD (sorted: Yes first, KD ↑ then Volume ↓) ----------
         filename_base = f"outrankiq_{scoring_mode.lower().replace(' ', '_')}_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
-        base_cols = ([kw_col] if kw_col else []) + [
-            vol_col, kd_col, "Score", "Tier", "Eligible", "Reason", "Category"
-        ]
+        base_cols = ([kw_col] if kw_col else []) + [vol_col, kd_col, "Score", "Tier", "Eligible", "Reason", "Category"]
         export_df = scored[base_cols].copy()
         export_df["Strategy"] = scoring_mode
 
-        export_df["_EligibleSort"] = export_df["Eligible"].map({"Yes": 1, "No": 0}).fillna(0)
+        export_df["_EligibleSort"] = export_df["Eligible"].map({"Yes":1,"No":0}).fillna(0)
         export_df = export_df.sort_values(
             by=["_EligibleSort", kd_col, vol_col],
             ascending=[False, True, False],
@@ -376,11 +387,10 @@ if uploaded is not None:
             help="Sorted by eligibility (Yes first), KD ascending, Volume descending"
         )
 
-        # Optional preview
         if st.checkbox("Preview first 10 rows (optional)", value=False):
             preview_df = scored.copy()
             preview_df["Strategy"] = scoring_mode
-            preview_df["_EligibleSort"] = preview_df["Eligible"].map({"Yes": 1, "No": 0}).fillna(0)
+            preview_df["_EligibleSort"] = preview_df["Eligible"].map({"Yes":1,"No":0}).fillna(0)
             preview_df = preview_df.sort_values(
                 by=["_EligibleSort", kd_col, vol_col],
                 ascending=[False, True, False],
@@ -391,8 +401,7 @@ if uploaded is not None:
                 color = COLOR_MAP.get(int(row.get("Score", 0)) if pd.notna(row.get("Score", 0)) else 0, "#9ca3af")
                 return [("background-color: " + color + "; color: black;") if c in ("Score", "Tier") else "" for c in row.index]
 
-            preview_cols = export_cols  # same columns as CSV
-            styled = preview_df[preview_cols].head(10).style.apply(_row_style, axis=1)
+            styled = preview_df[export_cols].head(10).style.apply(_row_style, axis=1)
             st.dataframe(styled, use_container_width=True)
 
 st.markdown("---")
