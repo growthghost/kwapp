@@ -13,9 +13,9 @@ except Exception:
 
 # ---------- Brand / Theme ----------
 BRAND_BG = "#747474"     # background
-BRAND_INK = "#242F40"    # secondary (blue/ink)
-BRAND_ACCENT = "#E1B000" # accent (yellow)
-BRAND_LIGHT = "#FFFFFF"  # light (white)
+BRAND_INK = "#242F40"    # blue/ink
+BRAND_ACCENT = "#E1B000" # yellow
+BRAND_LIGHT = "#FFFFFF"  # white
 
 st.set_page_config(page_title="OutrankIQ", page_icon="🔎", layout="centered")
 
@@ -39,7 +39,7 @@ html, body, [class^="css"], [class*=" css"] {{ color: var(--light) !important; }
 /* Headings */
 h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
 
-/* Inputs / selects / numbers: base surface is white with ink text */
+/* Inputs / selects / numbers: white surface with ink text */
 .stTextInput > div > div > input,
 .stTextArea textarea,
 .stNumberInput input,
@@ -49,12 +49,12 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
   border-radius: 8px !important;
 }}
 
-/* Hand cursor for select + number inputs (including +/- buttons) */
+/* Hand cursor for select + number inputs (including +/-) */
 .stSelectbox div[data-baseweb="select"] > div,
 .stNumberInput input,
 .stNumberInput button {{ cursor: pointer !important; }}
 
-/* Selectbox: caret INSIDE + yellow focus (no red) */
+/* Selectbox: caret inside + yellow focus (no red) */
 .stSelectbox div[data-baseweb="select"] > div {{
   border: 2px solid var(--light) !important;
   position: relative;
@@ -84,7 +84,7 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
   box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .35) !important;
 }}
 .stNumberInput button {{
-  background: var(--ink) !important;        /* blue by default */
+  background: var(--ink) !important;        /* blue default */
   color: #ffffff !important;
   border: 1px solid var(--ink) !important;
 }}
@@ -96,16 +96,30 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
   border-color: var(--accent) !important;
 }}
 
-/* Preview checkbox: white box → blue when checked */
+/* Preview checkbox: white box → blue #242F40 checkmark when selected */
 .stCheckbox input[type="checkbox"] {{
+  appearance: none;              /* fully custom */
   width: 18px; height: 18px;
-  appearance: auto;             /* keep native look for reliability */
-  accent-color: var(--ink);     /* when checked: blue box + white tick */
-  border: 2px solid var(--ink) !important;  /* visible blue border when unchecked */
-  background: #ffffff !important;
+  border: 2px solid var(--ink);
+  border-radius: 4px;
+  background: #ffffff;
+  position: relative;
+  cursor: pointer;
 }}
 .stCheckbox input[type="checkbox"]:hover {{
-  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .25);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .20);
+}}
+.stCheckbox input[type="checkbox"]:checked {{
+  background: #ffffff;           /* stays white when checked */
+}}
+.stCheckbox input[type="checkbox"]:checked::after {{
+  content: "";
+  position: absolute;
+  left: 4px; top: 0px;
+  width: 6px; height: 12px;
+  border: solid var(--ink);      /* blue checkmark */
+  border-width: 0 3px 3px 0;
+  transform: rotate(45deg);
 }}
 
 /* File uploader dropzone */
@@ -119,7 +133,7 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
 [data-testid="stFileUploaderDropzone"] button,
 [data-testid="stFileUploaderDropzone"] label,
 [data-testid="stFileUploaderDropzone"] [role="button"] {{
-  background-color: var(--ink) !important;
+  background-color: var(--ink) !important;  /* #242F40 */
   color: #ffffff !important;
   border: 1px solid var(--light) !important;
   border-radius: 8px !important;
@@ -151,7 +165,7 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
     unsafe_allow_html=True,
 )
 
-# ---------- Title + tagline (logo removed) ----------
+# ---------- Title + tagline ----------
 st.title("OutrankIQ")
 st.caption("Score keywords by Search Volume (A) and Keyword Difficulty (B) — with selectable scoring strategies.")
 
@@ -336,16 +350,6 @@ if uploaded is not None:
         st.stop()
 
     # Find relevant columns
-    def find_column(df: pd.DataFrame, candidates) -> str | None:
-        cols_lower = {c.lower(): c for c in df.columns}
-        for cand in candidates:
-            if cand.lower() in cols_lower:
-                return cols_lower[cand.lower()]
-        for c in df.columns:
-            if any(k in c.lower() for k in candidates):
-                return c
-        return None
-
     vol_col = find_column(df, ["volume","search volume","sv"])
     kd_col  = find_column(df, ["kd","difficulty","keyword difficulty"])
     kw_col  = find_column(df, ["keyword","query","term"])
@@ -404,7 +408,7 @@ if uploaded is not None:
                 color = COLOR_MAP.get(int(row.get("Score", 0)) if pd.notna(row.get("Score", 0)) else 0, "#9ca3af")
                 return [("background-color: " + color + "; color: black;") if c in ("Score", "Tier") else "" for c in row.index]
 
-            styled = preview_df[export_cols].head(10).style.apply(_row_style, axis=1)
+            styled = preview_df[export_cols].head(10).style.apply(_row_style, axis1)
             st.dataframe(styled, use_container_width=True)
 
 st.markdown("---")
