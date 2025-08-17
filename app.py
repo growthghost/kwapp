@@ -235,6 +235,7 @@ _THREADS = 12
 _MIN_FIT_THRESHOLD = 0.0
 _ALT_FIT_MIN = 0.2
 _DEF_HEADERS = {"User-Agent": "OutrankIQMapper/1.0 (+https://example.com)"}
+_MAPPER_VERSION = "site-map-v4"  # bump to invalidate old map cache
 
 def _tokenize(text: str) -> List[str]:
     return TOKEN_RE.findall(text.lower()) if text else []
@@ -266,7 +267,7 @@ def _same_site(url: str, base_host: str, base_root: str, include_subdomains: boo
     except Exception:
         return False
 
-# ---------- URL normalization for stable keys ----------
+# ---------- URL normalization & page-like helpers ----------
 def _url_key(u: str) -> str:
     """Normalize for stable matching (scheme/host lower, trim trailing slash, collapse //)."""
     try:
@@ -279,6 +280,29 @@ def _url_key(u: str) -> str:
         return f"{scheme}://{host}{path}"
     except Exception:
         return (u or "").strip().lower()
+
+def _is_home(u: str) -> bool:
+    p = urlparse(u)
+    path = re.sub(r'/+', '/', p.path or '/')
+    return path == '/'
+
+def _is_page_like(source_type: str, url: str, is_nav: bool) -> bool:
+    """Treat homepage + shallow, non-blog/nav pages as 'page-like' even if not in a page sitemap."""
+    if source_type == 'page':
+        return True
+    path = urlparse(url).path.lower()
+    if _is_home(url):
+        return True
+    # nav items that are not clearly blog/news/tax
+    if is_nav and not any(seg in path for seg in ('/blog/', '/news/', '/category/', '/tag/', '/author/', '/archive/')):
+        depth = len([seg for seg in path.split('/') if seg])
+        if depth <= 2:
+            return True
+    # shallow, non-blog paths (e.g., /about, /services)
+    depth = len([seg for seg in path.split('/') if seg])
+    if depth <= 1 and not re.search(r"/\d{4}/\d{2}/", path) and not any(s in path for s in ('/blog/', '/news/')):
+        return True
+    return False
 
 # ---------- Robots & sitemaps ----------
 @contextlib.contextmanager
@@ -732,11 +756,24 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
             if base_fit <= 0:
                 continue
             stype = _src_type_for_profile(p)   # 'page' | 'post' | 'tax' | 'other'
-            bonus = _url_priority_bonus(p["url"], _is_nav(p), stype)
-            f = max(0.0, min(2.0, base_fit + bonus))
+            is_nav = _is_nav(p)
+
+            bonus = _url_priority_bonus(p["url"], is_nav, stype)
+            f = base_fit + bonus
+
+            # VEO steering: prefer homepage/contact/locations; downweight news/blog
+            if slot == "VEO":
+                path = urlparse(p["url"]).path.lower()
+                if _is_home(p["url"]) or any(s in path for s in ("/contact", "/contact-us", "/locations", "/find-us", "/visit")):
+                    f += 0.15
+                if "/blog/" in path or "/news/" in path:
+                    f -= 0.25
+
+            f = max(0.0, min(2.0, f))
             if f <= 0:
                 continue
-            if stype == "page":
+
+            if _is_page_like(stype, p["url"], is_nav):
                 fits_page.append((p["url"], f))
             else:
                 fits_other.append((p["url"], f))
@@ -744,7 +781,7 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
         fits_page.sort(key=lambda x: x[1], reverse=True)
         fits_other.sort(key=lambda x: x[1], reverse=True)
 
-        # STRICT preference: take pages first; only fall back if no page candidates
+        # STRICT preference: take page-like first; only fall back if needed
         fits: List[Tuple[str,float]] = []
         fits.extend(fits_page[:TOP_K])
         if len(fits) < TOP_K:
@@ -879,7 +916,7 @@ if uploaded is not None:
             try: sig_df = export_df[sig_cols].copy()
             except Exception: sig_df = export_df[[col for col in sig_cols if col in export_df.columns]].copy()
             sig_csv = sig_df.fillna("").astype(str).to_csv(index=False)
-            sig_base = f"{_normalize_base(base_site_url.strip()).lower()}|{scoring_mode}|{kw_col}|{vol_col}|{kd_col}|{len(export_df)}"
+            sig_base = f"{_MAPPER_VERSION}|{_normalize_base(base_site_url.strip()).lower()}|{scoring_mode}|{kw_col}|{vol_col}|{kd_col}|{len(export_df)}"
             signature = hashlib.md5((sig_base + "\n" + sig_csv).encode("utf-8")).hexdigest()
             if "map_cache" not in st.session_state: st.session_state["map_cache"] = {}
             cache = st.session_state["map_cache"]
