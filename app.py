@@ -54,7 +54,7 @@ st.markdown(
 html, body, [class^="css"], [class*=" css"] {{ color: var(--light) !important; }}
 h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
 
-/* Inputs: white surface, GREEN focus */
+/* Inputs: white surface, GREEN focus (no red outlines) */
 .stTextInput > div > div > input,
 .stTextArea textarea,
 .stNumberInput input,
@@ -104,7 +104,6 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
 }}
 [data-testid="stFileUploaderDropzone"] button:hover,
 [data-testid="stFileUploaderDropzone"] label:hover,
-[data-testid="stFileUploaderDropzone"] [role="button"]::hover,
 [data-testid="stFileUploaderDropzone"] [role="button"]:hover {{
   background-color: var(--light) !important; /* white on hover */
   color: var(--ink) !important;             /* blue text */
@@ -234,10 +233,10 @@ _READ_TIMEOUT = 8
 _TOTAL_BUDGET_SECS = 60
 _CONCURRENCY = 16
 _THREADS = 12
-_MIN_FIT_THRESHOLD = 0.30  # slightly higher confidence floor
+_MIN_FIT_THRESHOLD = 0.30
 _ALT_FIT_MIN = 0.22
 _DEF_HEADERS = {"User-Agent": "OutrankIQMapper/1.1 (+https://example.com)"}
-_MAPPER_VERSION = "site-map-v9-ai-tuned"  # bump to invalidate old map cache
+_MAPPER_VERSION = "site-map-v10-phase1"
 
 # ---------- Synonyms / phrase normalization ----------
 PHRASE_MAP = [
@@ -251,24 +250,16 @@ PHRASE_MAP = [
 ]
 
 _SYN_MAP = {
-    # contact/connection
     "connect":"contact","connected":"contact","connecting":"contact","contacts":"contact",
     "support":"contact","helpdesk":"contact","help-line":"contact","helpline":"contact",
-    # location intent
     "nearby":"nearme","nearyou":"nearme","directions":"nearme","address":"nearme",
     "offices":"locations","office":"locations","locations":"locations","visit":"locations","findus":"locations",
-    # org
     "organisations":"organization","organisation":"organization","organizations":"organization","orgs":"organization","org":"organization",
     "nonprofit":"organization","ngo":"organization","charity":"organization","foundation":"organization",
-    # assist/help
     "assist":"help","assists":"help","assistance":"help","caregiving":"help","caregiver":"help","caregivers":"help",
-    # disability
     "disabilities":"disability","disabled":"disability",
-    # services/programs
     "programs":"program","programme":"program","services":"service",
-    # donate/give
     "contribute":"donate","give":"donate","giving":"donate",
-    # volunteer / get involved
     "get":"get","involved":"involved","volunteering":"volunteer","volunteers":"volunteer",
 }
 
@@ -289,17 +280,11 @@ def _normalize_phrases(text: str) -> str:
 def _norm_token(t: str) -> str:
     t = t.lower()
     if t in _SYN_MAP: t = _SYN_MAP[t]
-    # simple stemming
-    if t.endswith("ies") and len(t) > 3:
-        t = t[:-3] + "y"
-    elif t.endswith("es") and len(t) > 4:
-        t = t[:-2]
-    elif t.endswith("s") and len(t) > 3:
-        t = t[:-1]
-    if t.endswith("ing") and len(t) > 5:
-        t = t[:-3]
-    elif t.endswith("ed") and len(t) > 4:
-        t = t[:-2]
+    if t.endswith("ies") and len(t) > 3: t = t[:-3] + "y"
+    elif t.endswith("es") and len(t) > 4: t = t[:-2]
+    elif t.endswith("s") and len(t) > 3: t = t[:-1]
+    if t.endswith("ing") and len(t) > 5: t = t[:-3]
+    elif t.endswith("ed") and len(t) > 4: t = t[:-2]
     return t
 
 def _tokenize(text: str) -> List[str]:
@@ -437,20 +422,14 @@ def _extract_sitemaps_from_robots(base_root_url: str, session) -> List[str]:
     return maps
 
 def _parse_sitemap_xml_entries(xml_text: str) -> List[Tuple[str, Optional[float], Optional[str]]]:
-    """
-    Returns list of (loc, priority, lastmod) from a urlset or sitemapindex.
-    For sitemapindex, priority will be None.
-    """
     if not xml_text: return []
     entries: List[Tuple[str, Optional[float], Optional[str]]] = []
-    # urlset items
     for m in re.finditer(r"<url>\s*(.*?)\s*</url>", xml_text, re.I | re.S):
         block = m.group(1)
         lm = re.search(r"<loc>\s*([^<]+)\s*</loc>", block, re.I)
         if not lm: continue
         loc = lm.group(1).strip()
-        pr = None
-        lastmod = None
+        pr = None; lastmod = None
         pm = re.search(r"<priority>\s*([0-9.]+)\s*</priority>", block, re.I)
         if pm:
             with contextlib.suppress(Exception):
@@ -459,13 +438,11 @@ def _parse_sitemap_xml_entries(xml_text: str) -> List[Tuple[str, Optional[float]
         if lmm:
             lastmod = lmm.group(1).strip()
         entries.append((loc, pr, lastmod))
-    # sitemapindex items
     for m in re.finditer(r"<sitemap>\s*(.*?)\s*</sitemap>", xml_text, re.I | re.S):
         block = m.group(1)
         lm = re.search(r"<loc>\s*([^<]+)\s*</loc>", block, re.I)
         if lm:
             entries.append((lm.group(1).strip(), None, None))
-    # Fallback: any locs
     if not entries:
         for lm in re.finditer(r"<loc>\s*([^<]+)\s*</loc>", xml_text, re.I):
             entries.append((lm.group(1).strip(), None, None))
@@ -541,14 +518,12 @@ def discover_urls_with_sources(base_url: str, include_subdomains: bool, use_site
             for u in discovered:
                 srcmap.setdefault(_url_key(u), "other")
 
-    # unique preserve order
     discovered = list(dict.fromkeys(discovered))
     def _path_depth(u: str) -> int:
         return len([seg for seg in urlparse(u).path.split("/") if seg])
     prio = {"page":0,"post":1,"tax":2,"other":3}
     discovered.sort(key=lambda u: (prio.get(srcmap.get(_url_key(u),"other"),3), _path_depth(u)))
     trimmed = discovered[:_MAX_PAGES]
-    # reduce meta to trimmed items
     trimmed_meta = {}
     for u in trimmed:
         key = _url_key(u)
@@ -661,9 +636,6 @@ def shallow_crawl(base_url: str, include_subdomains: bool) -> List[str]:
 
 # ---------- Nav harvesting (anchors & tokens) ----------
 def _harvest_nav(base_url: str) -> Tuple[Dict[str, Set[str]], Set[str]]:
-    """
-    Returns: (nav_anchor_tokens_by_url, all_nav_tokens)
-    """
     home = _normalize_base(base_url)
     html = ""
     with _session() as sess:
@@ -690,7 +662,6 @@ def _harvest_nav(base_url: str) -> Tuple[Dict[str, Set[str]], Set[str]]:
                     if toks:
                         url_to_tokens[key].update(toks)
                         all_tokens.update(toks)
-            # include title/body light tokens for general nav context
             t = soup.find("title")
             if t:
                 all_tokens.update(_ntokens(t.get_text(" ", strip=True)))
@@ -721,19 +692,15 @@ def _answerability_score(html: str, title_h1_text: str) -> float:
     t = title_h1_text.lower()
     if AIO_PAGE_SIG.search(t):
         score += 0.2
-    # lists / steps
     if re.search(r"<(ol|ul)[\s>].*?<li", html or "", re.I | re.S):
         score += 0.1
-    # FAQ / Q&A patterns
     if re.search(r"\bFAQ\b|\bQ:\b|\bA:\b", html or "", re.I):
         score += 0.1
-    # Short definition pattern: 'X is ...' in first ~200 words
     first = re.sub(r"<.*?>", " ", (html or ""))
     first = re.sub(r"\s+", " ", first).strip()
     head = " ".join(first.split()[:200]).lower()
     if re.search(r"\b(is|are)\b.+?\.", head):
         score += 0.05
-    # HowTo / FAQPage schema hints
     if re.search(r"FAQPage|HowTo|QAPage", html or "", re.I):
         score += 0.1
     return min(0.5, score)
@@ -762,9 +729,11 @@ def _extract_profile(html: str, final_url: str, requested_url: Optional[str] = N
     if not canonical: canonical = final_url
     if body_text:
         words = body_text.split()
+        lead_text = " ".join(words[:200])
         if len(words) > 800: body_text = " ".join(words[:800])
+    else:
+        lead_text = ""
 
-    # Weights (section-aware)
     weights: Dict[str,float] = defaultdict(float)
     for tok in _ntokens(title): weights[tok] += 3.0
     for t in h1_texts:
@@ -775,15 +744,12 @@ def _extract_profile(html: str, final_url: str, requested_url: Optional[str] = N
 
     title_h1 = " ".join([title] + h1_texts)
     title_h1_norm = " ".join(_ntokens(title_h1))
+    lead_norm = " ".join(_ntokens(lead_text))
 
-    # VEO readiness
     veo_ready = False
-    if _is_contact_like(canonical):
-        veo_ready = True
-    if _PHONE_PAT.search(html or "") or _ADDR_PAT.search(html or ""):
-        veo_ready = True
-    if re.search(r"LocalBusiness|Organization", html or "", re.I):
-        veo_ready = True
+    if _is_contact_like(canonical): veo_ready = True
+    if _PHONE_PAT.search(html or "") or _ADDR_PAT.search(html or ""): veo_ready = True
+    if re.search(r"LocalBusiness|Organization", html or "", re.I): veo_ready = True
 
     a_score = _answerability_score(html or "", title_h1)
 
@@ -792,6 +758,7 @@ def _extract_profile(html: str, final_url: str, requested_url: Optional[str] = N
         "title": title or "",
         "title_h1": title_h1.lower(),
         "title_h1_norm": title_h1_norm,
+        "lead_norm": lead_norm,
         "weights": dict(weights),
         "final_url": final_url,
         "requested_url": requested_url or final_url,
@@ -878,14 +845,9 @@ def cached_nav(base_url: str) -> Tuple[Dict[str, Set[str]], Set[str]]:
 
 # ---------- Fit & priority ----------
 def _fit_score(keyword: str, profile: Dict) -> float:
-    """
-    BM25-lite: section weights already baked into profile['weights'].
-    Add title coverage bonuses & small penalty when nothing is covered in titles.
-    """
     tokens = _ntokens(keyword)
     if not tokens: return 0.0
     w = profile.get("weights", {})
-    # length-normalized sum of sqrt TF to damp long-body bias
     overlap = 0.0
     for t in tokens:
         tf = w.get(t, 0.0)
@@ -944,20 +906,33 @@ def _looks_out_of_domain(original_kw: str, site_lex: set, base_url: str) -> bool
         return True
     return False
 
+# ---------- Helpers for sitemap tie-break ----------
+def _parse_lastmod_ts(s: Optional[str]) -> float:
+    if not s: return 0.0
+    ss = s.strip()
+    with contextlib.suppress(Exception):
+        # try ISO 8601 variants
+        if ss.endswith("Z"): ss = ss[:-1] + "+00:00"
+        return datetime.fromisoformat(ss).timestamp()
+    m = re.match(r"(\d{4}-\d{2}-\d{2})", s)
+    if m:
+        try:
+            return datetime.fromisoformat(m.group(1)).timestamp()
+        except Exception:
+            return 0.0
+    return 0.0
+
 # ---------- Mapping ----------
 def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, kd_col: str,
                          base_url: str, include_subdomains: bool, use_sitemap_first: bool) -> pd.Series:
-    # Discover & profile (with sitemap source types + meta)
     url_list, srcmap, smeta = cached_discover_and_sources(base_url, include_subdomains, use_sitemap_first)
     profiles = cached_fetch_profiles(tuple(url_list))
     profiles = [p for p in profiles if p.get("weights")]
     if not profiles:
         return pd.Series([""]*len(df), index=df.index, dtype="string")
 
-    # Nav anchors
     nav_anchor_map, all_nav_tokens = cached_nav(base_url)
 
-    # Build lexicons & counts
     domain_toks = _domain_tokens(base_url)
     page_counts: Dict[str,int] = defaultdict(int)
     post_counts: Dict[str,int] = defaultdict(int)
@@ -975,7 +950,6 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
     def _is_nav(p: Dict) -> bool:
         return (_url_key(p.get("url","")) in nav_keys) or (_url_key(p.get("requested_url","")) in nav_keys)
 
-    # Count tokens by page/post buckets + global freq for rarity tweak
     global_counts: Dict[str,int] = defaultdict(int)
     for p in profiles:
         stype = _src_type_for_profile(p)
@@ -990,7 +964,6 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
             if is_page: page_counts[t] += 1
             if is_post: post_counts[t] += 1
 
-    # Fold nav/home tokens & domain tokens into page core counts (heavier weight)
     for key, toks in nav_anchor_map.items():
         for t in toks:
             page_counts[t] += 3
@@ -1001,16 +974,14 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
     post_lex = set(post_counts.keys())
     site_lex = set(page_core_lex) | set(post_lex) | set(all_nav_tokens) | set(domain_toks)
 
-    # Token post-heavy ratio map & commonness
     post_heavy: Dict[str,bool] = {}
     very_common: Dict[str,bool] = {}
     total_docs = max(1, len(profiles))
     for t in set(list(page_counts.keys()) + list(post_counts.keys()) + list(global_counts.keys())):
         r = post_counts.get(t,0) / max(1, page_counts.get(t,0))
         post_heavy[t] = (r >= 5.0)
-        very_common[t] = (global_counts.get(t,0) >= max(3, total_docs // 3))  # very common across site
+        very_common[t] = (global_counts.get(t,0) >= max(3, total_docs // 3))
 
-    # Prepare ranking weights
     vols = pd.to_numeric(df[vol_col], errors="coerce").fillna(0).clip(lower=0)
     max_log = float((vols + 1).apply(lambda x: math.log(1 + x)).max()) or 1.0
     def strat_weights():
@@ -1033,10 +1004,10 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
 
     def _commonness_penalty(tokens: List[str]) -> float:
         cnt = sum(1 for t in tokens if very_common.get(t, False))
-        return -0.05 * cnt  # small dampen for over-common tokens
+        return -0.05 * cnt
 
     TOP_K = 5
-    kw_candidates: Dict[int, List[Tuple[str,float,float,str]]] = {}  # (url, fit, covered_ratio, stype)
+    kw_candidates: Dict[int, List[Tuple[str,float,float,str]]] = {}
     kw_slot: Dict[int,str] = {}
     kw_rank: Dict[int,float] = {}
     head_noun_by_kw: Dict[int, str] = {}
@@ -1044,7 +1015,6 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
     for idx, row in df.iterrows():
         kw = str(row.get(kw_col, "")) if kw_col else str(row.get("Keyword",""))
 
-        # Out-of-domain/entity gate
         if _looks_out_of_domain(kw, site_lex, base_url):
             kw_candidates[idx] = []
             kw_slot[idx] = "SEO"
@@ -1060,7 +1030,6 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
         head = _head_noun(tokens_norm)
         head_noun_by_kw[idx] = head
 
-        # SEO/VEO must overlap page-core lexicon; also head noun must appear in Title/H1 or slug later.
         if slot in {"SEO","VEO"} and not _has_core_token(tokens_norm):
             kw_candidates[idx] = []
             kw_slot[idx] = slot
@@ -1080,47 +1049,55 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
             is_post_like = _is_post_like(stype, p["url"])
 
             title_tokens = set((p.get("title_h1_norm") or "").split())
+            title_raw = (p.get("title") or "").strip().lower()
             covered = sum(1 for t in tokens_norm if t in title_tokens)
             covered_ratio = covered / max(1, len(tokens_norm))
 
+            # First-200 words gate (lead salience) OR strong title coverage
+            lead_tokens = set((p.get("lead_norm") or "").split())
+            lead_cov = sum(1 for t in tokens_norm if t in lead_tokens) / max(1, len(tokens_norm))
+            if (lead_cov < 0.18) and (covered_ratio < 0.50):
+                continue
+
             bonus = _url_priority_bonus(p["url"], is_nav_flag, stype)
-            # Post-heavy penalty when mapping to a page-like URL
             if is_page_like:
                 bonus += _post_heavy_penalty(tokens_norm)
 
-            # Anchor/slug/head noun proximity
+            # Head-noun & slug/title proximity + prefix-boost
             slug_toks = _slug_tokens(p["url"])
             nav_anchor_toks = nav_anchor_map.get(_url_key(p["url"]), set())
             if head and (head in slug_toks or head in title_tokens): bonus += 0.12
             if head and (head in nav_anchor_toks): bonus += 0.12
+            phrase_str = " ".join(tokens_norm)
+            if head and (title_raw.startswith(head + " ") or title_raw == head):
+                bonus += 0.12
+            elif phrase_str and (title_raw.startswith(phrase_str + " ") or title_raw == phrase_str):
+                bonus += 0.12
 
-            # Answerability bonus for AIO on suitable pages/posts
             a_bonus = 0.0
             if slot == "AIO":
                 a_bonus = min(0.15, p.get("a_score", 0.0))
 
-            # Commonness dampener
             bonus += _commonness_penalty(tokens_norm)
 
             f = max(0.0, min(2.0, base_fit + bonus + a_bonus))
             if f <= 0:
                 continue
 
-            # AIO: allow posts only when AIO signal & strong fit
+            # AIO: allow posts only with AIO signal & strong fit
             if slot == "AIO" and is_post_like:
-                if not AIO_PAGE_SIG.search(p.get("title_h1","") or "") or f < 0.55:
+                if not AIO_PAGE_SIG.search(p.get("title_h1","") or "") or f < 0.60:
                     continue
 
             # VEO: require readiness (NAP/schema/contact-like)
             if slot == "VEO" and not p.get("veo_ready", False):
                 continue
 
-            # Head noun hard-gate for SEO/VEO: title/slug must include it
+            # Stronger head-noun rule for SEO/VEO: must be in Title or Slug; else allow only if exact phrase in Title/H1 AND fit≥0.70
             if slot in {"SEO","VEO"} and head:
                 if (head not in title_tokens) and (head not in slug_toks):
-                    # allow if exact phrase present in title_h1_norm
                     phrase = " ".join(tokens_norm)
-                    if not phrase or phrase not in (p.get("title_h1_norm") or ""):
+                    if not phrase or phrase not in (p.get("title_h1_norm") or "") or f < 0.70:
                         continue
 
             if is_page_like:
@@ -1131,11 +1108,25 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
         fits_page.sort(key=lambda x: x[1], reverse=True)
         fits_other.sort(key=lambda x: x[1], reverse=True)
 
-        # Prefer page-like candidates; fill with others if needed
+        # ----- Phase 1: Epsilon page-first override -----
         fits: List[Tuple[str,float,float,str]] = []
-        fits.extend(fits_page[:TOP_K])
-        if len(fits) < TOP_K:
-            fits.extend(fits_other[:TOP_K - len(fits)])
+        if fits_page and fits_other:
+            best_page = fits_page[0][1]
+            best_other = fits_other[0][1]
+            best_overall = max(best_page, best_other)
+            if best_page >= (best_overall - 0.08):
+                fits.extend(fits_page[:TOP_K])
+                if len(fits) < TOP_K:
+                    fits.extend(fits_other[:TOP_K - len(fits)])
+            else:
+                # default: pages first but other wins if clearly better
+                fits.extend(fits_page[:TOP_K])
+                if len(fits) < TOP_K:
+                    fits.extend(fits_other[:TOP_K - len(fits)])
+        elif fits_page:
+            fits = fits_page[:TOP_K]
+        else:
+            fits = fits_other[:TOP_K]
 
         if not fits or (fits[0][1] < _MIN_FIT_THRESHOLD):
             kw_candidates[idx] = []
@@ -1143,22 +1134,26 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
             kw_rank[idx] = 0.0
             continue
 
-        # Slight sitemap priority/lastmod boosts for ties
-        def _smeta_boost(u: str) -> float:
-            md = smeta.get(u, {})
+        # ----- Phase 1: Sharper sitemap tie-breakers within 0.04 -----
+        top_fit = fits[0][1]
+        def _smeta_boost(u: str, base_fit: float) -> float:
             b = 0.0
-            if md.get("priority"):
+            md = smeta.get(u, {})
+            close = (top_fit - base_fit) <= 0.04
+            if close and md.get("priority"):
                 try:
-                    pr = float(md.get("priority", "0") or 0)
-                    if pr >= 0.8: b += 0.05
-                    elif pr >= 0.5: b += 0.02
+                    pr = float(md.get("priority") or 0)
+                    if pr >= 0.8: b += 0.03
+                    elif pr >= 0.5: b += 0.015
                 except Exception:
                     pass
-            if md.get("lastmod") and "AIO" in slot:
-                b += 0.02  # tiny freshness nudge for AIO only
+            if close and md.get("lastmod") and (slot == "AIO"):
+                # tiny freshness nudge for AIO
+                if _parse_lastmod_ts(md.get("lastmod")) > 0:
+                    b += 0.01
             return b
 
-        fits = [(u, f + _smeta_boost(u), cr, st) for (u, f, cr, st) in fits]
+        fits = [(u, f + _smeta_boost(u, f), cr, st) for (u, f, cr, st) in fits]
         fits.sort(key=lambda x: x[1], reverse=True)
 
         kw_candidates[idx] = fits[:TOP_K]
@@ -1171,8 +1166,7 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
         kd_norm = max(0.0, 1.0 - kd_val/100.0)
         vol_norm = math.log(1 + max(0.0, vol_val)) / max_log
 
-        # Strategy-aware re-rank augmentation
-        lhf_opportunity = vol_norm * kd_norm  # high vol, low KD (kd_norm = 1 - kd/100)
+        lhf_opportunity = vol_norm * kd_norm
         if scoring_mode == "Low Hanging Fruit":
             kw_rank[idx] = 0.30*fit_norm + 0.30*kd_norm + 0.20*vol_norm + 0.20*lhf_opportunity
         elif scoring_mode == "In The Game":
@@ -1180,7 +1174,6 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
         else:
             kw_rank[idx] = 0.40*fit_norm + 0.20*kd_norm + 0.40*vol_norm
 
-    # Slot caps per URL
     caps = {"VEO":1, "AIO":1, "SEO":2}
     assigned: Dict[str, Dict[str, object]] = {}
     for p in profiles:
@@ -1189,18 +1182,14 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
     mapped = {i:"" for i in df.index}
 
     def _seo_allowed(stype: str, u: str, fit: float, covered_ratio: float, i: int) -> bool:
-        # avoid blog/news unless strong title coverage
         if _is_post_like(stype, u):
             if covered_ratio < 0.50 or fit < 0.45:
                 return False
-        # additional guard: head noun must be present (already enforced earlier)
         return True
 
-    # Assignment order (strategy-aware): in LHF, sort by opportunity then rank
     def assign_slot(slot_name: str):
         ids = [i for i,s in kw_slot.items() if s == slot_name]
         if scoring_mode == "Low Hanging Fruit":
-            # compute opportunity for sort
             opp = {}
             for i in ids:
                 row = df.loc[i]
@@ -1218,11 +1207,9 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
             if not choices: continue
             head = head_noun_by_kw.get(i, "")
             for j, (u, fit, covered_ratio, stype) in enumerate(choices):
-                # final head noun check on slug/title
                 title_tokens = set((next((p["title_h1_norm"] for p in profiles if p["url"]==u), "")).split())
                 if head and (head not in _slug_tokens(u)) and (head not in title_tokens):
                     continue
-
                 if slot_name in {"VEO","AIO"}:
                     if assigned[u][slot_name] is None and (j == 0 or fit >= _ALT_FIT_MIN):
                         assigned[u][slot_name] = i; mapped[i] = u; break
@@ -1232,7 +1219,6 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
 
     assign_slot("VEO"); assign_slot("AIO"); assign_slot("SEO")
 
-    # Trim overflow (safety)
     for u, slots in assigned.items():
         if isinstance(slots["SEO"], list) and len(slots["SEO"]) > caps["SEO"]:
             for drop_idx in slots["SEO"][caps["SEO"]:]: mapped[drop_idx] = ""
