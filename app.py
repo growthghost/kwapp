@@ -14,13 +14,13 @@ except Exception:
 # ---------- Brand / Theme ----------
 LOGO_PATH = "/mnt/data/OutrankIQ Grey Logo.png"
 BRAND_BG = "#747474"     # background
-BRAND_INK = "#242F40"    # secondary
+BRAND_INK = "#242F40"    # secondary (ink)
 BRAND_ACCENT = "#E1B000" # accent 1
 BRAND_LIGHT = "#FFFFFF"  # accent 2
 
 st.set_page_config(page_title="OutrankIQ", page_icon="🔎", layout="centered")
 
-# ---------- Global CSS (logo + colors) ----------
+# ---------- Global CSS (colors, components, uploader/table text colors) ----------
 st.markdown(
     f"""
 <style>
@@ -33,7 +33,7 @@ st.markdown(
 /* App background */
 .stApp {{ background-color: var(--bg); }}
 
-/* Base text on dark bg */
+/* Default text on dark bg */
 html, body, [class^="css"], [class*=" css"] {{ color: var(--light) !important; }}
 
 /* Headings */
@@ -49,11 +49,24 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
   border-radius: 8px !important;
 }}
 
-/* File uploader */
+/* Give the selectbox an explicit caret cue */
+.stSelectbox label::after {{
+  content: "  ⯆";
+  color: var(--light);
+  font-weight: 700;
+}}
+
+/* File uploader dropzone (and text) */
 [data-testid="stFileUploaderDropzone"] {{
-  background: rgba(255,255,255,0.95);
+  background: rgba(255,255,255,0.98);
   border: 2px dashed var(--accent);
-  color: var(--ink);
+  color: var(--ink) !important;
+}}
+[data-testid="stFileUploader"] * {{ color: var(--ink) !important; }}
+
+/* Tables/dataframes inside bulk CSV area should be dark text for readability */
+.stDataFrame, .stDataFrame * , .stTable, .stTable * {{
+  color: var(--ink) !important;
 }}
 
 /* Buttons (including download) */
@@ -67,24 +80,23 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
 }}
 .stButton > button:hover, .stDownloadButton > button:hover {{ filter: brightness(1.05); }}
 
-/* Tables readable on dark bg */
-.stDataFrame, .stDataFrame div, .stDataFrame table, .stTable {{ color: var(--ink) !important; }}
+/* Strategy banner helper */
+.info-banner {{
+  background: linear-gradient(90deg, var(--ink) 0%, var(--accent) 100%);
+  padding: 16px; border-radius: 12px; color: var(--light);
+}}
 </style>
 """,
     unsafe_allow_html=True,
 )
 
-# ---------- Header with logo ----------
-try:
-    spacer = "<div style='height:8px'></div>"
-    st.markdown(spacer, unsafe_allow_html=True)
-    c1, c2, c3 = st.columns([1,6,1])
-    with c2:
-        st.image(LOGO_PATH, use_column_width=True)
-except Exception:
-    pass
+# ---------- Header: Logo replaces main title ----------
+st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+col_l, col_c, col_r = st.columns([1, 6, 1])
+with col_c:
+    # use_container_width replaces deprecated use_column_width
+    st.image(LOGO_PATH, use_container_width=True)
 
-st.title("OutrankIQ")
 st.caption("Score keywords by Search Volume (A) and Keyword Difficulty (B) — with selectable scoring strategies.")
 
 # ---------- Helpers ----------
@@ -125,7 +137,7 @@ strategy_descriptions = {
     "Competitive": "High-volume, high-difficulty keywords dominated by authoritative domains. Requires strong content, domain authority, and strategic SEO to compete. Great for long-term growth.",
 }
 
-# ---------- Strategy selector ----------
+# ---------- Strategy selector (label shows a caret) ----------
 scoring_mode = st.selectbox("Choose Scoring Strategy", ["Low Hanging Fruit", "In The Game", "Competitive"])
 
 if scoring_mode == "Low Hanging Fruit":
@@ -138,15 +150,14 @@ elif scoring_mode == "Competitive":
     MIN_VALID_VOLUME = 3000
     KD_BUCKETS = [(0, 40, 6), (41, 60, 5), (61, 75, 4), (76, 85, 3), (86, 95, 2), (96, 100, 1)]
 
-# Branded strategy banner
 st.markdown(
     f"""
-<div style='background: linear-gradient(90deg, {BRAND_INK} 0%, {BRAND_ACCENT} 100%); padding:16px; border-radius:12px; margin-bottom:16px;'>
-    <div style='margin-bottom:6px; font-size:13px; color:{BRAND_LIGHT};'>
-        Minimum Search Volume Required: <strong>{MIN_VALID_VOLUME}</strong>
-    </div>
-    <strong style='color:{BRAND_LIGHT}; font-size:18px;'>{scoring_mode}</strong><br>
-    <span style='color:{BRAND_LIGHT}; font-size:15px;'>{strategy_descriptions[scoring_mode]}</span>
+<div class="info-banner" style="margin-bottom:16px;">
+  <div style='margin-bottom:6px; font-size:13px;'>
+    Minimum Search Volume Required: <strong>{MIN_VALID_VOLUME}</strong>
+  </div>
+  <strong style='font-size:18px;'>{scoring_mode}</strong><br>
+  <span style='font-size:15px;'>{strategy_descriptions[scoring_mode]}</span>
 </div>
 """,
     unsafe_allow_html=True,
@@ -231,8 +242,6 @@ with st.form("single"):
     if st.form_submit_button("Calculate Score"):
         sc = calculate_score(vol_val, kd_val)
         label = LABEL_MAP.get(sc, "Not rated")
-        color = "#ffffff"  # text color inside the card
-        # Colored badge using brand accent/ink instead of the old palette
         st.markdown(
             f"""
             <div style='background: linear-gradient(90deg, {BRAND_ACCENT}, {BRAND_INK}); padding:16px; border-radius:12px; text-align:center;'>
@@ -345,13 +354,16 @@ if uploaded is not None:
             ).drop(columns=["_EligibleSort"])
 
             def _row_style(row):
-                # keep the score coloring but text stays dark for contrast
-                color = "#ffffff"
-                return [("background-color: " + color + "; color: black;") if c in ("Score", "Tier") else "" for c in row.index]
+                # keep contrasting text for the colored cells
+                color = COLOR_MAP.get(int(row.get("Score", 0)) if pd.notna(row.get("Score", 0)) else 0, "#9ca3af")
+                return [
+                    ("background-color: " + color + "; color: black;") if c in ("Score", "Tier") else ""
+                    for c in row.index
+                ]
 
             preview_cols = export_cols  # same columns as CSV
             styled = preview_df[preview_cols].head(10).style.apply(_row_style, axis=1)
             st.dataframe(styled, use_container_width=True)
 
 st.markdown("---")
-st.caption("© 2025 OutrankIQ • Brand colors: bg #747474 • ink #242F40 • accent #E1B000 • light #FFFFFF.")
+st.caption(f"© {datetime.now().year} OutrankIQ")
