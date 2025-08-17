@@ -436,7 +436,8 @@ def _parse_sitemap_xml(xml_text: str) -> List[str]:
     urls = []
     if not xml_text:
         return urls
-    for m in re.finditer("<loc>\s*([^<]+)\s*</loc>", xml_text, re.I):
+    # robust raw-string pattern for <loc>...</loc>
+    for m in re.finditer(r"<loc>\s*([^<]+)\s*</loc>", xml_text, re.I):
         urls.append(m.group(1).strip())
     return urls
 
@@ -459,7 +460,6 @@ def _collect_sitemap_urls(sm_url: str, session, base_host: str, base_root: str, 
             if _same_site(u, base_host, base_root, include_subdomains):
                 out.append(u)
     
-
 
 def discover_urls(base_url: str, include_subdomains: bool, use_sitemap_first: bool) -> List[str]:
     base = _normalize_base(base_url)
@@ -1027,3 +1027,21 @@ if uploaded is not None:
                 loader.empty()
                 cache[signature] = map_series.fillna("").astype(str).tolist()
         else:
+            st.info("Enter a Base site URL to enable mapping.")
+
+        export_df["Map URL"] = map_series
+
+        export_cols = base_cols + ["Strategy", "Map URL"]  # Map URL as rightmost column
+        export_df = export_df[export_cols]
+
+        csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")
+        st.download_button(
+            label="⬇️ Download scored CSV",
+            data=csv_bytes,
+            file_name=f"{filename_base}.csv",
+            mime="text/csv",
+            help="Sorted by eligibility (Yes first), KD ascending, Volume descending"
+        )
+
+st.markdown("---")
+st.caption(f"© {datetime.now().year} OutrankIQ")
