@@ -1,6 +1,5 @@
 import io
 import re
-from pathlib import Path
 import pandas as pd
 import streamlit as st
 from datetime import datetime
@@ -40,7 +39,7 @@ html, body, [class^="css"], [class*=" css"] {{ color: var(--light) !important; }
 /* Headings */
 h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
 
-/* Inputs / selects / numbers base */
+/* Inputs / selects / numbers: base surface is white with ink text */
 .stTextInput > div > div > input,
 .stTextArea textarea,
 .stNumberInput input,
@@ -49,6 +48,11 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
   color: var(--ink) !important;
   border-radius: 8px !important;
 }}
+
+/* Hand cursor for select + number inputs (including +/- buttons) */
+.stSelectbox div[data-baseweb="select"] > div,
+.stNumberInput input,
+.stNumberInput button {{ cursor: pointer !important; }}
 
 /* Selectbox: caret INSIDE + yellow focus (no red) */
 .stSelectbox div[data-baseweb="select"] > div {{
@@ -92,6 +96,18 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
   border-color: var(--accent) !important;
 }}
 
+/* Preview checkbox: white box → blue when checked */
+.stCheckbox input[type="checkbox"] {{
+  width: 18px; height: 18px;
+  appearance: auto;             /* keep native look for reliability */
+  accent-color: var(--ink);     /* when checked: blue box + white tick */
+  border: 2px solid var(--ink) !important;  /* visible blue border when unchecked */
+  background: #ffffff !important;
+}}
+.stCheckbox input[type="checkbox"]:hover {{
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .25);
+}}
+
 /* File uploader dropzone */
 [data-testid="stFileUploaderDropzone"] {{
   background: rgba(255,255,255,0.98);
@@ -111,7 +127,7 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
   font-weight: 700 !important;
 }}
 
-/* Tables/dataframes readable on dark bg */
+/* Tables/readability */
 .stDataFrame, .stDataFrame * , .stTable, .stTable * {{ color: var(--ink) !important; }}
 
 /* Action buttons (download etc.) */
@@ -135,49 +151,8 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
     unsafe_allow_html=True,
 )
 
-# ---------- Logo (top-left, robust loading) ----------
-def _load_logo() -> tuple[bytes | str | None, list[str]]:
-    tried = []
-    candidates = [
-        Path("assets/OutrankIQ Grey Logo.png"),          # preferred repo path
-        Path("OutrankIQ Grey Logo.png"),                 # project root fallback
-        Path("/mnt/data/OutrankIQ Grey Logo.png"),       # dev fallback
-    ]
-    for p in candidates:
-        tried.append(str(p))
-        try:
-            if p.exists():
-                return p.read_bytes(), tried
-        except Exception:
-            pass
-    # Optional URL via secrets
-    try:
-        url = st.secrets.get("LOGO_URL", None)
-        if url:
-            return url, tried + ["st.secrets['LOGO_URL']"]
-    except Exception:
-        pass
-    return None, tried
-
-top = st.container()
-with top:
-    left, right = st.columns([2, 8])
-    with left:
-        logo, tried_paths = _load_logo()
-        if logo:
-            st.image(logo, width=220)  # top-left logo (doesn't replace title)
-        else:
-            st.info(
-                "Logo not found. Searched: " + " • ".join(tried_paths) +
-                ". Add the PNG to your repo or set LOGO_URL in Secrets."
-            )
-    with right:
-        st.write("")  # keep empty for clean header
-
-# ---- Title stays as text ----
+# ---------- Title + tagline (logo removed) ----------
 st.title("OutrankIQ")
-
-# ---- Tagline sits directly above the scoring selector ----
 st.caption("Score keywords by Search Volume (A) and Keyword Difficulty (B) — with selectable scoring strategies.")
 
 # ---------- Helpers ----------
@@ -299,7 +274,7 @@ def add_scoring_columns(df: pd.DataFrame, volume_col: str, kd_col: str, kw_col: 
     remaining = [c for c in out.columns if c not in ordered]
     return out[ordered + remaining]
 
-# ---------- Single Keyword ----------
+# ---------- Single keyword ----------
 st.subheader("Single Keyword Score")
 with st.form("single"):
     c1, c2 = st.columns(2)
@@ -361,6 +336,16 @@ if uploaded is not None:
         st.stop()
 
     # Find relevant columns
+    def find_column(df: pd.DataFrame, candidates) -> str | None:
+        cols_lower = {c.lower(): c for c in df.columns}
+        for cand in candidates:
+            if cand.lower() in cols_lower:
+                return cols_lower[cand.lower()]
+        for c in df.columns:
+            if any(k in c.lower() for k in candidates):
+                return c
+        return None
+
     vol_col = find_column(df, ["volume","search volume","sv"])
     kd_col  = find_column(df, ["kd","difficulty","keyword difficulty"])
     kw_col  = find_column(df, ["keyword","query","term"])
@@ -374,7 +359,7 @@ if uploaded is not None:
     else:
         # Clean numbers
         df[vol_col] = df[vol_col].astype(str).str.replace(r"[,\s]","",regex=True).str.replace("%","",regex=False)
-        df[kd_col] = df[kd_col].astype(str).str.replace(r"[,\s]","",regex=True).str.replace("%","",regex=False)
+        df[kd_col]  = df[kd_col].astype(str).str.replace(r"[,\s]","",regex=True).str.replace("%","",regex=False)
         df[vol_col] = pd.to_numeric(df[vol_col], errors="coerce")
         df[kd_col]  = pd.to_numeric(df[kd_col], errors="coerce").clip(lower=0, upper=100)
 
