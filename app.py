@@ -2,6 +2,7 @@ import io
 import re
 import asyncio
 import contextlib
+import gzip
 from typing import Optional, List, Dict, Tuple
 from collections import defaultdict
 from urllib.parse import urlparse, urljoin
@@ -118,6 +119,19 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
   color: #000 !important;
   border-color: var(--accent) !important;
 }}
+
+/* Text inputs: ensure GREEN focus */
+.stTextInput input {
+  border: 2px solid var(--light) !important;
+  outline: none !important;
+  border-radius: 8px !important;
+}
+.stTextInput input:focus,
+.stTextInput input:focus-visible {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .35) !important;
+  outline: none !important;
+}
 
 /* File uploader dropzone */
 [data-testid="stFileUploaderDropzone"] {{
@@ -317,7 +331,7 @@ _READ_TIMEOUT = 8
 _TOTAL_BUDGET_SECS = 60
 _CONCURRENCY = 16  # aiohttp
 _THREADS = 12      # requests fallback
-_MIN_FIT_THRESHOLD = 0.05
+_MIN_FIT_THRESHOLD = 0.0
 
 _DEF_HEADERS = {
     "User-Agent": "OutrankIQMapper/1.0 (+https://example.com)"
@@ -333,7 +347,8 @@ def _same_site(url: str, base_host: str, base_root: str, include_subdomains: boo
         if not host:
             return False
         if include_subdomains:
-            return host == base_root or host.endswith("." + base_root)
+            # Compare against the exact base host; include any subdomain of it
+            return host == base_host or host.endswith("." + base_host)
         else:
             return host == base_host
     except Exception:
@@ -384,10 +399,15 @@ def _fetch_text_requests(url: str, session, timeout: Tuple[int, int]) -> Optiona
         ctype = resp.headers.get("Content-Type", "").lower()
         if resp.status_code >= 400:
             return None
-        if "text" not in ctype and "html" not in ctype and "xml" not in ctype:
+        # Accept HTML, text, XML, and gzipped sitemaps
+        raw = resp.content[:_MAX_BYTES]
+        if ("gzip" in ctype) or url.lower().endswith(".gz"):
+            with contextlib.suppress(Exception):
+                raw = gzip.decompress(raw)
+            ctype = "text/xml"
+        if ("text" not in ctype) and ("html" not in ctype) and ("xml" not in ctype):
             return None
-        content = resp.content[:_MAX_BYTES]
-        return content.decode(resp.apparent_encoding or "utf-8", errors="ignore")
+        return raw.decode(resp.apparent_encoding or "utf-8", errors="ignore")
     except Exception:
         return None
 
