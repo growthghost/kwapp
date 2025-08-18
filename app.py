@@ -63,12 +63,19 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--ink) !important; }}
   margin-bottom: 16px;
   box-shadow: 0 2px 8px rgba(0,0,0,.08);
 }}
-/* Full-bleed trick: stretch inside Streamlit's centered container */
+/* Full-bleed trick */
 .oiq-bleed {{
   margin-left: calc(50% - 50vw);
   margin-right: calc(50% - 50vw);
   width: 100vw;
   border-radius: 0 !important;
+}}
+/* Inner container: centered with slight left pad; center-align text */
+.oiq-header-inner {{
+  max-width: 1000px;
+  margin: 0 auto;
+  padding-left: 12px;
+  text-align: center;
 }}
 .oiq-header .oiq-title {{
   font-size: 24px;
@@ -118,6 +125,15 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--ink) !important; }}
   content:"▾"; position:absolute; right:12px; top:50%; transform:translateY(-50%); color:var(--ink); pointer-events:none; font-size:14px; font-weight:700;
 }}
 
+/* BLUE labels for specific widgets */
+div[data-testid="stSelectbox"] > label,
+div[data-testid="stNumberInput"] > label,
+div[data-testid="stTextInput"] > label,
+div[data-testid="stCheckbox"] > label {{ color: var(--ink) !important; font-weight: 700; }}
+
+/* Expander header ("See example") in blue */
+[data-testid="stExpander"] [role="button"] p {{ color: var(--ink) !important; font-weight: 700; }}
+
 /* Uploader area + Browse button (BLUE -> WHITE on hover) */
 [data-testid="stFileUploaderDropzone"] {{ background: rgba(255,255,255,0.98); border: 2px dashed var(--accent); }}
 [data-testid="stFileUploader"] * {{ color: var(--ink) !important; }}
@@ -140,10 +156,17 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--ink) !important; }}
   border-color: var(--ink) !important;      /* blue border */
 }}
 
-/* Tables */
-.stDataFrame, .stDataFrame *, .stTable, .stTable * {{ color: var(--ink) !important; }}
+/* Checkbox visibility */
+div[data-testid="stCheckbox"] input[type="checkbox"] {{
+  accent-color: var(--accent);
+  width: 18px; height: 18px;
+}}
+div[data-testid="stCheckbox"] label p {{ color: var(--ink) !important; }}
 
-/* Action buttons: fix hover text to dark on white */
+/* Tables */
+.stDataFrame, .stDataFrame *, .stTable, .stTable * {{ color: var(--ink) !重要; }}
+
+/* Action buttons */
 .stButton > button, .stDownloadButton > button {{
   background-color: var(--accent) !important; color: var(--ink) !important;
   border: 2px solid rgba(36,47,64,0.08) !important; border-radius: 10px !important; font-weight: 700 !important;
@@ -163,12 +186,14 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--ink) !important; }}
     unsafe_allow_html=True,
 )
 
-# ---------- Header (edge-to-edge green) ----------
+# ---------- Header (edge-to-edge green, centered content) ----------
 st.markdown(
     """
 <div class="oiq-header oiq-bleed">
-  <div class="oiq-title">OutrankIQ</div>
-  <div class="oiq-sub">Score keywords by Search Volume (A) and Keyword Difficulty (B) — with selectable scoring strategies.</div>
+  <div class="oiq-header-inner">
+    <div class="oiq-title">OutrankIQ</div>
+    <div class="oiq-sub">Score keywords by Search Volume (A) and Keyword Difficulty (B) — with selectable scoring strategies.</div>
+  </div>
 </div>
 """,
     unsafe_allow_html=True,
@@ -289,7 +314,7 @@ _ALT_FIT_MIN = 0.22
 _DEF_HEADERS = {"User-Agent": "OutrankIQMapper/1.2 (voice-engine-optimization)"}
 _MAPPER_VERSION = "site-map-v11-pages-first-strict"
 
-# ---------- Synonyms / phrase normalization ----------
+# ---------- Synonyms / normalization ----------
 PHRASE_MAP = [
     (re.compile(r"\bget[ -]?in[ -]?touch\b", re.I), "contact"),
     (re.compile(r"\breach[ -]?out\b", re.I), "contact"),
@@ -299,7 +324,6 @@ PHRASE_MAP = [
     (re.compile(r"\bnear\s*me\b", re.I), "nearme"),
     (re.compile(r"\bnear\s*you\b", re.I), "nearyou"),
 ]
-
 _SYN_MAP = {
     "connect":"contact","connected":"contact","connecting":"contact","contacts":"contact",
     "support":"contact","helpdesk":"contact","help-line":"contact","helpline":"contact",
@@ -313,7 +337,6 @@ _SYN_MAP = {
     "contribute":"donate","give":"donate","giving":"donate",
     "involved":"involved","volunteering":"volunteer","volunteers":"volunteer",
 }
-
 STOPWORDS = {
     "the","and","for","to","a","an","of","with"," in","on","at","by","from","about",
     "is","are","be","can","should","how","what","who","where","why","when","which",
@@ -775,7 +798,7 @@ def _extract_profile(html: str, final_url: str, requested_url: Optional[str] = N
         except Exception:
             pass
     if not title:
-        m = re.search(r"<title>(.*?)</title>", html or "", re.I|S)
+        m = re.search(r"<title>(.*?)</title>", html or "", re.I|re.S)
         if m: title = re.sub(r"\s+"," ",m.group(1)).strip()
     if not canonical: canonical = final_url
     if body_text:
@@ -1055,6 +1078,7 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
 
     vols = pd.to_numeric(df[vol_col], errors="coerce").fillna(0).clip(lower=0)
     max_log = float((vols + 1).apply(lambda x: math.log(1 + x)).max()) or 1.0
+
     def strat_weights():
         if scoring_mode == "Low Hanging Fruit": return 0.30, 0.40, 0.30
         elif scoring_mode == "In The Game":     return 0.30, 0.35, 0.35
@@ -1327,13 +1351,15 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
     def assign_slot(slot_name: str):
         ids = [i for i,s in kw_slot.items() if s == slot_name]
         if scoring_mode == "Low Hanging Fruit":
+            vols_local = pd.to_numeric(df[vol_col], errors="coerce").fillna(0).clip(lower=0)
+            max_log_local = float((vols_local + 1).apply(lambda x: math.log(1 + x)).max()) or 1.0
             opp = {}
             for i in ids:
                 row = df.loc[i]
                 kd_val = float(pd.to_numeric(row.get(kd_col,0), errors="coerce") or 0)
                 vol_val = float(pd.to_numeric(row.get(vol_col,0), errors="coerce") or 0)
                 kd_norm = max(0.0, 1.0 - kd_val/100.0)
-                vol_norm = math.log(1 + max(0.0, vol_val)) / (float((vols + 1).apply(lambda x: math.log(1 + x)).max()) or 1.0)
+                vol_norm = math.log(1 + max(0.0, vol_val)) / max_log_local
                 opp[i] = vol_norm * kd_norm
             ids.sort(key=lambda i: (-opp.get(i,0.0), -kw_rank.get(i,0.0), i))
         else:
@@ -1342,7 +1368,7 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
         for i in ids:
             choices = kw_candidates.get(i, [])
             if not choices: continue
-            head = head_noun_by_kw.get(i, "")
+            head = _head_noun(_ntokens(str(df.loc[i].get(kw_col, "")) if kw_col else str(df.loc[i].get("Keyword",""))))
             for j, (u, fit, covered_ratio, stype, a_score) in enumerate(choices):
                 title_tokens = set((next((p["title_h1_norm"] for p in profiles if p["url"]==u), "")).split())
                 if slot_name == "SEO":
@@ -1383,10 +1409,10 @@ with st.form("single"):
 st.markdown("---")
 st.subheader("Bulk Scoring (CSV Upload)")
 
-# Mapping controls (minimal UI)
+# Mapping controls (now with a visible checkbox)
 base_site_url = st.text_input("Base site URL (for URL mapping)", placeholder="https://example.com")
-use_sitemap_first = True
-include_subdomains = True
+include_subdomains = st.checkbox("Include subdomains (recommended)", value=True)
+use_sitemap_first = True  # still always true; not exposing this in UI
 
 uploaded = st.file_uploader("Upload CSV", type=["csv"])
 example = pd.DataFrame({"Keyword":["best running shoes","seo tools","crm software"], "Volume":[5400,880,12000], "KD":[38,72,18]})
@@ -1453,7 +1479,7 @@ if uploaded is not None:
             try: sig_df = export_df[sig_cols].copy()
             except Exception: sig_df = export_df[[col for col in sig_cols if col in export_df.columns]].copy()
             sig_csv = sig_df.fillna("").astype(str).to_csv(index=False)
-            sig_base = f"{_MAPPER_VERSION}|{_normalize_base(base_site_url.strip()).lower()}|{scoring_mode}|{kw_col}|{vol_col}|{kd_col}|{len(export_df)}"
+            sig_base = f"{_MAPPER_VERSION}|{_normalize_base(base_site_url.strip()).lower()}|{scoring_mode}|{kw_col}|{vol_col}|{kd_col}|{len(export_df)}|subdomains={include_subdomains}"
             signature = hashlib.md5((sig_base + "\n" + sig_csv).encode("utf-8")).hexdigest()
             if "map_cache" not in st.session_state: st.session_state["map_cache"] = {}
             cache = st.session_state["map_cache"]
@@ -1474,7 +1500,7 @@ if uploaded is not None:
                 with st.spinner("Launching fast crawl & scoring fit…"):
                     map_series = map_keywords_to_urls(
                         export_df, kw_col=kw_col, vol_col=vol_col, kd_col=kd_col,
-                        base_url=base_site_url.strip(), include_subdomains=True, use_sitemap_first=True
+                        base_url=base_site_url.strip(), include_subdomains=include_subdomains, use_sitemap_first=True
                     )
                 loader.empty()
                 cache[signature] = map_series.fillna("").astype(str).tolist()
