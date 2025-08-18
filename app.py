@@ -31,9 +31,9 @@ except Exception:
     HAVE_BS4 = False
 
 # ---------- Brand / Theme ----------
-BRAND_BG = "#747474"     # background
-BRAND_INK = "#242F40"    # blue/ink
-BRAND_ACCENT = "#329662" # accent (green)
+BRAND_BG = "#FFFFFF"     # page background (white)
+BRAND_INK = "#242F40"    # dark blue text on white
+BRAND_ACCENT = "#329662" # green
 BRAND_LIGHT = "#FFFFFF"  # white
 
 st.set_page_config(page_title="OutrankIQ", page_icon="🔎", layout="centered")
@@ -49,12 +49,39 @@ st.markdown(
   --accent-rgb: 50,150,98;
   --light: {BRAND_LIGHT};
 }}
-/* App background + base text */
-.stApp {{ background-color: var(--bg); }}
-html, body, [class^="css"], [class*=" css"] {{ color: var(--light) !important; }}
-h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
 
-/* Inputs: white surface, GREEN focus (no red outlines) */
+/* App background + base text (ink on white) */
+.stApp {{ background-color: var(--bg); }}
+html, body, [class^="css"], [class*=" css"] {{ color: var(--ink) !important; }}
+h1, h2, h3, h4, h5, h6 {{ color: var(--ink) !important; }}
+
+/* OutrankIQ green header bar — full-bleed */
+.oiq-header {{
+  background: var(--accent);
+  color: #ffffff;
+  padding: 18px 20px;
+  margin-bottom: 16px;
+  box-shadow: 0 2px 8px rgba(0,0,0,.08);
+}}
+/* Full-bleed trick: stretch inside Streamlit's centered container */
+.oiq-bleed {{
+  margin-left: calc(50% - 50vw);
+  margin-right: calc(50% - 50vw);
+  width: 100vw;
+  border-radius: 0 !important;
+}}
+.oiq-header .oiq-title {{
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+}}
+.oiq-header .oiq-sub {{
+  margin-top: 4px;
+  font-size: 14px;
+  opacity: .95;
+}}
+
+/* Inputs: white surface, GREEN focus */
 .stTextInput > div > div > input,
 .stTextArea textarea,
 .stNumberInput input,
@@ -65,7 +92,9 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
 }}
 .stSelectbox div[data-baseweb="select"] > div,
 .stNumberInput input,
-.stTextInput input {{ border: 2px solid var(--light) !important; }}
+.stTextInput input {{
+  border: 2px solid rgba(36,47,64,0.08) !important;
+}}
 .stNumberInput input:focus,
 .stNumberInput input:focus-visible,
 .stNumberInput:focus-within input,
@@ -82,6 +111,7 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
 .stNumberInput button:hover,.stNumberInput button:active,.stNumberInput button:focus-visible {{
   background: var(--accent) !important; color:#000 !important; border-color: var(--accent) !important;
 }}
+
 /* Select caret */
 .stSelectbox div[data-baseweb="select"] > div {{ position: relative; }}
 .stSelectbox div[data-baseweb="select"] > div::after {{
@@ -113,25 +143,36 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--light) !important; }}
 /* Tables */
 .stDataFrame, .stDataFrame *, .stTable, .stTable * {{ color: var(--ink) !important; }}
 
-/* Buttons */
+/* Action buttons: fix hover text to dark on white */
 .stButton > button, .stDownloadButton > button {{
   background-color: var(--accent) !important; color: var(--ink) !important;
-  border: 2px solid var(--light) !important; border-radius: 10px !important; font-weight: 700 !important;
-  box-shadow: 0 2px 0 rgba(0,0,0,.15);
+  border: 2px solid rgba(36,47,64,0.08) !important; border-radius: 10px !important; font-weight: 700 !important;
+  box-shadow: 0 2px 0 rgba(0,0,0,.12);
 }}
 .stButton > button:hover, .stDownloadButton > button:hover {{
-  background-color: transparent !important; color: var(--light) !important; border-color: var(--accent) !important;
+  background-color: transparent !important; color: var(--ink) !important; border-color: var(--accent) !important;
 }}
-/* Banner */
-.info-banner {{ background: linear-gradient(90deg, var(--ink) 0%, var(--accent) 100%); padding:16px; border-radius:12px; color:var(--light); }}
+
+/* Strategy banner */
+.info-banner {{
+  background: linear-gradient(90deg, var(--ink) 0%, var(--accent) 100%);
+  padding: 16px; border-radius: 12px; color: var(--light);
+}}
 </style>
 """,
     unsafe_allow_html=True,
 )
 
-# ---------- Title ----------
-st.title("OutrankIQ")
-st.caption("Score keywords by Search Volume (A) and Keyword Difficulty (B) — with selectable scoring strategies.")
+# ---------- Header (edge-to-edge green) ----------
+st.markdown(
+    """
+<div class="oiq-header oiq-bleed">
+  <div class="oiq-title">OutrankIQ</div>
+  <div class="oiq-sub">Score keywords by Search Volume (A) and Keyword Difficulty (B) — with selectable scoring strategies.</div>
+</div>
+""",
+    unsafe_allow_html=True,
+)
 
 # ---------- Helpers ----------
 def find_column(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
@@ -235,7 +276,7 @@ _TOTAL_BUDGET_SECS = 60
 _CONCURRENCY = 16
 _THREADS = 12
 
-# STRICTER per-class minimums (page vs post) — reverted
+# STRICTER per-class minimums (page vs post) — baseline
 _MIN_SEO_PAGE = 0.25
 _MIN_SEO_POST = 0.55
 _MIN_AIO_PAGE = 0.18
@@ -274,7 +315,7 @@ _SYN_MAP = {
 }
 
 STOPWORDS = {
-    "the","and","for","to","a","an","of","with","in","on","at","by","from","about",
+    "the","and","for","to","a","an","of","with"," in","on","at","by","from","about",
     "is","are","be","can","should","how","what","who","where","why","when","which",
     "me","you","us","my","our","your","we","i","it","they","them","near","now","open",
     "vs","or","and","as"
@@ -734,7 +775,7 @@ def _extract_profile(html: str, final_url: str, requested_url: Optional[str] = N
         except Exception:
             pass
     if not title:
-        m = re.search(r"<title>(.*?)</title>", html or "", re.I|re.S)
+        m = re.search(r"<title>(.*?)</title>", html or "", re.I|S)
         if m: title = re.sub(r"\s+"," ",m.group(1)).strip()
     if not canonical: canonical = final_url
     if body_text:
@@ -906,12 +947,15 @@ def _capitalized_tokens(original_kw: str) -> set:
         caps.add(_norm_token(m.group(0)))
     return caps
 
+def _domain_tokens_for_base(base_url: str) -> set:
+    return _domain_tokens(base_url)
+
 def _looks_out_of_domain(original_kw: str, site_lex: set, base_url: str) -> bool:
     tokens = _ntokens(original_kw)
     if not tokens: return False
     if POL_CONTACT_PAT.search(original_kw or ""):
         return True
-    domtoks = _domain_tokens(base_url)
+    domtoks = _domain_tokens_for_base(base_url)
     distinctive = [t for t in tokens if t.isalpha() and len(t) >= 4 and t not in STOPWORDS]
     unknown = [t for t in distinctive if (t not in site_lex and t not in domtoks)]
     if not unknown:
@@ -960,7 +1004,7 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
 
     nav_anchor_map, all_nav_tokens = cached_nav(base_url)
 
-    domain_toks = _domain_tokens(base_url)
+    domain_toks = _domain_tokens_for_base(base_url)
     page_counts: Dict[str,int] = defaultdict(int)
     post_counts: Dict[str,int] = defaultdict(int)
     src_by_key = { _url_key(k): v for k, v in srcmap.items() }
@@ -1023,7 +1067,6 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
                 return True
         return False
 
-    # STRICTER penalties (reverted)
     def _post_heavy_penalty(tokens: List[str]) -> float:
         cnt = sum(1 for t in tokens if post_heavy.get(t, False))
         if cnt >= 2: return -0.30
@@ -1058,8 +1101,6 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
         head = _head_noun(tokens_norm)
         head_noun_by_kw[idx] = head
 
-        # STRICT core requirement:
-        # - SEO and VEO require a core token from site/page lexicon
         if slot in {"SEO","VEO"} and not _has_core_token(tokens_norm):
             kw_candidates[idx] = []
             kw_slot[idx] = slot
@@ -1068,7 +1109,7 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
 
         fits_page: List[Tuple[str,float,float,str,float]] = []
         fits_other: List[Tuple[str,float,float,str,float]] = []
-        best_page_probe: Optional[Tuple[str,float,float,str,float]] = None  # keep best page even if gated
+        best_page_probe: Optional[Tuple[str,float,float,str,float]] = None
 
         for p in profiles:
             base_fit = _fit_score(kw, p)
@@ -1087,7 +1128,6 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
             is_nav_flag = (_url_key(p["url"]) in nav_anchor_map) or (_url_key(p.get("requested_url","")) in nav_anchor_map)
             is_page_like = _is_page_like(stype, p["url"], is_nav_flag)
 
-            # coverage & salience
             title_tokens = set((p.get("title_h1_norm") or "").split())
             title_raw = (p.get("title") or "").strip().lower()
             covered = sum(1 for t in tokens_norm if t in title_tokens)
@@ -1098,7 +1138,6 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
             v_intent, home_nap = _veo_intent(p, nav_anchor_map)
             a_score = p.get("a_score", 0.0)
 
-            # bonuses/penalties
             bonus = _url_priority_bonus(p["url"], is_nav_flag, stype)
             if is_page_like:
                 bonus += _post_heavy_penalty(tokens_norm)
@@ -1123,7 +1162,6 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
 
             f = max(0.0, min(2.0, base_fit + bonus + a_bonus + v_bonus))
 
-            # VEO soft gate — STRICT (0.60) when nav/NAP intent absent
             if slot == "VEO" and not v_intent:
                 f = max(0.0, f - 0.20)
                 if f < 0.60:
@@ -1132,7 +1170,6 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
                             best_page_probe = (p["url"], f, covered_ratio, stype, a_score)
                     continue
 
-            # Class-aware salience gates (strict)
             passed = True
             if slot == "SEO":
                 if (lead_cov < 0.18) and (covered_ratio < 0.50):
@@ -1144,7 +1181,6 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
                 if lead_cov < 0.10 and v_intent and covered_ratio < 0.33:
                     passed = False
 
-            # SEO head rule — STRICT
             if passed and slot == "SEO" and head:
                 if (head not in title_tokens) and (head not in slug_toks):
                     phrase = " ".join(tokens_norm)
@@ -1165,7 +1201,6 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
         fits_page.sort(key=lambda x: x[1], reverse=True)
         fits_other.sort(key=lambda x: x[1], reverse=True)
 
-        # ---------- Forced include: ensure at least one PAGE candidate (STRICT) ----------
         if not fits_page and fits_other and best_page_probe is not None:
             best_fit = fits_other[0][1]
             page_fit = best_page_probe[1]
@@ -1173,11 +1208,9 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
             if (page_fit >= 0.50 * best_fit) and (page_fit >= (page_min - 0.03)):
                 fits_page = [best_page_probe]
 
-        # ----- Selection with strict page-first epsilon -----
         fits: List[Tuple[str,float,float,str,float]] = []
         if slot == "AIO" and fits_page and fits_other:
             best_page = fits_page[0][1]
-            # AIO post can beat page only if clearly better
             aio_posts = [t for t in fits_other if _is_post_like(t[3], t[0]) and t[4] >= 0.35]
             if aio_posts:
                 aio_posts.sort(key=lambda x: x[1], reverse=True)
@@ -1187,7 +1220,6 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
                     if len(fits) < TOP_K:
                         fits.extend(fits_page[:TOP_K - len(fits)])
                 else:
-                    # prefer page when close (epsilon 0.10)
                     if best_page >= (best_post - 0.10):
                         fits.extend(fits_page[:TOP_K])
                         if len(fits) < TOP_K:
@@ -1201,7 +1233,6 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
                 if len(fits) < TOP_K:
                     fits.extend(fits_other[:TOP_K - len(fits)])
         else:
-            # Non-AIO: page-first with epsilon 0.10
             if fits_page and fits_other:
                 best_page = fits_page[0][1]
                 best_other = fits_other[0][1]
@@ -1225,7 +1256,6 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
             kw_rank[idx] = 0.0
             continue
 
-        # sitemap tie-breakers within 0.04
         top_fit = fits[0][1]
         def _smeta_boost(u: str, base_fit: float) -> float:
             b = 0.0
@@ -1264,7 +1294,6 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
         else:
             kw_rank[idx] = 0.40*fit_norm + 0.20*kd_norm + 0.40*vol_norm
 
-        # --- class-specific minimum fit across candidates (STRICT mins) ---
         def _class_min_for_type(slot_name: str, is_post: bool) -> float:
             if slot_name == "SEO": return _MIN_SEO_POST if is_post else _MIN_SEO_PAGE
             if slot_name == "AIO": return _MIN_AIO_POST if is_post else _MIN_AIO_PAGE
@@ -1290,7 +1319,6 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
 
     def _seo_allowed(stype: str, u: str, fit: float, covered_ratio: float, head: str, title_tokens: Set[str]) -> bool:
         if _is_post_like(stype, u):
-            # strict: only exceptionally strong post matches for SEO
             if (covered_ratio >= 0.60 and fit >= 0.80 and head and (head in title_tokens or head in _slug_tokens(u))):
                 return True
             return False
