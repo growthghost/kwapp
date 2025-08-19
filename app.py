@@ -50,7 +50,7 @@ st.markdown(
   --light: {BRAND_LIGHT};
 }}
 
-/* App background + base text (ink on white) */
+/* App background + base text */
 .stApp {{ background-color: var(--bg); }}
 html, body, [class^="css"], [class*=" css"] {{ color: var(--ink) !important; }}
 h1, h2, h3, h4, h5, h6 {{ color: var(--ink) !important; }}
@@ -59,33 +59,34 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--ink) !important; }}
 .oiq-header {{
   background: var(--accent);
   color: #ffffff;
-  padding: 18px 20px;
+  padding: 22px 20px;
   margin-bottom: 16px;
   box-shadow: 0 2px 8px rgba(0,0,0,.08);
 }}
-/* Full-bleed trick */
+/* Full-bleed */
 .oiq-bleed {{
   margin-left: calc(50% - 50vw);
   margin-right: calc(50% - 50vw);
   width: 100vw;
   border-radius: 0 !important;
 }}
-/* Inner container: centered with slight left pad; center-align text */
+
+/* Inner container aligned with Streamlit content column */
 .oiq-header-inner {{
-  max-width: 1000px;
-  margin: 0 auto;
-  padding-left: 12px;
-  text-align: center;
+  max-width: 1000px;          /* match content column width */
+  margin: 0 auto;             /* center container */
+  padding-left: 16px;         /* slight left pad so it's not flush */
+  text-align: left;           /* left align title + subtext */
 }}
 .oiq-header .oiq-title {{
-  font-size: 24px;
+  font-size: 36px;            /* larger title */
   font-weight: 800;
   letter-spacing: 0.2px;
 }}
 .oiq-header .oiq-sub {{
-  margin-top: 4px;
-  font-size: 14px;
-  opacity: .95;
+  margin-top: 6px;
+  font-size: 16px;
+  opacity: .98;
 }}
 
 /* Inputs: white surface, GREEN focus */
@@ -125,16 +126,29 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--ink) !important; }}
   content:"▾"; position:absolute; right:12px; top:50%; transform:translateY(-50%); color:var(--ink); pointer-events:none; font-size:14px; font-weight:700;
 }}
 
-/* BLUE labels for specific widgets */
+/* BLUE labels (specific widgets) */
 div[data-testid="stSelectbox"] > label,
 div[data-testid="stNumberInput"] > label,
 div[data-testid="stTextInput"] > label,
 div[data-testid="stCheckbox"] > label {{ color: var(--ink) !important; font-weight: 700; }}
 
-/* Expander header ("See example") in blue */
-[data-testid="stExpander"] [role="button"] p {{ color: var(--ink) !important; font-weight: 700; }}
+/* Expander header ("See example") — clearly visible, blue text, white background */
+[data-testid="stExpander"] > details > summary {{
+  background: #ffffff !important;
+  border: 1px solid rgba(36,47,64,0.12) !important;
+  border-radius: 10px !important;
+}}
+[data-testid="stExpander"] [role="button"] p {{
+  color: var(--ink) !important;
+  font-weight: 700;
+}}
+/* Expander body on white */
+[data-testid="stExpander"] .st-emotion-cache-1h9usn1,   /* fallback */
+[data-testid="stExpander"] > details > div {{
+  background: #ffffff !important;
+}}
 
-/* Uploader area + Browse button (BLUE -> WHITE on hover) */
+/* Uploader + Browse button (BLUE -> WHITE on hover) */
 [data-testid="stFileUploaderDropzone"] {{ background: rgba(255,255,255,0.98); border: 2px dashed var(--accent); }}
 [data-testid="stFileUploader"] * {{ color: var(--ink) !important; }}
 [data-testid="stFileUploaderDropzone"] button,
@@ -156,15 +170,8 @@ div[data-testid="stCheckbox"] > label {{ color: var(--ink) !important; font-weig
   border-color: var(--ink) !important;      /* blue border */
 }}
 
-/* Checkbox visibility */
-div[data-testid="stCheckbox"] input[type="checkbox"] {{
-  accent-color: var(--accent);
-  width: 18px; height: 18px;
-}}
-div[data-testid="stCheckbox"] label p {{ color: var(--ink) !important; }}
-
 /* Tables */
-.stDataFrame, .stDataFrame *, .stTable, .stTable * {{ color: var(--ink) !重要; }}
+.stDataFrame, .stDataFrame *, .stTable, .stTable * {{ color: var(--ink) !important; }}
 
 /* Action buttons */
 .stButton > button, .stDownloadButton > button {{
@@ -181,12 +188,21 @@ div[data-testid="stCheckbox"] label p {{ color: var(--ink) !important; }}
   background: linear-gradient(90deg, var(--ink) 0%, var(--accent) 100%);
   padding: 16px; border-radius: 12px; color: var(--light);
 }}
+
+/* Footer */
+.oiq-footer {{
+  color: var(--ink);
+  font-size: 13px;
+  opacity: .95;
+  text-align: left;
+  margin-top: 24px;
+}}
 </style>
 """,
     unsafe_allow_html=True,
 )
 
-# ---------- Header (edge-to-edge green, centered content) ----------
+# ---------- Header (edge-to-edge green, left-aligned content) ----------
 st.markdown(
     """
 <div class="oiq-header oiq-bleed">
@@ -512,11 +528,8 @@ def _parse_sitemap_xml_entries(xml_text: str) -> List[Tuple[str, Optional[float]
         if lmm:
             lastmod = lmm.group(1).strip()
         entries.append((loc, pr, lastmod))
-    for m in re.finditer(r"<sitemap>\s*(.*?)\s*</sitemap>", xml_text, re.I | re.S):
-        block = m.group(1)
-        lm = re.search(r"<loc>\s*([^<]+)\s*</loc>", block, re.I)
-        if lm:
-            entries.append((lm.group(1).strip(), None, None))
+    for m in re.finditer(r"<sitemap>\s*(.*?)\s*</sitemap>", xml_text, re.I | \S):
+        pass  # keep compatibility if needed
     if not entries:
         for lm in re.finditer(r"<loc>\s*([^<]+)\s*</loc>", xml_text, re.I):
             entries.append((lm.group(1).strip(), None, None))
@@ -562,10 +575,8 @@ def _collect_sitemap_urls(sm_url: str, session, base_host: str, base_root: str,
             key = _url_key(u)
             srcmap.setdefault(key, stype)
             md = meta.setdefault(key, {})
-            if pr is not None:
-                md["priority"] = f"{pr:.3f}"
-            if lm:
-                md["lastmod"] = lm
+            if pr is not None: md["priority"] = f"{pr:.3f}"
+            if lm: md["lastmod"] = lm
 
 def discover_urls_with_sources(base_url: str, include_subdomains: bool, use_sitemap_first: bool) -> Tuple[List[str], Dict[str,str], Dict[str, Dict[str, Optional[str]]]]:
     base = _normalize_base(base_url)
@@ -912,10 +923,6 @@ def cached_discover_and_sources(base_url: str, include_subdomains: bool, use_sit
 @st.cache_data(show_spinner=False, ttl=3600)
 def cached_fetch_profiles(urls: Tuple[str, ...]) -> List[Dict]:
     return _fetch_profiles(list(urls))
-
-@st.cache_data(show_spinner=False, ttl=3600)
-def cached_nav(base_url: str) -> Tuple[Dict[str, Set[str]], Set[str]]:
-    return _harvest_nav(base_url)
 
 # ---------- Fit & priority ----------
 def _fit_score(keyword: str, profile: Dict) -> float:
@@ -1409,10 +1416,10 @@ with st.form("single"):
 st.markdown("---")
 st.subheader("Bulk Scoring (CSV Upload)")
 
-# Mapping controls (now with a visible checkbox)
+# Mapping controls (Include subdomains removed from UI; dev default = True)
 base_site_url = st.text_input("Base site URL (for URL mapping)", placeholder="https://example.com")
-include_subdomains = st.checkbox("Include subdomains (recommended)", value=True)
-use_sitemap_first = True  # still always true; not exposing this in UI
+include_subdomains = True
+use_sitemap_first = True  # always use sitemap first
 
 uploaded = st.file_uploader("Upload CSV", type=["csv"])
 example = pd.DataFrame({"Keyword":["best running shoes","seo tools","crm software"], "Volume":[5400,880,12000], "KD":[38,72,18]})
@@ -1520,5 +1527,4 @@ if uploaded is not None:
             help="Sorted by eligibility (Yes first), KD ascending, Volume descending"
         )
 
-st.markdown("---")
-st.caption(f"© {datetime.now().year} OutrankIQ")
+st.markdown("<div class='oiq-footer'>© 2025 OutrankIQ</div>", unsafe_allow_html=True)
