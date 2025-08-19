@@ -95,13 +95,19 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--ink) !important; }}
   color: var(--ink) !important;
   border-radius: 8px !important;
 }}
-/* Base border */
-.stSelectbox div[data-baseweb="select"] > div,
+
+/* Base border (light) */
 .stNumberInput input,
 .stTextInput input {{
   border: 2px solid rgba(36,47,64,0.08) !important;
 }}
-/* Number & text focus = GREEN (unchanged) */
+/* Select focus = BLUE glow */
+.stSelectbox div[data-baseweb="select"]:focus-within > div {{
+  border-color: var(--ink) !important;
+  box-shadow: 0 0 0 3px rgba(36,47,64,.35) !important;
+  outline: none !important;
+}}
+/* Number & text focus = GREEN glow */
 .stNumberInput input:focus,
 .stNumberInput input:focus-visible,
 .stNumberInput:focus-within input,
@@ -111,12 +117,15 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--ink) !important; }}
   box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .35) !important;
   outline: none !important;
 }}
-/* Selectbox focus = BLUE (requested) */
-.stSelectbox div[data-baseweb="select"]:focus-within > div {{
-  border-color: var(--ink) !important;
-  box-shadow: 0 0 0 3px rgba(36,47,64,.35) !important;
-  outline: none !important;
+
+/* --- FORCE BLUE BASE BORDERS (requested) --- */
+.stSelectbox div[data-baseweb="select"] > div {{
+  border: 2px solid var(--ink) !important;        /* dropdown default border = BLUE */
 }}
+.stNumberInput input {{
+  border: 2px solid var(--ink) !important;        /* A/B boxes default border = BLUE */
+}}
+
 /* Number steppers */
 .stNumberInput button {{
   background: var(--ink) !important; color:#fff !important; border:1px solid var(--ink) !important;
@@ -171,9 +180,9 @@ div[data-testid="stCheckbox"] > label {{ color: var(--ink) !important; font-weig
 [data-testid="stFileUploaderDropzone"] button:hover,
 [data-testid="stFileUploaderDropzone"] label:hover,
 [data-testid="stFileUploaderDropzone"] [role="button"]:hover {{
-  background-color: var(--light) !important; /* white on hover */
-  color: var(--ink) !important;             /* blue text */
-  border-color: var(--ink) !important;      /* blue border */
+  background-color: var(--light) !important; 
+  color: var(--ink) !important;             
+  border-color: var(--ink) !important;      
   box-shadow: 0 0 0 3px rgba(36,47,64,.15) !important;
 }}
 
@@ -181,9 +190,7 @@ div[data-testid="stCheckbox"] > label {{ color: var(--ink) !important; font-weig
 [data-testid="stSpinner"] * {{ color: var(--ink) !important; }}
 
 /* Custom loader (blue circular spinner) */
-.oiq-loader {{
-  display:flex; align-items:center; gap:12px;
-}}
+.oiq-loader {{ display:flex; align-items:center; gap:12px; }}
 .oiq-spinner {{
   width:22px; height:22px; border:3px solid rgba(36,47,64,0.25);
   border-top-color: var(--ink);
@@ -205,8 +212,10 @@ div[data-testid="stCheckbox"] > label {{ color: var(--ink) !important; font-weig
   box-shadow: 0 2px 0 rgba(0,0,0,.12);
   transition: background-color .15s ease, color .15s ease, border-color .15s ease, box-shadow .15s ease;
 }}
-/* HOVER = transparent, BLUE text, BLUE outline (requested) */
-.stButton > button:hover, .stDownloadButton > button:hover {{
+/* HOVER / FOCUS / ACTIVE = transparent, BLUE text, BLUE outline (requested) */
+.stButton > button:hover, .stDownloadButton > button:hover,
+.stButton > button:focus-visible, .stDownloadButton > button:focus-visible,
+.stButton > button:active, .stDownloadButton > button:active {{
   background-color: transparent !important; 
   color: var(--ink) !important; 
   border-color: var(--ink) !important;
@@ -286,10 +295,9 @@ st.markdown(
 """, unsafe_allow_html=True)
 
 # ---------- Category Tagging ----------
-# (VEO = Voice Engine Optimization)
 AIO_PAT = re.compile(r"\b(what is|what's|define|definition|how to|step[- ]?by[- ]?step|tutorial|guide|is)\b", re.I)
 AEO_PAT = re.compile(r"^\s*(who|what|when|where|why|how|which|can|should)\b", re.I)
-VEO_PAT = re.compile(r"\b(near me|open now|closest|call now|directions|ok google|alexa|siri|hey google)\b", re.I)
+VEO_PAT = re.compile(r"\b(near me|open now|closest|call now|directions|ok google|alexa|siri|hey google)\b", re.I)  # Voice Engine Optimization
 GEO_PAT = re.compile(r"\b(how to|best way to|steps? to|examples? of|checklist|framework|template)\b", re.I)
 SXO_PAT = re.compile(r"\b(best|top|compare|comparison|vs\.?|review|pricing|cost|cheap|free download|template|examples?)\b", re.I)
 LLM_PAT = re.compile(r"\b(prompt|prompting|prompt[- ]?engineering|chatgpt|gpt[- ]?\d|llm|rag|embedding|vector|few[- ]?shot|zero[- ]?shot)\b", re.I)
