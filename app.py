@@ -63,23 +63,20 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--ink) !important; }}
   margin-bottom: 16px;
   box-shadow: 0 2px 8px rgba(0,0,0,.08);
 }}
-/* Full-bleed */
 .oiq-bleed {{
   margin-left: calc(50% - 50vw);
   margin-right: calc(50% - 50vw);
   width: 100vw;
   border-radius: 0 !important;
 }}
-
-/* Inner container aligned with Streamlit content column */
 .oiq-header-inner {{
   max-width: 1000px;
   margin: 0 auto;
-  padding-left: 16px;   /* slight left pad so it's not flush */
-  text-align: left;     /* left align title + subtext */
+  padding-left: 16px;
+  text-align: left;
 }}
 .oiq-header .oiq-title {{
-  font-size: 36px;      /* larger title */
+  font-size: 36px;
   font-weight: 800;
   letter-spacing: 0.2px;
 }}
@@ -132,17 +129,19 @@ div[data-testid="stNumberInput"] > label,
 div[data-testid="stTextInput"] > label,
 div[data-testid="stCheckbox"] > label {{ color: var(--ink) !important; font-weight: 700; }}
 
-/* Expander header ("See example") — clearly visible, blue text, white background */
+/* Expander header ("See example") — blue text + blue arrow, visible on white */
 [data-testid="stExpander"] > details > summary {{
   background: #ffffff !important;
   border: 1px solid rgba(36,47,64,0.12) !important;
   border-radius: 10px !important;
-}}
-[data-testid="stExpander"] [role="button"] p {{
   color: var(--ink) !important;
   font-weight: 700;
 }}
-/* Expander body on white */
+/* Arrow color (WebKit + modern) */
+[data-testid="stExpander"] > details > summary::-webkit-details-marker {{ color: var(--ink) !important; }}
+[data-testid="stExpander"] > details > summary::marker {{ color: var(--ink) !important; }}
+
+/* Expander body */
 [data-testid="stExpander"] .st-emotion-cache-1h9usn1,
 [data-testid="stExpander"] > details > div {{
   background: #ffffff !important;
@@ -169,6 +168,21 @@ div[data-testid="stCheckbox"] > label {{ color: var(--ink) !important; font-weig
   color: var(--ink) !important;             /* blue text */
   border-color: var(--ink) !important;      /* blue border */
 }}
+
+/* Make Streamlit spinner text blue */
+[data-testid="stSpinner"] * {{ color: var(--ink) !important; }}
+
+/* Custom loader (blue circular spinner) */
+.oiq-loader {{
+  display:flex; align-items:center; gap:12px;
+}}
+.oiq-spinner {{
+  width:22px; height:22px; border:3px solid rgba(36,47,64,0.25);
+  border-top-color: var(--ink);
+  border-radius:50%; animation: oiq-spin 1s linear infinite;
+}}
+@keyframes oiq-spin {{ to {{ transform: rotate(360deg); }} }}
+.oiq-loader-text {{ color: var(--ink); font-weight:700; }}
 
 /* Tables */
 .stDataFrame, .stDataFrame *, .stTable, .stTable * {{ color: var(--ink) !important; }}
@@ -362,6 +376,24 @@ def _tokenize(text: str) -> List[str]:
 def _ntokens(text: str) -> List[str]:
     text = _normalize_phrases(text or "")
     return [_norm_token(t) for t in _tokenize(text)]
+
+# ---------- NEW: head noun heuristic ----------
+HEAD_BLACKLIST = {
+    "near","nearme","contact","call","email","address","directions","phone","hours",
+    "best","top","vs","review","pricing","cost","cheap","free","template","example",
+    "what","how","who","where","why","when","which"
+}
+HEAD_STOP = STOPWORDS | HEAD_BLACKLIST
+
+def _head_noun(tokens: List[str]) -> str:
+    """
+    Pick a salient content word from the keyword (for slug/title checks).
+    Heuristic: last non-stopword token with length>=3 and not in HEAD_BLACKLIST.
+    """
+    for t in reversed(tokens):
+        if len(t) >= 3 and t.isalpha() and t not in HEAD_STOP:
+            return t
+    return ""
 
 # ---------- Domain helpers ----------
 def _derive_roots(base_url: str) -> Tuple[str,str]:
@@ -1353,7 +1385,6 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
         for i in ids:
             choices = kw_candidates.get(i, [])
             if not choices: continue
-            head = ""
             kw_text = str(df.loc[i].get(kw_col, "")) if kw_col else str(df.loc[i].get("Keyword",""))
             head = _head_noun(_ntokens(kw_text))
             for j, (u, fit, covered_ratio, stype, a_score) in enumerate(choices):
@@ -1481,12 +1512,10 @@ if uploaded is not None:
                 loader = st.empty()
                 loader.markdown(
                     """
-                    <div style='display:flex;align-items:center;gap:12px;'>
-                      <div style='font-size:28px'>🚀</div>
-                      <div style='font-weight:700;'>Mapping keywords to your site…</div>
+                    <div class="oiq-loader">
+                      <div class="oiq-spinner"></div>
+                      <div class="oiq-loader-text">Mapping keywords to your site…</div>
                     </div>
-                    <style>@keyframes bob { from { transform: translateY(0); } to { transform: translateY(-6px); } }
-                    div[style*="font-size:28px"] { animation: bob .6s ease-in-out infinite alternate; }</style>
                     """, unsafe_allow_html=True)
                 with st.spinner("Launching fast crawl & scoring fit…"):
                     map_series = map_keywords_to_urls(
