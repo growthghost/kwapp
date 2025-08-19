@@ -86,7 +86,7 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--ink) !important; }}
   opacity: .98;
 }}
 
-/* Inputs: white surface, GREEN focus */
+/* Inputs: white surface */
 .stTextInput > div > div > input,
 .stTextArea textarea,
 .stNumberInput input,
@@ -95,21 +95,29 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--ink) !important; }}
   color: var(--ink) !important;
   border-radius: 8px !important;
 }}
+/* Base border */
 .stSelectbox div[data-baseweb="select"] > div,
 .stNumberInput input,
 .stTextInput input {{
   border: 2px solid rgba(36,47,64,0.08) !important;
 }}
+/* Number & text focus = GREEN (unchanged) */
 .stNumberInput input:focus,
 .stNumberInput input:focus-visible,
 .stNumberInput:focus-within input,
 .stTextInput input:focus,
-.stTextInput input:focus-visible,
-.stSelectbox div[data-baseweb="select"]:focus-within > div {{
+.stTextInput input:focus-visible {{
   border-color: var(--accent) !important;
   box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .35) !important;
   outline: none !important;
 }}
+/* Selectbox focus = BLUE (requested) */
+.stSelectbox div[data-baseweb="select"]:focus-within > div {{
+  border-color: var(--ink) !important;
+  box-shadow: 0 0 0 3px rgba(36,47,64,.35) !important;
+  outline: none !important;
+}}
+/* Number steppers */
 .stNumberInput button {{
   background: var(--ink) !important; color:#fff !important; border:1px solid var(--ink) !important;
 }}
@@ -123,13 +131,13 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--ink) !important; }}
   content:"▾"; position:absolute; right:12px; top:50%; transform:translateY(-50%); color:var(--ink); pointer-events:none; font-size:14px; font-weight:700;
 }}
 
-/* BLUE labels (specific widgets) */
+/* BLUE labels */
 div[data-testid="stSelectbox"] > label,
 div[data-testid="stNumberInput"] > label,
 div[data-testid="stTextInput"] > label,
 div[data-testid="stCheckbox"] > label {{ color: var(--ink) !important; font-weight: 700; }}
 
-/* Expander header ("See example") — blue text + blue arrow, visible on white */
+/* Expander header ("See example") — blue text + blue arrow */
 [data-testid="stExpander"] > details > summary {{
   background: #ffffff !important;
   border: 1px solid rgba(36,47,64,0.12) !important;
@@ -137,7 +145,6 @@ div[data-testid="stCheckbox"] > label {{ color: var(--ink) !important; font-weig
   color: var(--ink) !important;
   font-weight: 700;
 }}
-/* Arrow color (WebKit + modern) */
 [data-testid="stExpander"] > details > summary::-webkit-details-marker {{ color: var(--ink) !important; }}
 [data-testid="stExpander"] > details > summary::marker {{ color: var(--ink) !important; }}
 
@@ -159,7 +166,7 @@ div[data-testid="stCheckbox"] > label {{ color: var(--ink) !important; font-weig
   border-radius: 8px !important;
   padding: 2px 10px !important;
   font-weight: 700 !important;
-  transition: background-color .15s ease, color .15s ease, border-color .15s ease;
+  transition: background-color .15s ease, color .15s ease, border-color .15s ease, box-shadow .15s ease;
 }}
 [data-testid="stFileUploaderDropzone"] button:hover,
 [data-testid="stFileUploaderDropzone"] label:hover,
@@ -167,6 +174,7 @@ div[data-testid="stCheckbox"] > label {{ color: var(--ink) !important; font-weig
   background-color: var(--light) !important; /* white on hover */
   color: var(--ink) !important;             /* blue text */
   border-color: var(--ink) !important;      /* blue border */
+  box-shadow: 0 0 0 3px rgba(36,47,64,.15) !important;
 }}
 
 /* Make Streamlit spinner text blue */
@@ -189,12 +197,20 @@ div[data-testid="stCheckbox"] > label {{ color: var(--ink) !important; font-weig
 
 /* Action buttons */
 .stButton > button, .stDownloadButton > button {{
-  background-color: var(--accent) !important; color: var(--ink) !important;
-  border: 2px solid rgba(36,47,64,0.08) !important; border-radius: 10px !important; font-weight: 700 !important;
+  background-color: var(--accent) !important; 
+  color: var(--ink) !important;
+  border: 2px solid rgba(36,47,64,0.08) !important; 
+  border-radius: 10px !important; 
+  font-weight: 700 !important;
   box-shadow: 0 2px 0 rgba(0,0,0,.12);
+  transition: background-color .15s ease, color .15s ease, border-color .15s ease, box-shadow .15s ease;
 }}
+/* HOVER = transparent, BLUE text, BLUE outline (requested) */
 .stButton > button:hover, .stDownloadButton > button:hover {{
-  background-color: transparent !important; color: var(--ink) !important; border-color: var(--accent) !important;
+  background-color: transparent !important; 
+  color: var(--ink) !important; 
+  border-color: var(--ink) !important;
+  box-shadow: 0 0 0 3px rgba(36,47,64,.15) !important;
 }}
 
 /* Strategy banner */
@@ -386,10 +402,6 @@ HEAD_BLACKLIST = {
 HEAD_STOP = STOPWORDS | HEAD_BLACKLIST
 
 def _head_noun(tokens: List[str]) -> str:
-    """
-    Pick a salient content word from the keyword (for slug/title checks).
-    Heuristic: last non-stopword token with length>=3 and not in HEAD_BLACKLIST.
-    """
     for t in reversed(tokens):
         if len(t) >= 3 and t.isalpha() and t not in HEAD_STOP:
             return t
@@ -957,7 +969,6 @@ def _fit_score(keyword: str, profile: Dict) -> float:
     return max(0.0, min(2.0, overlap))
 
 def _url_priority_bonus(u: str, is_nav: bool, source_type: Optional[str]) -> float:
-    """Page-first bias."""
     path = urlparse(u).path.lower()
     depth = len([seg for seg in path.split("/") if seg])
     bonus = 0.0
