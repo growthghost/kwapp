@@ -73,13 +73,13 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--ink) !important; }}
 
 /* Inner container aligned with Streamlit content column */
 .oiq-header-inner {{
-  max-width: 1000px;          /* match content column width */
-  margin: 0 auto;             /* center container */
-  padding-left: 16px;         /* slight left pad so it's not flush */
-  text-align: left;           /* left align title + subtext */
+  max-width: 1000px;
+  margin: 0 auto;
+  padding-left: 16px;   /* slight left pad so it's not flush */
+  text-align: left;     /* left align title + subtext */
 }}
 .oiq-header .oiq-title {{
-  font-size: 36px;            /* larger title */
+  font-size: 36px;      /* larger title */
   font-weight: 800;
   letter-spacing: 0.2px;
 }}
@@ -143,7 +143,7 @@ div[data-testid="stCheckbox"] > label {{ color: var(--ink) !important; font-weig
   font-weight: 700;
 }}
 /* Expander body on white */
-[data-testid="stExpander"] .st-emotion-cache-1h9usn1,   /* fallback */
+[data-testid="stExpander"] .st-emotion-cache-1h9usn1,
 [data-testid="stExpander"] > details > div {{
   background: #ffffff !important;
 }}
@@ -307,30 +307,9 @@ def add_scoring_columns(df: pd.DataFrame, volume_col: str, kd_col: str, kw_col: 
     remaining = [c for c in out.columns if c not in ordered]
     return out[ordered + remaining]
 
-# ---------- Tokenization & constants ----------
+# ---------- Tokenization & normalization ----------
 TOKEN_RE = re.compile(r"[a-z0-9]+", re.I)
-_MAX_PAGES = 120
-_MAX_BYTES = 350_000
-_CONNECT_TIMEOUT = 5
-_READ_TIMEOUT = 8
-_TOTAL_BUDGET_SECS = 60
-_CONCURRENCY = 16
-_THREADS = 12
 
-# STRICTER per-class minimums (page vs post) — baseline
-_MIN_SEO_PAGE = 0.25
-_MIN_SEO_POST = 0.55
-_MIN_AIO_PAGE = 0.18
-_MIN_AIO_POST = 0.22
-_MIN_VEO_PAGE = 0.18
-_MIN_VEO_POST = 0.30
-
-_ALT_FIT_MIN = 0.22
-
-_DEF_HEADERS = {"User-Agent": "OutrankIQMapper/1.2 (voice-engine-optimization)"}
-_MAPPER_VERSION = "site-map-v11-pages-first-strict"
-
-# ---------- Synonyms / normalization ----------
 PHRASE_MAP = [
     (re.compile(r"\bget[ -]?in[ -]?touch\b", re.I), "contact"),
     (re.compile(r"\breach[ -]?out\b", re.I), "contact"),
@@ -383,12 +362,6 @@ def _tokenize(text: str) -> List[str]:
 def _ntokens(text: str) -> List[str]:
     text = _normalize_phrases(text or "")
     return [_norm_token(t) for t in _tokenize(text)]
-
-def _head_noun(tokens: List[str]) -> str:
-    for t in reversed(tokens):
-        if t and t not in STOPWORDS and t.isalpha() and len(t) >= 3:
-            return t
-    return ""
 
 # ---------- Domain helpers ----------
 def _derive_roots(base_url: str) -> Tuple[str,str]:
@@ -483,14 +456,14 @@ def _session():
 def _fetch_text_requests(url: str, session, timeout: Tuple[int,int]) -> Optional[str]:
     try:
         if session is not None:
-            resp = session.get(url, headers=_DEF_HEADERS, timeout=timeout, stream=True, allow_redirects=True)
+            resp = session.get(url, headers={"User-Agent":"OutrankIQMapper/1.2 (voice-engine-optimization)"}, timeout=timeout, stream=True, allow_redirects=True)
         elif requests is not None:
-            resp = requests.get(url, headers=_DEF_HEADERS, timeout=timeout, stream=True, allow_redirects=True)
+            resp = requests.get(url, headers={"User-Agent":"OutrankIQMapper/1.2 (voice-engine-optimization)"}, timeout=timeout, stream=True, allow_redirects=True)
         else:
             return None
         if resp.status_code >= 400: return None
         ctype = resp.headers.get("Content-Type","").lower()
-        raw = resp.content[:_MAX_BYTES]
+        raw = resp.content[:350_000]
         if ("gzip" in ctype) or url.lower().endswith(".gz"):
             with contextlib.suppress(Exception):
                 raw = gzip.decompress(raw)
@@ -502,7 +475,7 @@ def _fetch_text_requests(url: str, session, timeout: Tuple[int,int]) -> Optional
 
 def _extract_sitemaps_from_robots(base_root_url: str, session) -> List[str]:
     robots_url = urljoin(base_root_url + "/", "robots.txt")
-    txt = _fetch_text_requests(robots_url, session, (_CONNECT_TIMEOUT,_READ_TIMEOUT))
+    txt = _fetch_text_requests(robots_url, session, (5,8))
     if not txt: return []
     maps = []
     for line in txt.splitlines():
@@ -512,14 +485,18 @@ def _extract_sitemaps_from_robots(base_root_url: str, session) -> List[str]:
     return maps
 
 def _parse_sitemap_xml_entries(xml_text: str) -> List[Tuple[str, Optional[float], Optional[str]]]:
-    if not xml_text: return []
+    if not xml_text:
+        return []
     entries: List[Tuple[str, Optional[float], Optional[str]]] = []
+    # Parse <urlset> entries
     for m in re.finditer(r"<url>\s*(.*?)\s*</url>", xml_text, re.I | re.S):
         block = m.group(1)
         lm = re.search(r"<loc>\s*([^<]+)\s*</loc>", block, re.I)
-        if not lm: continue
+        if not lm:
+            continue
         loc = lm.group(1).strip()
-        pr = None; lastmod = None
+        pr: Optional[float] = None
+        lastmod: Optional[str] = None
         pm = re.search(r"<priority>\s*([0-9.]+)\s*</priority>", block, re.I)
         if pm:
             with contextlib.suppress(Exception):
@@ -528,8 +505,7 @@ def _parse_sitemap_xml_entries(xml_text: str) -> List[Tuple[str, Optional[float]
         if lmm:
             lastmod = lmm.group(1).strip()
         entries.append((loc, pr, lastmod))
-    for m in re.finditer(r"<sitemap>\s*(.*?)\s*</sitemap>", xml_text, re.I | \S):
-        pass  # keep compatibility if needed
+    # Fallback: if only a list of <loc> values (e.g., sitemapindex/children)
     if not entries:
         for lm in re.finditer(r"<loc>\s*([^<]+)\s*</loc>", xml_text, re.I):
             entries.append((lm.group(1).strip(), None, None))
@@ -550,9 +526,9 @@ def _collect_sitemap_urls(sm_url: str, session, base_host: str, base_root: str,
                           include_subdomains: bool, seen: set, out: List[str],
                           srcmap: Dict[str,str], meta: Dict[str, Dict[str, Optional[str]]],
                           parent_type: Optional[str] = None, depth: int = 0):
-    if depth > 3 or len(out) >= _MAX_PAGES or sm_url in seen: return
+    if depth > 3 or len(out) >= 120 or sm_url in seen: return
     seen.add(sm_url)
-    xml = _fetch_text_requests(sm_url, session, (_CONNECT_TIMEOUT,_READ_TIMEOUT))
+    xml = _fetch_text_requests(sm_url, session, (5,8))
     if not xml: return
     entries = _parse_sitemap_xml_entries(xml)
     is_index = bool(re.search(r"<sitemapindex", xml, re.I)) or any(u.lower().endswith((".xml",".xml.gz")) for (u,_,_) in entries)
@@ -561,7 +537,7 @@ def _collect_sitemap_urls(sm_url: str, session, base_host: str, base_root: str,
         children = [u for (u,_,_) in entries if u]
         children.sort(key=_sm_bucket)  # prefer page sitemaps first
         for child in children:
-            if len(out) >= _MAX_PAGES: break
+            if len(out) >= 120: break
             if child.lower().endswith((".xml",".xml.gz")):
                 _collect_sitemap_urls(child, session, base_host, base_root, include_subdomains,
                                       seen, out, srcmap, meta, parent_type=None, depth=depth+1)
@@ -569,7 +545,7 @@ def _collect_sitemap_urls(sm_url: str, session, base_host: str, base_root: str,
 
     stype = parent_type if parent_type else _sm_classify(sm_url)
     for (u, pr, lm) in entries:
-        if len(out) >= _MAX_PAGES: break
+        if len(out) >= 120: break
         if _same_site(u, base_host, base_root, include_subdomains):
             out.append(u)
             key = _url_key(u)
@@ -594,21 +570,23 @@ def discover_urls_with_sources(base_url: str, include_subdomains: bool, use_site
             maps.sort(key=_sm_bucket)  # pages before posts/tax/other
             seen = set()
             for sm in maps:
-                if len(discovered) >= _MAX_PAGES: break
+                if len(discovered) >= 120: break
                 _collect_sitemap_urls(sm, sess, base_host, base_root, include_subdomains,
                                       seen, discovered, srcmap, meta, parent_type=_sm_classify(sm), depth=0)
 
+        # Fallback shallow crawl if still empty
         if not discovered:
             discovered = shallow_crawl(base, include_subdomains)
             for u in discovered:
                 srcmap.setdefault(_url_key(u), "other")
 
+    # Dedup + sort: pages first, shallower paths earlier
     discovered = list(dict.fromkeys(discovered))
     def _path_depth(u: str) -> int:
         return len([seg for seg in urlparse(u).path.split("/") if seg])
     prio = {"page":0,"post":1,"tax":2,"other":3}
     discovered.sort(key=lambda u: (prio.get(srcmap.get(_url_key(u),"other"),3), _path_depth(u)))
-    trimmed = discovered[:_MAX_PAGES]
+    trimmed = discovered[:120]
     trimmed_meta = {}
     for u in trimmed:
         key = _url_key(u)
@@ -649,82 +627,82 @@ def shallow_crawl(base_url: str, include_subdomains: bool) -> List[str]:
 
     if HAVE_AIOHTTP:
         async def _run():
-            timeout = aiohttp.ClientTimeout(total=_TOTAL_BUDGET_SECS, sock_connect=_CONNECT_TIMEOUT, sock_read=_READ_TIMEOUT)
-            conn = aiohttp.TCPConnector(limit=_CONCURRENCY, ssl=False)
-            async with aiohttp.ClientSession(timeout=timeout, connector=conn, headers=_DEF_HEADERS) as session:
-                while frontier and len(out) < _MAX_PAGES:
+            timeout = aiohttp.ClientTimeout(total=60, sock_connect=5, sock_read=8)
+            conn = aiohttp.TCPConnector(limit=16, ssl=False)
+            async with aiohttp.ClientSession(timeout=timeout, connector=conn, headers={"User-Agent":"OutrankIQMapper/1.2 (voice-engine-optimization)"}) as session:
+                while frontier and len(out) < 120:
                     url, depth = frontier.pop(0)
                     try:
                         async with session.get(url, allow_redirects=True) as resp:
                             if resp.status >= 400: continue
                             ctype = resp.headers.get("Content-Type","").lower()
                             if "html" not in ctype and "text" not in ctype: continue
-                            b = await resp.content.read(_MAX_BYTES)
+                            b = await resp.content.read(350_000)
                             html = b.decode(errors="ignore")
                     except Exception:
                         continue
                     out.append(url)
-                    if depth < 2 and len(out) < _MAX_PAGES:
+                    if depth < 2 and len(out) < 120:
                         for link in _extract_links(html, url):
                             if link not in seen and ok(link):
                                 seen.add(link)
                                 frontier.append((link, depth+1))
             return out
         try:
-            return asyncio.run(_run())[:_MAX_PAGES]
+            return asyncio.run(_run())[:120]
         except RuntimeError:
             if not requests: return [base]
             sess = requests.Session()
             try:
-                while frontier and len(out) < _MAX_PAGES:
+                while frontier and len(out) < 120:
                     url, depth = frontier.pop(0)
                     try:
-                        r = sess.get(url, headers=_DEF_HEADERS, timeout=(_CONNECT_TIMEOUT,_READ_TIMEOUT), allow_redirects=True)
+                        r = sess.get(url, headers={"User-Agent":"OutrankIQMapper/1.2 (voice-engine-optimization)"}, timeout=(5,8), allow_redirects=True)
                         if r.status_code >= 400: continue
                         ctype = r.headers.get("Content-Type","").lower()
                         if "html" not in ctype and "text" not in ctype: continue
-                        html = r.content[:_MAX_BYTES].decode(r.apparent_encoding or "utf-8", errors="ignore")
+                        html = r.content[:350_000].decode(r.apparent_encoding or "utf-8", errors="ignore")
                     except Exception:
                         continue
                     out.append(url)
-                    if depth < 2 and len(out) < _MAX_PAGES:
+                    if depth < 2 and len(out) < 120:
                         for link in _extract_links(html, url):
                             if link not in seen and ok(link):
                                 seen.add(link)
                                 frontier.append((link, depth+1))
             finally:
                 sess.close()
-            return out[:_MAX_PAGES]
+            return out[:120]
     else:
         if not requests: return [base]
         sess = requests.Session()
         try:
-            while frontier and len(out) < _MAX_PAGES:
+            while frontier and len(out) < 120:
                 url, depth = frontier.pop(0)
                 try:
-                    r = sess.get(url, headers=_DEF_HEADERS, timeout=(_CONNECT_TIMEOUT,_READ_TIMEOUT), allow_redirects=True)
+                    r = sess.get(url, headers={"User-Agent":"OutrankIQMapper/1.2 (voice-engine-optimization)"}, timeout=(5,8), allow_redirects=True)
                     if r.status_code >= 400: continue
                     ctype = r.headers.get("Content-Type","").lower()
                     if "html" not in ctype and "text" not in ctype: continue
-                    html = r.content[:_MAX_BYTES].decode(r.apparent_encoding or "utf-8", errors="ignore")
+                    html = r.content[:350_000].decode(r.apparent_encoding or "utf-8", errors="ignore")
                 except Exception:
                     continue
                 out.append(url)
-                if depth < 2 and len(out) < _MAX_PAGES:
+                if depth < 2 and len(out) < 120:
                     for link in _extract_links(html, url):
                         if link not in seen and ok(link):
                             seen.add(link)
                             frontier.append((link, depth+1))
         finally:
             sess.close()
-        return out[:_MAX_PAGES]
+        return out[:120]
 
 # ---------- Nav harvesting ----------
 def _harvest_nav(base_url: str) -> Tuple[Dict[str, Set[str]], Set[str]]:
     home = _normalize_base(base_url)
     html = ""
     with _session() as sess:
-        html = _fetch_text_requests(home, sess, (_CONNECT_TIMEOUT,_READ_TIMEOUT)) or ""
+        html = _fetch_text_requests(home, sess, (5,8)) or ""
     url_to_tokens: Dict[str, Set[str]] = defaultdict(set)
     all_tokens: Set[str] = set()
     if not html:
@@ -857,10 +835,10 @@ def _fetch_profiles(urls: List[str]) -> List[Dict]:
 
     if HAVE_AIOHTTP:
         async def _run():
-            timeout = aiohttp.ClientTimeout(total=_TOTAL_BUDGET_SECS, sock_connect=_CONNECT_TIMEOUT, sock_read=_READ_TIMEOUT)
-            conn = aiohttp.TCPConnector(limit=_CONCURRENCY, ssl=False)
-            async with aiohttp.ClientSession(timeout=timeout, connector=conn, headers=_DEF_HEADERS) as session:
-                sem = asyncio.Semaphore(_CONCURRENCY)
+            timeout = aiohttp.ClientTimeout(total=60, sock_connect=5, sock_read=8)
+            conn = aiohttp.TCPConnector(limit=16, ssl=False)
+            async with aiohttp.ClientSession(timeout=timeout, connector=conn, headers={"User-Agent":"OutrankIQMapper/1.2 (voice-engine-optimization)"}) as session:
+                sem = asyncio.Semaphore(16)
                 async def fetch(u: str):
                     async with sem:
                         try:
@@ -868,7 +846,7 @@ def _fetch_profiles(urls: List[str]) -> List[Dict]:
                                 if resp.status >= 400: return None
                                 ctype = resp.headers.get("Content-Type","").lower()
                                 if "html" not in ctype and "text" not in ctype: return None
-                                b = await resp.content.read(_MAX_BYTES)
+                                b = await resp.content.read(350_000)
                                 html = b.decode(errors="ignore")
                                 return _extract_profile(html, str(resp.url), requested_url=u)
                         except Exception:
@@ -883,13 +861,13 @@ def _fetch_profiles(urls: List[str]) -> List[Dict]:
             if not requests: return profiles
             sess = requests.Session()
             try:
-                for u in urls[:_MAX_PAGES]:
+                for u in urls[:120]:
                     try:
-                        r = sess.get(u, headers=_DEF_HEADERS, timeout=(_CONNECT_TIMEOUT,_READ_TIMEOUT), allow_redirects=True)
+                        r = sess.get(u, headers={"User-Agent":"OutrankIQMapper/1.2 (voice-engine-optimization)"}, timeout=(5,8), allow_redirects=True)
                         if r.status_code >= 400: continue
                         ctype = r.headers.get("Content-Type","").lower()
                         if "html" not in ctype and "text" not in ctype: continue
-                        html = r.content[:_MAX_BYTES].decode(r.apparent_encoding or "utf-8", errors="ignore")
+                        html = r.content[:350_000].decode(r.apparent_encoding or "utf-8", errors="ignore")
                         prof = _extract_profile(html, str(r.url), requested_url=u)
                         if prof and prof.get("weights"): profiles.append(prof)
                     except Exception:
@@ -901,13 +879,13 @@ def _fetch_profiles(urls: List[str]) -> List[Dict]:
         if not requests: return profiles
         sess = requests.Session()
         try:
-            for u in urls[:_MAX_PAGES]:
+            for u in urls[:120]:
                 try:
-                    r = sess.get(u, headers=_DEF_HEADERS, timeout=(_CONNECT_TIMEOUT,_READ_TIMEOUT), allow_redirects=True)
+                    r = sess.get(u, headers={"User-Agent":"OutrankIQMapper/1.2 (voice-engine-optimization)"}, timeout=(5,8), allow_redirects=True)
                     if r.status_code >= 400: continue
                     ctype = r.headers.get("Content-Type","").lower()
                     if "html" not in ctype and "text" not in ctype: continue
-                    html = r.content[:_MAX_BYTES].decode(r.apparent_encoding or "utf-8", errors="ignore")
+                    html = r.content[:350_000].decode(r.apparent_encoding or "utf-8", errors="ignore")
                     profiles.append(_extract_profile(html, str(r.url), requested_url=u))
                 except Exception:
                     continue
@@ -1235,7 +1213,7 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
         if not fits_page and fits_other and best_page_probe is not None:
             best_fit = fits_other[0][1]
             page_fit = best_page_probe[1]
-            page_min = _MIN_SEO_PAGE if slot=="SEO" else (_MIN_AIO_PAGE if slot=="AIO" else _MIN_VEO_PAGE)
+            page_min = 0.25 if slot=="SEO" else (0.18 if slot=="AIO" else 0.18)
             if (page_fit >= 0.50 * best_fit) and (page_fit >= (page_min - 0.03)):
                 fits_page = [best_page_probe]
 
@@ -1247,39 +1225,39 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
                 aio_posts.sort(key=lambda x: x[1], reverse=True)
                 best_post = aio_posts[0][1]
                 if best_post >= (best_page + 0.08):
-                    fits.extend(aio_posts[:TOP_K])
-                    if len(fits) < TOP_K:
-                        fits.extend(fits_page[:TOP_K - len(fits)])
+                    fits.extend(aio_posts[:5])
+                    if len(fits) < 5:
+                        fits.extend(fits_page[:5 - len(fits)])
                 else:
                     if best_page >= (best_post - 0.10):
-                        fits.extend(fits_page[:TOP_K])
-                        if len(fits) < TOP_K:
-                            fits.extend(fits_other[:TOP_K - len(fits)])
+                        fits.extend(fits_page[:5])
+                        if len(fits) < 5:
+                            fits.extend(fits_other[:5 - len(fits)])
                     else:
-                        fits.extend(fits_page[:TOP_K])
-                        if len(fits) < TOP_K:
-                            fits.extend(fits_other[:TOP_K - len(fits)])
+                        fits.extend(fits_page[:5])
+                        if len(fits) < 5:
+                            fits.extend(fits_other[:5 - len(fits)])
             else:
-                fits.extend(fits_page[:TOP_K])
-                if len(fits) < TOP_K:
-                    fits.extend(fits_other[:TOP_K - len(fits)])
+                fits.extend(fits_page[:5])
+                if len(fits) < 5:
+                    fits.extend(fits_other[:5 - len(fits)])
         else:
             if fits_page and fits_other:
                 best_page = fits_page[0][1]
                 best_other = fits_other[0][1]
                 best_overall = max(best_page, best_other)
                 if best_page >= (best_overall - 0.10):
-                    fits.extend(fits_page[:TOP_K])
-                    if len(fits) < TOP_K:
-                        fits.extend(fits_other[:TOP_K - len(fits)])
+                    fits.extend(fits_page[:5])
+                    if len(fits) < 5:
+                        fits.extend(fits_other[:5 - len(fits)])
                 else:
-                    fits.extend(fits_page[:TOP_K])
-                    if len(fits) < TOP_K:
-                        fits.extend(fits_other[:TOP_K - len(fits)])
+                    fits.extend(fits_page[:5])
+                    if len(fits) < 5:
+                        fits.extend(fits_other[:5 - len(fits)])
             elif fits_page:
-                fits = fits_page[:TOP_K]
+                fits = fits_page[:5]
             else:
-                fits = fits_other[:TOP_K]
+                fits = fits_other[:5]
 
         if not fits:
             kw_candidates[idx] = []
@@ -1307,7 +1285,7 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
         fits = [(u, f + _smeta_boost(u, f), cr, st, a) for (u, f, cr, st, a) in fits]
         fits.sort(key=lambda x: x[1], reverse=True)
 
-        kw_candidates[idx] = fits[:TOP_K]
+        kw_candidates[idx] = fits[:5]
         kw_slot[idx] = slot
 
         best_fit = fits[0][1]
@@ -1326,9 +1304,9 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
             kw_rank[idx] = 0.40*fit_norm + 0.20*kd_norm + 0.40*vol_norm
 
         def _class_min_for_type(slot_name: str, is_post: bool) -> float:
-            if slot_name == "SEO": return _MIN_SEO_POST if is_post else _MIN_SEO_PAGE
-            if slot_name == "AIO": return _MIN_AIO_POST if is_post else _MIN_AIO_PAGE
-            return _MIN_VEO_POST if is_post else _MIN_VEO_PAGE
+            if slot_name == "SEO": return 0.55 if is_post else 0.25
+            if slot_name == "AIO": return 0.22 if is_post else 0.18
+            return 0.30 if is_post else 0.18
 
         any_ok = False
         for (u, f, cr, st, a) in fits:
@@ -1375,19 +1353,25 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
         for i in ids:
             choices = kw_candidates.get(i, [])
             if not choices: continue
-            head = _head_noun(_ntokens(str(df.loc[i].get(kw_col, "")) if kw_col else str(df.loc[i].get("Keyword",""))))
+            head = ""
+            kw_text = str(df.loc[i].get(kw_col, "")) if kw_col else str(df.loc[i].get("Keyword",""))
+            head = _head_noun(_ntokens(kw_text))
             for j, (u, fit, covered_ratio, stype, a_score) in enumerate(choices):
-                title_tokens = set((next((p["title_h1_norm"] for p in profiles if p["url"]==u), "")).split())
+                title_tokens = set()
+                for p in profiles:
+                    if p["url"] == u:
+                        title_tokens = set((p.get("title_h1_norm") or "").split())
+                        break
                 if slot_name == "SEO":
                     if not _seo_allowed(stype, u, fit, covered_ratio, head, title_tokens):
                         continue
                     if head and (head not in _slug_tokens(u)) and (head not in title_tokens):
                         continue
                 if slot_name in {"VEO","AIO"}:
-                    if assigned[u][slot_name] is None and (j == 0 or fit >= _ALT_FIT_MIN):
+                    if assigned[u][slot_name] is None and (j == 0 or fit >= 0.22):
                         assigned[u][slot_name] = i; mapped[i] = u; break
                 else:
-                    if (len(assigned[u]["SEO"]) < caps["SEO"]) and (j == 0 or fit >= _ALT_FIT_MIN):
+                    if (len(assigned[u]["SEO"]) < caps["SEO"]) and (j == 0 or fit >= 0.22):
                         assigned[u]["SEO"].append(i); mapped[i] = u; break
 
     assign_slot("VEO"); assign_slot("AIO"); assign_slot("SEO")
@@ -1486,7 +1470,7 @@ if uploaded is not None:
             try: sig_df = export_df[sig_cols].copy()
             except Exception: sig_df = export_df[[col for col in sig_cols if col in export_df.columns]].copy()
             sig_csv = sig_df.fillna("").astype(str).to_csv(index=False)
-            sig_base = f"{_MAPPER_VERSION}|{_normalize_base(base_site_url.strip()).lower()}|{scoring_mode}|{kw_col}|{vol_col}|{kd_col}|{len(export_df)}|subdomains={include_subdomains}"
+            sig_base = f"site-map-v11-pages-first-strict|{_normalize_base(base_site_url.strip()).lower()}|{scoring_mode}|{kw_col}|{vol_col}|{kd_col}|{len(export_df)}|subdomains={include_subdomains}"
             signature = hashlib.md5((sig_base + "\n" + sig_csv).encode("utf-8")).hexdigest()
             if "map_cache" not in st.session_state: st.session_state["map_cache"] = {}
             cache = st.session_state["map_cache"]
