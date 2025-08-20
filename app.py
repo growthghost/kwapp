@@ -179,14 +179,14 @@ div[data-testid="stCheckbox"] > label {{ color: var(--ink) !important; font-weig
 }}
 [data-testid="stFileUploaderDropzone"] button:hover,
 [data-testid="stFileUploaderDropzone"] label:hover,
-[data-testid="stFileUploaderDropzone"] [role="button"]:hover {{
+[data-testid="stFileUploaderDropzone"] [role="button"]:/hover {{
   background-color: var(--light) !important; 
   color: var(--ink) !important;             
   border-color: var(--ink) !important;      
   box-shadow: 0 0 0 3px rgba(36,47,64,.15) !important;
 }}
 
-/* Make Streamlit spinner text blue */
+/* Spinner text blue */
 [data-testid="stSpinner"] * {{ color: var(--ink) !important; }}
 
 /* Custom loader (blue circular spinner) */
@@ -202,7 +202,7 @@ div[data-testid="stCheckbox"] > label {{ color: var(--ink) !important; font-weig
 /* Tables */
 .stDataFrame, .stDataFrame *, .stTable, .stTable * {{ color: var(--ink) !important; }}
 
-/* Action buttons */
+/* Action buttons (default: green base) */
 .stButton > button, .stDownloadButton > button {{
   background-color: var(--accent) !important; 
   color: var(--ink) !important;
@@ -235,6 +235,22 @@ div[data-testid="stCheckbox"] > label {{ color: var(--ink) !important; font-weig
   opacity: .95;
   text-align: left;
   margin-top: 24px;
+}}
+
+/* ---------- SCOPED BLUE STYLING FOR "Map keywords to site" BUTTON ---------- */
+/* We place a sentinel div just before that button; target adjacent wrapper -> button */
+#mapbtn-scope + div button {{
+  background-color: var(--ink) !important;     /* blue base */
+  color: #ffffff !important;                   /* white text */
+  border: 2px solid var(--ink) !important;     /* blue border */
+}}
+#mapbtn-scope + div button:hover,
+#mapbtn-scope + div button:active,
+#mapbtn-scope + div button:focus-visible {{
+  background-color: #ffffff !important;        /* white on hover/click */
+  color: var(--ink) !important;                /* blue text */
+  border-color: var(--ink) !important;         /* blue border */
+  box-shadow: 0 0 0 3px rgba(36,47,64,.15) !important;
 }}
 </style>
 """,
@@ -280,7 +296,6 @@ scoring_mode = st.selectbox("Choose Scoring Strategy", ["Low Hanging Fruit","In 
 if "last_strategy" not in st.session_state:
     st.session_state["last_strategy"] = scoring_mode
 if st.session_state.get("last_strategy") != scoring_mode:
-    # Clear mapping-related state so each strategy gets a truly fresh run
     st.session_state["last_strategy"] = scoring_mode
     for k in ["map_cache","map_result","map_signature","map_ready","mapping_running"]:
         st.session_state.pop(k, None)
@@ -355,7 +370,7 @@ def add_scoring_columns(df: pd.DataFrame, volume_col: str, kd_col: str, kw_col: 
     remaining = [c for c in out.columns if c not in ordered]
     return out[ordered + remaining]
 
-# ---------- Tokenization & normalization ----------
+# ---------- Tokenization / normalization helpers (snip for brevity; unchanged from prior version) ----------
 TOKEN_RE = re.compile(r"[a-z0-9]+", re.I)
 
 PHRASE_MAP = [
@@ -1601,20 +1616,28 @@ if uploaded is not None:
         except Exception:
             sig_df = export_df[[col for col in sig_cols if col in export_df.columns]].copy()
         sig_csv = sig_df.fillna("").astype(str).to_csv(index=False)
-        sig_base = f"site-map-v12-synonyms-gated|{_normalize_base(base_site_url.strip()).lower()}|{scoring_mode}|{kw_col}|{vol_col}|{kd_col}|{len(export_df)}|subdomains={include_subdomains}"
+
+        # Strategy-gated mapping for "In The Game" and "Competitive"
+        eligible_only = scoring_mode in ("In The Game", "Competitive")
+        sig_base = (
+            f"site-map-v13-strategy-gated|{_normalize_base(base_site_url.strip()).lower()}|"
+            f"{scoring_mode}|{kw_col}|{vol_col}|{kd_col}|{len(export_df)}|subdomains={include_subdomains}|eligible_only={int(eligible_only)}"
+        )
         curr_signature = hashlib.md5((sig_base + "\n" + sig_csv).encode("utf-8")).hexdigest()
 
         # Invalidate previous map if inputs changed
         if st.session_state.get("map_signature") != curr_signature:
             st.session_state["map_ready"] = False
 
-        # ---------- Manual mapping button ----------
+        # ---------- Manual mapping button (scoped blue styling) ----------
         can_map = bool(base_site_url.strip())
-        map_btn = st.button("Map keywords to site", type="primary", disabled=not can_map, help="Runs a fast crawl & assigns the best page per keyword for this strategy.")
+        with st.container():
+            st.markdown('<div id="mapbtn-scope"></div>', unsafe_allow_html=True)
+            map_btn = st.button("Map keywords to site", type="primary", disabled=not can_map,
+                                help="Runs a fast crawl & assigns the best page per eligible keyword for this strategy.")
 
         if map_btn and not st.session_state.get("mapping_running", False):
             st.session_state["mapping_running"] = True
-            # Also clear per-run cache if strategy changed earlier
             if "map_cache" not in st.session_state:
                 st.session_state["map_cache"] = {}
             loader = st.empty()
@@ -1626,25 +1649,37 @@ if uploaded is not None:
                 </div>
                 """, unsafe_allow_html=True)
             with st.spinner("Launching fast crawl & scoring fit…"):
-                # Use cache keyed by signature (fast re-map if same inputs)
                 cache = st.session_state["map_cache"]
+
                 if curr_signature in cache and len(cache[curr_signature]) == len(export_df):
-                    map_series = pd.Series(cache[curr_signature], index=export_df.index, dtype="string")
+                    mapped_full = pd.Series(cache[curr_signature], index=export_df.index, dtype="string")
                 else:
-                    map_series = map_keywords_to_urls(
-                        export_df, kw_col=kw_col, vol_col=vol_col, kd_col=kd_col,
-                        base_url=base_site_url.strip(), include_subdomains=True, use_sitemap_first=True
-                    )
-                    cache[curr_signature] = map_series.fillna("").astype(str).tolist()
-                # Save map result to session for download step
-                st.session_state["map_result"] = map_series
+                    if eligible_only:
+                        mask = export_df["Eligible"].astype(str).eq("Yes")
+                        df_subset = export_df.loc[mask]
+                        # Map only eligible subset
+                        subset_series = map_keywords_to_urls(
+                            df_subset, kw_col=kw_col, vol_col=vol_col, kd_col=kd_col,
+                            base_url=base_site_url.strip(), include_subdomains=True, use_sitemap_first=True
+                        )
+                        # Recombine into full-length series (ineligible blank)
+                        mapped_full = pd.Series([""]*len(export_df), index=export_df.index, dtype="string")
+                        mapped_full.loc[mask] = subset_series
+                    else:
+                        # LHF: map whole set (as before)
+                        mapped_full = map_keywords_to_urls(
+                            export_df, kw_col=kw_col, vol_col=vol_col, kd_col=kd_col,
+                            base_url=base_site_url.strip(), include_subdomains=True, use_sitemap_first=True
+                        )
+                    cache[curr_signature] = mapped_full.fillna("").astype(str).tolist()
+
+                st.session_state["map_result"] = mapped_full
                 st.session_state["map_signature"] = curr_signature
                 st.session_state["map_ready"] = True
             loader.empty()
             st.session_state["mapping_running"] = False
 
         # ---------- Build CSV for download (enabled only when mapped & signature matches) ----------
-        # If we have a fresh map result, attach it; otherwise leave Map URL blank
         if st.session_state.get("map_ready") and st.session_state.get("map_signature") == curr_signature:
             export_df["Map URL"] = st.session_state["map_result"]
             can_download = True
