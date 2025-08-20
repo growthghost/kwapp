@@ -76,7 +76,7 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--ink) !important; }}
   text-align: left;
 }}
 .oiq-header .oiq-title {{
-  font-size: 36px;
+  font-size: 40px;
   font-weight: 800;
   letter-spacing: 0.2px;
 }}
@@ -241,7 +241,7 @@ div[data-testid="stCheckbox"] > label {{ color: var(--ink) !important; font-weig
     unsafe_allow_html=True,
 )
 
-# ---------- Header (edge-to-edge green, left-aligned content) ----------
+# ---------- Header ----------
 st.markdown(
     """
 <div class="oiq-header oiq-bleed">
@@ -275,6 +275,16 @@ strategy_descriptions = {
 
 # ---------- Strategy ----------
 scoring_mode = st.selectbox("Choose Scoring Strategy", ["Low Hanging Fruit","In The Game","Competitive"])
+
+# --- Strategy-specific reset of mapping state ---
+if "last_strategy" not in st.session_state:
+    st.session_state["last_strategy"] = scoring_mode
+if st.session_state.get("last_strategy") != scoring_mode:
+    # Clear mapping-related state so each strategy gets a truly fresh run
+    st.session_state["last_strategy"] = scoring_mode
+    for k in ["map_cache","map_result","map_signature","map_ready","mapping_running"]:
+        st.session_state.pop(k, None)
+
 if scoring_mode == "Low Hanging Fruit":
     MIN_VALID_VOLUME = 10
     KD_BUCKETS = [(0,15,6),(16,20,5),(21,25,4),(26,50,3),(51,75,2),(76,100,1)]
@@ -348,7 +358,6 @@ def add_scoring_columns(df: pd.DataFrame, volume_col: str, kd_col: str, kw_col: 
 # ---------- Tokenization & normalization ----------
 TOKEN_RE = re.compile(r"[a-z0-9]+", re.I)
 
-# --- Synonym/phrase config (no negatives) ---
 PHRASE_MAP = [
     (re.compile(r"\bget[ -]?in[ -]?touch\b", re.I), "contact"),
     (re.compile(r"\breach[ -]?out\b", re.I), "contact"),
@@ -430,10 +439,9 @@ _SYN_MAP = {
     "calendar":"events","workshops":"events","trainings":"events","classes":"events","webinars":"events",
     "jobs":"careers","employment":"careers","opening":"careers","openings":"careers","hiring":"careers",
     "library":"resources","toolkit":"resources","templates":"resources","guides":"resources","playbook":"resources","downloads":"resources",
-    "aboutus":"about","mission":"about","vision":"about","leadership":"about","team":"about","board":"about","staff":"about",
+    "aboutus":"about","mission":"about","vision":"about","team":"about","board":"about","staff":"about",
 }
 
-# Triggers and concept bias (tiny, capped later)
 VEO_TRIGGER_TOKS = {"contact","nearme","phone","address","hours","location","locations","map","email","call","directions","parking"}
 AIO_TRIGGER_TOKS = {"what","how","guide","tutorial","checklist","framework","template","example","examples","definition","define","is"}
 
@@ -450,7 +458,7 @@ CONCEPT_BIAS = {
     "resources": 0.04,
     "careers": 0.04,
 }
-MAX_CONCEPT_BONUS = 0.12  # per keyword→URL pair
+MAX_CONCEPT_BONUS = 0.12
 
 STOPWORDS = {
     "the","and","for","to","a","an","of","with"," in","on","at","by","from","about",
@@ -468,16 +476,13 @@ def _normalize_phrases(text: str) -> str:
 
 def _norm_token(t: str) -> str:
     t = t.lower()
-    # synonym map first
     if t in _SYN_MAP:
         t = _SYN_MAP[t]
-    # morphology trims
     if t.endswith("ies") and len(t) > 3: t = t[:-3] + "y"
     elif t.endswith("es") and len(t) > 4: t = t[:-2]
     elif t.endswith("s") and len(t) > 3: t = t[:-1]
     if t.endswith("ing") and len(t) > 5: t = t[:-3]
     elif t.endswith("ed") and len(t) > 4: t = t[:-2]
-    # re-map after trim if created a synonym
     if t in _SYN_MAP:
         t = _SYN_MAP[t]
     return t
@@ -489,7 +494,6 @@ def _ntokens(text: str) -> List[str]:
     text = _normalize_phrases(text or "")
     return [_norm_token(t) for t in _tokenize(text)]
 
-# ---------- NEW: head noun heuristic ----------
 HEAD_BLACKLIST = {
     "near","nearme","contact","call","email","address","directions","phone","hours",
     "best","top","vs","review","pricing","cost","cheap","free","template","example",
@@ -536,7 +540,6 @@ def _same_site(url: str, base_host: str, base_root: str, include_subdomains: boo
     except Exception:
         return False
 
-# ---------- URL normalization & page-like helpers ----------
 def _url_key(u: str) -> str:
     try:
         p = urlparse(u)
@@ -628,7 +631,6 @@ def _parse_sitemap_xml_entries(xml_text: str) -> List[Tuple[str, Optional[float]
     if not xml_text:
         return []
     entries: List[Tuple[str, Optional[float], Optional[str]]] = []
-    # Parse <urlset> entries
     for m in re.finditer(r"<url>\s*(.*?)\s*</url>", xml_text, re.I | re.S):
         block = m.group(1)
         lm = re.search(r"<loc>\s*([^<]+)\s*</loc>", block, re.I)
@@ -645,7 +647,6 @@ def _parse_sitemap_xml_entries(xml_text: str) -> List[Tuple[str, Optional[float]
         if lmm:
             lastmod = lmm.group(1).strip()
         entries.append((loc, pr, lastmod))
-    # Fallback: if only a list of <loc> values (e.g., sitemapindex/children)
     if not entries:
         for lm in re.finditer(r"<loc>\s*([^<]+)\s*</loc>", xml_text, re.I):
             entries.append((lm.group(1).strip(), None, None))
@@ -714,13 +715,11 @@ def discover_urls_with_sources(base_url: str, include_subdomains: bool, use_site
                 _collect_sitemap_urls(sm, sess, base_host, base_root, include_subdomains,
                                       seen, discovered, srcmap, meta, parent_type=_sm_classify(sm), depth=0)
 
-        # Fallback shallow crawl if still empty
         if not discovered:
             discovered = shallow_crawl(base, include_subdomains)
             for u in discovered:
                 srcmap.setdefault(_url_key(u), "other")
 
-    # Dedup + sort: pages first, shallower paths earlier
     discovered = list(dict.fromkeys(discovered))
     def _path_depth(u: str) -> int:
         return len([seg for seg in urlparse(u).path.split("/") if seg])
@@ -1085,7 +1084,6 @@ def _url_priority_bonus(u: str, is_nav: bool, source_type: Optional[str]) -> flo
         bonus += 0.15
     return bonus
 
-# ---------- VEO (Voice Engine Optimization) intent detection ----------
 VEO_NAV_TOKS = {"contact","contacts","phone","call","address","directions","hours","location","locations","visit","map","email"}
 
 def _veo_intent(profile: Dict, nav_anchor_map: Dict[str, Set[str]]) -> Tuple[bool, bool]:
@@ -1097,7 +1095,6 @@ def _veo_intent(profile: Dict, nav_anchor_map: Dict[str, Set[str]]) -> Tuple[boo
     home_nap = _is_home(u) and profile.get("veo_ready", False)
     return (nav_hit or page_hit), home_nap
 
-# ---------- Helpers for sitemap tie-break ----------
 def _parse_lastmod_ts(s: Optional[str]) -> float:
     if not s: return 0.0
     ss = s.strip()
@@ -1112,7 +1109,6 @@ def _parse_lastmod_ts(s: Optional[str]) -> float:
             return 0.0
     return 0.0
 
-# ---------- Concept detection ----------
 CONCEPT_EVIDENCE = {
     "contact": {"contact","contacts","email","call","phone","locations","address"},
     "locations": {"location","locations","address","map","directions","hours","visit"},
@@ -1230,7 +1226,6 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
         raw_kw = str(row.get(kw_col, "")) if kw_col else str(row.get("Keyword",""))
         tokens_norm = _ntokens(raw_kw)
 
-        # Keyword-level intent flags
         kw_is_veo[idx] = any(t in VEO_TRIGGER_TOKS for t in tokens_norm)
         kw_is_aio[idx] = bool(AIO_PAT.search(raw_kw) or any(t in AIO_TRIGGER_TOKS for t in tokens_norm))
         kw_concepts[idx] = _detect_concepts(tokens_norm)
@@ -1292,29 +1287,23 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
             elif phrase_str and (title_raw.startswith(phrase_str + " ") or title_raw == phrase_str):
                 bonus += 0.12
 
-            # ---- Concept/intent micro-boosts (capped) ----
+            # Concept/intent micro-boosts (capped)
             concept_bonus = 0.0
             if kw_is_veo[idx] and v_intent:
                 concept_bonus += CONCEPT_BIAS["veo"]
             if kw_is_aio[idx] and a_score >= 0.25:
                 concept_bonus += CONCEPT_BIAS["aio"]
-
-            # Concept evidence gating: boost only if page shows aligned signals
-            # build evidence set for this page
             page_ev = set(title_tokens) | slug_toks | nav_anchor_map.get(_url_key(p["url"]), set())
             for c in kw_concepts[idx]:
                 if c in CONCEPT_BIAS:
                     if page_ev & CONCEPT_EVIDENCE.get(c, set()):
                         concept_bonus += CONCEPT_BIAS[c]
-
             if concept_bonus > MAX_CONCEPT_BONUS:
                 concept_bonus = MAX_CONCEPT_BONUS
 
             bonus += _commonness_penalty(tokens_norm)
-
             f = max(0.0, min(2.0, base_fit + bonus + concept_bonus))
 
-            # VEO: prefer VEO-ready pages; allow pass-through to a good page if close
             if slot == "VEO" and not v_intent:
                 f = max(0.0, f - 0.20)
                 if f < 0.60:
@@ -1323,7 +1312,6 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
                             best_page_probe = (p["url"], f, covered_ratio, stype, a_score)
                     continue
 
-            # Core pass thresholds by class
             passed = True
             if slot == "SEO":
                 if (lead_cov < 0.18) and (covered_ratio < 0.50):
@@ -1589,6 +1577,7 @@ if uploaded is not None:
     if missing:
         st.error("Missing required column(s): " + ", ".join(missing))
     else:
+        # Clean numbers
         df[vol_col] = df[vol_col].astype(str).str.replace(r"[,\s]","",regex=True).str.replace("%","",regex=False)
         df[kd_col]  = df[kd_col].astype(str).str.replace(r"[,\s]","",regex=True).str.replace("%","",regex=False)
         df[vol_col] = pd.to_numeric(df[vol_col], errors="coerce")
@@ -1596,6 +1585,7 @@ if uploaded is not None:
 
         scored = add_scoring_columns(df, vol_col, kd_col, kw_col)
 
+        # ---------- Build export_df (no mapping yet) ----------
         filename_base = f"outrankiq_{scoring_mode.lower().replace(' ', '_')}_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
         base_cols = ([kw_col] if kw_col else []) + [vol_col, kd_col, "Score","Tier","Eligible","Reason","Category"]
         export_df = scored[base_cols].copy()
@@ -1604,40 +1594,66 @@ if uploaded is not None:
         export_df["_EligibleSort"] = export_df["Eligible"].map({"Yes":1,"No":0}).fillna(0)
         export_df = export_df.sort_values(by=["_EligibleSort", kd_col, vol_col], ascending=[False, True, False], kind="mergesort").drop(columns=["_EligibleSort"])
 
-        # -------- URL Mapping --------
-        map_series = pd.Series([""]*len(export_df), index=export_df.index, dtype="string")
-        if base_site_url.strip():
-            sig_cols = [c for c in [kw_col, vol_col, kd_col] if c]
-            try: sig_df = export_df[sig_cols].copy()
-            except Exception: sig_df = export_df[[col for col in sig_cols if col in export_df.columns]].copy()
-            sig_csv = sig_df.fillna("").astype(str).to_csv(index=False)
-            sig_base = f"site-map-v12-synonyms-gated|{_normalize_base(base_site_url.strip()).lower()}|{scoring_mode}|{kw_col}|{vol_col}|{kd_col}|{len(export_df)}|subdomains={include_subdomains}"
-            signature = hashlib.md5((sig_base + "\n" + sig_csv).encode("utf-8")).hexdigest()
-            if "map_cache" not in st.session_state: st.session_state["map_cache"] = {}
-            cache = st.session_state["map_cache"]
+        # ---------- Prepare signature for mapping state ----------
+        sig_cols = [c for c in [kw_col, vol_col, kd_col] if c]
+        try:
+            sig_df = export_df[sig_cols].copy()
+        except Exception:
+            sig_df = export_df[[col for col in sig_cols if col in export_df.columns]].copy()
+        sig_csv = sig_df.fillna("").astype(str).to_csv(index=False)
+        sig_base = f"site-map-v12-synonyms-gated|{_normalize_base(base_site_url.strip()).lower()}|{scoring_mode}|{kw_col}|{vol_col}|{kd_col}|{len(export_df)}|subdomains={include_subdomains}"
+        curr_signature = hashlib.md5((sig_base + "\n" + sig_csv).encode("utf-8")).hexdigest()
 
-            if signature in cache and len(cache[signature]) == len(export_df):
-                map_series = pd.Series(cache[signature], index=export_df.index, dtype="string")
-            else:
-                loader = st.empty()
-                loader.markdown(
-                    """
-                    <div class="oiq-loader">
-                      <div class="oiq-spinner"></div>
-                      <div class="oiq-loader-text">Mapping keywords to your site…</div>
-                    </div>
-                    """, unsafe_allow_html=True)
-                with st.spinner("Launching fast crawl & scoring fit…"):
+        # Invalidate previous map if inputs changed
+        if st.session_state.get("map_signature") != curr_signature:
+            st.session_state["map_ready"] = False
+
+        # ---------- Manual mapping button ----------
+        can_map = bool(base_site_url.strip())
+        map_btn = st.button("Map keywords to site", type="primary", disabled=not can_map, help="Runs a fast crawl & assigns the best page per keyword for this strategy.")
+
+        if map_btn and not st.session_state.get("mapping_running", False):
+            st.session_state["mapping_running"] = True
+            # Also clear per-run cache if strategy changed earlier
+            if "map_cache" not in st.session_state:
+                st.session_state["map_cache"] = {}
+            loader = st.empty()
+            loader.markdown(
+                """
+                <div class="oiq-loader">
+                  <div class="oiq-spinner"></div>
+                  <div class="oiq-loader-text">Mapping keywords to your site…</div>
+                </div>
+                """, unsafe_allow_html=True)
+            with st.spinner("Launching fast crawl & scoring fit…"):
+                # Use cache keyed by signature (fast re-map if same inputs)
+                cache = st.session_state["map_cache"]
+                if curr_signature in cache and len(cache[curr_signature]) == len(export_df):
+                    map_series = pd.Series(cache[curr_signature], index=export_df.index, dtype="string")
+                else:
                     map_series = map_keywords_to_urls(
                         export_df, kw_col=kw_col, vol_col=vol_col, kd_col=kd_col,
-                        base_url=base_site_url.strip(), include_subdomains=include_subdomains, use_sitemap_first=True
+                        base_url=base_site_url.strip(), include_subdomains=True, use_sitemap_first=True
                     )
-                loader.empty()
-                cache[signature] = map_series.fillna("").astype(str).tolist()
-        else:
-            st.info("Enter a Base site URL to enable mapping.")
+                    cache[curr_signature] = map_series.fillna("").astype(str).tolist()
+                # Save map result to session for download step
+                st.session_state["map_result"] = map_series
+                st.session_state["map_signature"] = curr_signature
+                st.session_state["map_ready"] = True
+            loader.empty()
+            st.session_state["mapping_running"] = False
 
-        export_df["Map URL"] = map_series
+        # ---------- Build CSV for download (enabled only when mapped & signature matches) ----------
+        # If we have a fresh map result, attach it; otherwise leave Map URL blank
+        if st.session_state.get("map_ready") and st.session_state.get("map_signature") == curr_signature:
+            export_df["Map URL"] = st.session_state["map_result"]
+            can_download = True
+        else:
+            export_df["Map URL"] = pd.Series([""]*len(export_df), index=export_df.index, dtype="string")
+            can_download = False
+            if base_site_url.strip():
+                st.info("Click **Map keywords to site** to generate Map URLs for this strategy and dataset.")
+
         export_cols = base_cols + ["Strategy","Map URL"]
         export_df = export_df[export_cols]
 
@@ -1647,7 +1663,8 @@ if uploaded is not None:
             data=csv_bytes,
             file_name=f"{filename_base}.csv",
             mime="text/csv",
-            help="Sorted by eligibility (Yes first), KD ascending, Volume descending"
+            help="Sorted by eligibility (Yes first), KD ascending, Volume descending",
+            disabled=not can_download
         )
 
 st.markdown("<div class='oiq-footer'>© 2025 OutrankIQ</div>", unsafe_allow_html=True)
