@@ -212,7 +212,7 @@ div[data-testid="stCheckbox"] > label {{ color: var(--ink) !important; font-weig
   box-shadow: 0 2px 0 rgba(0,0,0,.12);
   transition: background-color .15s ease, color .15s ease, border-color .15s ease, box-shadow .15s ease;
 }}
-/* HOVER / FOCUS / ACTIVE = transparent, BLUE text, BLUE outline (requested) */
+/* Hover/focus/active = transparent, BLUE text, BLUE outline */
 .stButton > button:hover, .stDownloadButton > button:hover,
 .stButton > button:focus-visible, .stDownloadButton > button:focus-visible,
 .stButton > button:active, .stDownloadButton > button:active {{
@@ -348,28 +348,110 @@ def add_scoring_columns(df: pd.DataFrame, volume_col: str, kd_col: str, kw_col: 
 # ---------- Tokenization & normalization ----------
 TOKEN_RE = re.compile(r"[a-z0-9]+", re.I)
 
+# --- Synonym/phrase config (no negatives) ---
 PHRASE_MAP = [
     (re.compile(r"\bget[ -]?in[ -]?touch\b", re.I), "contact"),
     (re.compile(r"\breach[ -]?out\b", re.I), "contact"),
     (re.compile(r"\bemail\s*us\b", re.I), "contact"),
     (re.compile(r"\bcall\s*us\b", re.I), "contact"),
+    (re.compile(r"\btalk\s*to\s*us\b", re.I), "contact"),
+    (re.compile(r"\bspeak\s*with\b", re.I), "contact"),
+    (re.compile(r"\brequest\s+(info|information)\b", re.I), "contact"),
+    (re.compile(r"\bbook\s+(a\s*)?call\b", re.I), "contact"),
+    (re.compile(r"\bschedule\s+(a\s*)?call\b", re.I), "contact"),
+    (re.compile(r"\bappointment\b", re.I), "contact"),
+
+    (re.compile(r"\bnon\s*profit(s)?\b", re.I), "nonprofit"),
     (re.compile(r"\bnon[- ]?profit(s)?\b", re.I), "nonprofit"),
+
     (re.compile(r"\bnear\s*me\b", re.I), "nearme"),
     (re.compile(r"\bnear\s*you\b", re.I), "nearyou"),
+    (re.compile(r"\bnearby\b", re.I), "nearme"),
+    (re.compile(r"\bclosest\b", re.I), "nearme"),
+
+    (re.compile(r"\bfind\s*us\b", re.I), "locations"),
+    (re.compile(r"\bvisit\s*us\b", re.I), "locations"),
+    (re.compile(r"\bour\s*office(s)?\b", re.I), "locations"),
+    (re.compile(r"\bour\s*location(s)?\b", re.I), "locations"),
+    (re.compile(r"\bwhere\s*we\s*are\b", re.I), "locations"),
+
+    (re.compile(r"\bmake\s+(a\s*)?gift\b", re.I), "donate"),
+    (re.compile(r"\bgive\s*now\b", re.I), "donate"),
+    (re.compile(r"\bsupport\s+our\s+work\b", re.I), "donate"),
+    (re.compile(r"\bcontribute\b", re.I), "donate"),
+    (re.compile(r"\bmake\s+(a\s*)?donation\b", re.I), "donate"),
+
+    (re.compile(r"\bget\s+involved\b", re.I), "volunteer"),
+    (re.compile(r"\bserve\s+with\s+us\b", re.I), "volunteer"),
+    (re.compile(r"\bjoin\s+us\b", re.I), "volunteer"),
+    (re.compile(r"\btake\s+action\b", re.I), "volunteer"),
+    (re.compile(r"\bsign\s+up\s+to\s+help\b", re.I), "volunteer"),
+
+    (re.compile(r"\bcalendar\b", re.I), "events"),
+    (re.compile(r"\b(upcoming|workshops|trainings|classes|webinars)\b", re.I), "events"),
+
+    (re.compile(r"\bwho\s+we\s+are\b", re.I), "about"),
+    (re.compile(r"\bour\s+story\b", re.I), "about"),
+    (re.compile(r"\bmission\b", re.I), "about"),
+    (re.compile(r"\bvision\b", re.I), "about"),
+    (re.compile(r"\bleadership\b", re.I), "about"),
+    (re.compile(r"\b(team|board|staff)\b", re.I), "about"),
+
+    (re.compile(r"\binitiatives\b", re.I), "program"),
+    (re.compile(r"\bofferings\b", re.I), "service"),
+    (re.compile(r"\bsolutions\b", re.I), "service"),
+    (re.compile(r"\bministries\b", re.I), "service"),
+
+    (re.compile(r"\blibrary\b", re.I), "resources"),
+    (re.compile(r"\btoolkit\b", re.I), "resources"),
+    (re.compile(r"\bdownloads?\b", re.I), "resources"),
+    (re.compile(r"\btemplates?\b", re.I), "resources"),
+    (re.compile(r"\bguides?\b", re.I), "resources"),
+    (re.compile(r"\bplaybook\b", re.I), "resources"),
+
+    (re.compile(r"\bjobs?\b", re.I), "careers"),
+    (re.compile(r"\bemployment\b", re.I), "careers"),
+    (re.compile(r"\b(opening|openings)\b", re.I), "careers"),
+    (re.compile(r"\bwe'?re\s+hiring\b", re.I), "careers"),
 ]
+
 _SYN_MAP = {
     "connect":"contact","connected":"contact","connecting":"contact","contacts":"contact",
-    "support":"contact","helpdesk":"contact","help-line":"contact","helpline":"contact",
-    "nearby":"nearme","nearyou":"nearme","directions":"nearme","address":"nearme",
+    "support":"contact","helpdesk":"contact","helpline":"contact","help-line":"contact",
+    "nearby":"nearme","nearyou":"nearme","directions":"directions","address":"address",
     "offices":"locations","office":"locations","locations":"locations","visit":"locations","findus":"locations",
     "organisations":"organization","organisation":"organization","organizations":"organization","orgs":"organization","org":"organization",
-    "nonprofit":"organization","ngo":"organization","charity":"organization","foundation":"organization",
+    "nonprofit":"nonprofit","ngo":"organization","charity":"organization","foundation":"organization",
     "assist":"help","assists":"help","assistance":"help","caregiving":"help","caregiver":"help","caregivers":"help",
     "disabilities":"disability","disabled":"disability",
     "programs":"program","programme":"program","services":"service",
-    "contribute":"donate","give":"donate","giving":"donate",
-    "involved":"involved","volunteering":"volunteer","volunteers":"volunteer",
+    "contribute":"donate","give":"donate","giving":"donate","donation":"donate","donations":"donate",
+    "involved":"volunteer","volunteering":"volunteer","volunteers":"volunteer",
+    "calendar":"events","workshops":"events","trainings":"events","classes":"events","webinars":"events",
+    "jobs":"careers","employment":"careers","opening":"careers","openings":"careers","hiring":"careers",
+    "library":"resources","toolkit":"resources","templates":"resources","guides":"resources","playbook":"resources","downloads":"resources",
+    "aboutus":"about","mission":"about","vision":"about","leadership":"about","team":"about","board":"about","staff":"about",
 }
+
+# Triggers and concept bias (tiny, capped later)
+VEO_TRIGGER_TOKS = {"contact","nearme","phone","address","hours","location","locations","map","email","call","directions","parking"}
+AIO_TRIGGER_TOKS = {"what","how","guide","tutorial","checklist","framework","template","example","examples","definition","define","is"}
+
+CONCEPT_BIAS = {
+    "veo": 0.06,
+    "aio": 0.06,
+    "contact": 0.06,
+    "locations": 0.06,
+    "donate": 0.06,
+    "volunteer": 0.05,
+    "about": 0.04,
+    "program": 0.04,
+    "service": 0.04,
+    "resources": 0.04,
+    "careers": 0.04,
+}
+MAX_CONCEPT_BONUS = 0.12  # per keyword→URL pair
+
 STOPWORDS = {
     "the","and","for","to","a","an","of","with"," in","on","at","by","from","about",
     "is","are","be","can","should","how","what","who","where","why","when","which",
@@ -386,12 +468,18 @@ def _normalize_phrases(text: str) -> str:
 
 def _norm_token(t: str) -> str:
     t = t.lower()
-    if t in _SYN_MAP: t = _SYN_MAP[t]
+    # synonym map first
+    if t in _SYN_MAP:
+        t = _SYN_MAP[t]
+    # morphology trims
     if t.endswith("ies") and len(t) > 3: t = t[:-3] + "y"
     elif t.endswith("es") and len(t) > 4: t = t[:-2]
     elif t.endswith("s") and len(t) > 3: t = t[:-1]
     if t.endswith("ing") and len(t) > 5: t = t[:-3]
     elif t.endswith("ed") and len(t) > 4: t = t[:-2]
+    # re-map after trim if created a synonym
+    if t in _SYN_MAP:
+        t = _SYN_MAP[t]
     return t
 
 def _tokenize(text: str) -> List[str]:
@@ -997,34 +1085,6 @@ def _url_priority_bonus(u: str, is_nav: bool, source_type: Optional[str]) -> flo
         bonus += 0.15
     return bonus
 
-# ---------- Out-of-domain detection ----------
-POL_CONTACT_PAT = re.compile(r"\b(contact|email|call)\s+(senator|representative|rep|governor|mayor|mp|president)\b", re.I)
-
-def _capitalized_tokens(original_kw: str) -> set:
-    caps = set()
-    for m in re.finditer(r"\b[A-Z][a-z]+(?:[-'][A-Za-z]+)?\b", original_kw or ""):
-        caps.add(_norm_token(m.group(0)))
-    return caps
-
-def _domain_tokens_for_base(base_url: str) -> set:
-    return _domain_tokens(base_url)
-
-def _looks_out_of_domain(original_kw: str, site_lex: set, base_url: str) -> bool:
-    tokens = _ntokens(original_kw)
-    if not tokens: return False
-    if POL_CONTACT_PAT.search(original_kw or ""):
-        return True
-    domtoks = _domain_tokens_for_base(base_url)
-    distinctive = [t for t in tokens if t.isalpha() and len(t) >= 4 and t not in STOPWORDS]
-    unknown = [t for t in distinctive if (t not in site_lex and t not in domtoks)]
-    if not unknown:
-        return False
-    cap = _capitalized_tokens(original_kw)
-    if any(t in unknown for t in cap): return True
-    if "contact" in tokens and unknown: return True
-    if len(unknown) >= 2: return True
-    return False
-
 # ---------- VEO (Voice Engine Optimization) intent detection ----------
 VEO_NAV_TOKS = {"contact","contacts","phone","call","address","directions","hours","location","locations","visit","map","email"}
 
@@ -1052,6 +1112,26 @@ def _parse_lastmod_ts(s: Optional[str]) -> float:
             return 0.0
     return 0.0
 
+# ---------- Concept detection ----------
+CONCEPT_EVIDENCE = {
+    "contact": {"contact","contacts","email","call","phone","locations","address"},
+    "locations": {"location","locations","address","map","directions","hours","visit"},
+    "donate": {"donate","donation","donations","give","giving","gift","support"},
+    "volunteer": {"volunteer","involved","serve","signup"},
+    "about": {"about","mission","vision","team","board","staff","leadership","story"},
+    "program": {"program","programs","initiative","initiatives","ministry","ministries","project","projects"},
+    "service": {"service","services","offering","offerings","solution","solutions"},
+    "resources": {"resources","library","toolkit","templates","guides","playbook","downloads"},
+    "careers": {"careers","jobs","employment","hiring","openings"},
+}
+
+def _detect_concepts(tokens: List[str]) -> Set[str]:
+    hits = set()
+    for c, ev in CONCEPT_EVIDENCE.items():
+        if any(t in tokens for t in ev):
+            hits.add(c)
+    return hits
+
 # ---------- Mapping ----------
 def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, kd_col: str,
                          base_url: str, include_subdomains: bool, use_sitemap_first: bool) -> pd.Series:
@@ -1063,7 +1143,7 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
 
     nav_anchor_map, all_nav_tokens = cached_nav(base_url)
 
-    domain_toks = _domain_tokens_for_base(base_url)
+    domain_toks = _domain_tokens(base_url)
     page_counts: Dict[str,int] = defaultdict(int)
     post_counts: Dict[str,int] = defaultdict(int)
     src_by_key = { _url_key(k): v for k, v in srcmap.items() }
@@ -1142,28 +1222,30 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
     kw_slot: Dict[int,str] = {}
     kw_rank: Dict[int,float] = {}
     head_noun_by_kw: Dict[int, str] = {}
+    kw_is_aio: Dict[int, bool] = {}
+    kw_is_veo: Dict[int, bool] = {}
+    kw_concepts: Dict[int, Set[str]] = {}
 
     for idx, row in df.iterrows():
-        kw = str(row.get(kw_col, "")) if kw_col else str(row.get("Keyword",""))
+        raw_kw = str(row.get(kw_col, "")) if kw_col else str(row.get("Keyword",""))
+        tokens_norm = _ntokens(raw_kw)
 
-        if _looks_out_of_domain(kw, site_lex, base_url):
-            kw_candidates[idx] = []
-            kw_slot[idx] = "SEO"
-            kw_rank[idx] = 0.0
-            continue
+        # Keyword-level intent flags
+        kw_is_veo[idx] = any(t in VEO_TRIGGER_TOKS for t in tokens_norm)
+        kw_is_aio[idx] = bool(AIO_PAT.search(raw_kw) or any(t in AIO_TRIGGER_TOKS for t in tokens_norm))
+        kw_concepts[idx] = _detect_concepts(tokens_norm)
 
-        cats = set(categorize_keyword(kw))
+        cats = set(categorize_keyword(raw_kw))
         if "VEO" in cats: slot = "VEO"
         elif "AIO" in cats: slot = "AIO"
         else: slot = "SEO"
+        kw_slot[idx] = slot
 
-        tokens_norm = _ntokens(kw)
         head = _head_noun(tokens_norm)
         head_noun_by_kw[idx] = head
 
         if slot in {"SEO","VEO"} and not _has_core_token(tokens_norm):
             kw_candidates[idx] = []
-            kw_slot[idx] = slot
             kw_rank[idx] = 0.0
             continue
 
@@ -1172,7 +1254,7 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
         best_page_probe: Optional[Tuple[str,float,float,str,float]] = None
 
         for p in profiles:
-            base_fit = _fit_score(kw, p)
+            base_fit = _fit_score(raw_kw, p)
             if base_fit <= 0:
                 continue
             stype = (
@@ -1210,18 +1292,29 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
             elif phrase_str and (title_raw.startswith(phrase_str + " ") or title_raw == phrase_str):
                 bonus += 0.12
 
-            a_bonus = 0.0
-            v_bonus = 0.0
-            if slot == "AIO":
-                a_bonus = min(0.22, a_score)
-            if slot == "VEO":
-                if v_intent: v_bonus += 0.18
-                if home_nap: v_bonus += 0.08
+            # ---- Concept/intent micro-boosts (capped) ----
+            concept_bonus = 0.0
+            if kw_is_veo[idx] and v_intent:
+                concept_bonus += CONCEPT_BIAS["veo"]
+            if kw_is_aio[idx] and a_score >= 0.25:
+                concept_bonus += CONCEPT_BIAS["aio"]
+
+            # Concept evidence gating: boost only if page shows aligned signals
+            # build evidence set for this page
+            page_ev = set(title_tokens) | slug_toks | nav_anchor_map.get(_url_key(p["url"]), set())
+            for c in kw_concepts[idx]:
+                if c in CONCEPT_BIAS:
+                    if page_ev & CONCEPT_EVIDENCE.get(c, set()):
+                        concept_bonus += CONCEPT_BIAS[c]
+
+            if concept_bonus > MAX_CONCEPT_BONUS:
+                concept_bonus = MAX_CONCEPT_BONUS
 
             bonus += _commonness_penalty(tokens_norm)
 
-            f = max(0.0, min(2.0, base_fit + bonus + a_bonus + v_bonus))
+            f = max(0.0, min(2.0, base_fit + bonus + concept_bonus))
 
+            # VEO: prefer VEO-ready pages; allow pass-through to a good page if close
             if slot == "VEO" and not v_intent:
                 f = max(0.0, f - 0.20)
                 if f < 0.60:
@@ -1230,12 +1323,13 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
                             best_page_probe = (p["url"], f, covered_ratio, stype, a_score)
                     continue
 
+            # Core pass thresholds by class
             passed = True
             if slot == "SEO":
                 if (lead_cov < 0.18) and (covered_ratio < 0.50):
                     passed = False
             elif slot == "AIO":
-                if (lead_cov < 0.12) and (covered_ratio < 0.40) and (a_score < 0.30):
+                if (lead_cov < 0.12) and (covered_ratio < 0.40) and (a_score < 0.25):
                     passed = False
             else:  # VEO
                 if lead_cov < 0.10 and v_intent and covered_ratio < 0.33:
@@ -1243,8 +1337,7 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
 
             if passed and slot == "SEO" and head:
                 if (head not in title_tokens) and (head not in slug_toks):
-                    phrase = " ".join(tokens_norm)
-                    if not phrase or phrase not in (p.get("title_h1_norm") or "") or f < 0.70:
+                    if not phrase_str or phrase_str not in (p.get("title_h1_norm") or "") or f < 0.70:
                         passed = False
 
             if not passed:
@@ -1312,7 +1405,6 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
 
         if not fits:
             kw_candidates[idx] = []
-            kw_slot[idx] = slot
             kw_rank[idx] = 0.0
             continue
 
@@ -1337,7 +1429,6 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
         fits.sort(key=lambda x: x[1], reverse=True)
 
         kw_candidates[idx] = fits[:5]
-        kw_slot[idx] = slot
 
         best_fit = fits[0][1]
         kd_val = float(pd.to_numeric(row.get(kd_col,0), errors="coerce") or 0)
@@ -1520,7 +1611,7 @@ if uploaded is not None:
             try: sig_df = export_df[sig_cols].copy()
             except Exception: sig_df = export_df[[col for col in sig_cols if col in export_df.columns]].copy()
             sig_csv = sig_df.fillna("").astype(str).to_csv(index=False)
-            sig_base = f"site-map-v11-pages-first-strict|{_normalize_base(base_site_url.strip()).lower()}|{scoring_mode}|{kw_col}|{vol_col}|{kd_col}|{len(export_df)}|subdomains={include_subdomains}"
+            sig_base = f"site-map-v12-synonyms-gated|{_normalize_base(base_site_url.strip()).lower()}|{scoring_mode}|{kw_col}|{vol_col}|{kd_col}|{len(export_df)}|subdomains={include_subdomains}"
             signature = hashlib.md5((sig_base + "\n" + sig_csv).encode("utf-8")).hexdigest()
             if "map_cache" not in st.session_state: st.session_state["map_cache"] = {}
             cache = st.session_state["map_cache"]
