@@ -96,18 +96,26 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--ink) !important; }}
   border-radius: 8px !important;
 }}
 
-/* Base border (light) */
+/* Base borders */
 .stNumberInput input,
 .stTextInput input {{
   border: 2px solid rgba(36,47,64,0.08) !important;
 }}
-/* Select focus = BLUE glow */
+
+/* Force BLUE base border on select + number (your request) */
+.stSelectbox div[data-baseweb="select"] > div {{
+  border: 2px solid var(--ink) !important;        /* dropdown default = BLUE */
+}}
+.stNumberInput input {{
+  border: 2px solid var(--ink) !important;        /* A/B boxes default = BLUE */
+}}
+
+/* Focus glows */
 .stSelectbox div[data-baseweb="select"]:focus-within > div {{
   border-color: var(--ink) !important;
   box-shadow: 0 0 0 3px rgba(36,47,64,.35) !important;
   outline: none !important;
 }}
-/* Number & text focus = GREEN glow */
 .stNumberInput input:focus,
 .stNumberInput input:focus-visible,
 .stNumberInput:focus-within input,
@@ -116,14 +124,6 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--ink) !important; }}
   border-color: var(--accent) !important;
   box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .35) !important;
   outline: none !important;
-}}
-
-/* --- FORCE BLUE BASE BORDERS (requested) --- */
-.stSelectbox div[data-baseweb="select"] > div {{
-  border: 2px solid var(--ink) !important;        /* dropdown default border = BLUE */
-}}
-.stNumberInput input {{
-  border: 2px solid var(--ink) !important;        /* A/B boxes default border = BLUE */
 }}
 
 /* Number steppers */
@@ -158,7 +158,6 @@ div[data-testid="stCheckbox"] > label {{ color: var(--ink) !important; font-weig
 [data-testid="stExpander"] > details > summary::marker {{ color: var(--ink) !important; }}
 
 /* Expander body */
-[data-testid="stExpander"] .st-emotion-cache-1h9usn1,
 [data-testid="stExpander"] > details > div {{
   background: #ffffff !important;
 }}
@@ -179,7 +178,7 @@ div[data-testid="stCheckbox"] > label {{ color: var(--ink) !important; font-weig
 }}
 [data-testid="stFileUploaderDropzone"] button:hover,
 [data-testid="stFileUploaderDropzone"] label:hover,
-[data-testid="stFileUploaderDropzone"] [role="button"]:/hover {{
+[data-testid="stFileUploaderDropzone"] [role="button"]:hover {{
   background-color: var(--light) !important; 
   color: var(--ink) !important;             
   border-color: var(--ink) !important;      
@@ -206,17 +205,16 @@ div[data-testid="stCheckbox"] > label {{ color: var(--ink) !important; font-weig
 .stButton > button, .stDownloadButton > button {{
   background-color: var(--accent) !important; 
   color: var(--ink) !important;
-  border: 2px solid rgba(36,47,64,0.08) !important; 
+  border: 2px solid rgba(36,47,64,0.12) !important; 
   border-radius: 10px !important; 
   font-weight: 700 !important;
   box-shadow: 0 2px 0 rgba(0,0,0,.12);
   transition: background-color .15s ease, color .15s ease, border-color .15s ease, box-shadow .15s ease;
 }}
-/* Hover/focus/active = transparent, BLUE text, BLUE outline */
-.stButton > button:hover, .stDownloadButton > button:hover,
-.stButton > button:focus-visible, .stDownloadButton > button:focus-visible,
-.stButton > button:active, .stDownloadButton > button:active {{
-  background-color: transparent !important; 
+/* Calculate & Download hover/focus/active = WHITE bg, BLUE text + border */
+.stButton > button:hover, .stButton > button:focus-visible, .stButton > button:active,
+.stDownloadButton > button:hover, .stDownloadButton > button:focus-visible, .stDownloadButton > button:active {{
+  background-color: #ffffff !important; 
   color: var(--ink) !important; 
   border-color: var(--ink) !important;
   box-shadow: 0 0 0 3px rgba(36,47,64,.15) !important;
@@ -237,16 +235,19 @@ div[data-testid="stCheckbox"] > label {{ color: var(--ink) !important; font-weig
   margin-top: 24px;
 }}
 
-/* ---------- SCOPED BLUE STYLING FOR "Map keywords to site" BUTTON ---------- */
-/* We place a sentinel div just before that button; target adjacent wrapper -> button */
-#mapbtn-scope + div button {{
+/* ---------- SCOPED BLUE STYLING FOR "Map keywords to site" BUTTON ONLY ---------- */
+#mapbtn-scope + div button,
+#mapbtn-scope + div .stButton > button {{
   background-color: var(--ink) !important;     /* blue base */
   color: #ffffff !important;                   /* white text */
   border: 2px solid var(--ink) !important;     /* blue border */
 }}
 #mapbtn-scope + div button:hover,
 #mapbtn-scope + div button:active,
-#mapbtn-scope + div button:focus-visible {{
+#mapbtn-scope + div button:focus-visible,
+#mapbtn-scope + div .stButton > button:hover,
+#mapbtn-scope + div .stButton > button:active,
+#mapbtn-scope + div .stButton > button:focus-visible {{
   background-color: #ffffff !important;        /* white on hover/click */
   color: var(--ink) !important;                /* blue text */
   border-color: var(--ink) !important;         /* blue border */
@@ -292,7 +293,7 @@ strategy_descriptions = {
 # ---------- Strategy ----------
 scoring_mode = st.selectbox("Choose Scoring Strategy", ["Low Hanging Fruit","In The Game","Competitive"])
 
-# --- Strategy-specific reset of mapping state ---
+# Reset mapping state when strategy changes
 if "last_strategy" not in st.session_state:
     st.session_state["last_strategy"] = scoring_mode
 if st.session_state.get("last_strategy") != scoring_mode:
@@ -370,7 +371,7 @@ def add_scoring_columns(df: pd.DataFrame, volume_col: str, kd_col: str, kw_col: 
     remaining = [c for c in out.columns if c not in ordered]
     return out[ordered + remaining]
 
-# ---------- Tokenization / normalization helpers (snip for brevity; unchanged from prior version) ----------
+# ---------- Tokenization / synonyms ----------
 TOKEN_RE = re.compile(r"[a-z0-9]+", re.I)
 
 PHRASE_MAP = [
@@ -1084,7 +1085,7 @@ def _url_priority_bonus(u: str, is_nav: bool, source_type: Optional[str]) -> flo
     bonus = 0.0
     if source_type == "page":
         bonus += 0.35
-        bonus += 0.05
+        bonus += 0.05  # sitemap page preference
     elif source_type == "post":
         bonus -= 0.20
     elif source_type == "tax":
@@ -1144,6 +1145,9 @@ def _detect_concepts(tokens: List[str]) -> Set[str]:
     return hits
 
 # ---------- Mapping ----------
+_ALT_FIT_MIN = 0.22
+_ALT_FIT_MIN_PASS2 = 0.18
+
 def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, kd_col: str,
                          base_url: str, include_subdomains: bool, use_sitemap_first: bool) -> pd.Series:
     url_list, srcmap, smeta = cached_discover_and_sources(base_url, include_subdomains, use_sitemap_first)
@@ -1364,6 +1368,7 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
             if (page_fit >= 0.50 * best_fit) and (page_fit >= (page_min - 0.03)):
                 fits_page = [best_page_probe]
 
+        # Mix page and other (page-first bias)
         fits: List[Tuple[str,float,float,str,float]] = []
         if slot == "AIO" and fits_page and fits_other:
             best_page = fits_page[0][1]
@@ -1463,7 +1468,7 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
             kw_candidates[idx] = []
             kw_rank[idx] = 0.0
 
-    # ---------- Assignment (no backfill; caps enforced) ----------
+    # ---------- Assignment (Pass 1) ----------
     caps = {"VEO":1, "AIO":1, "SEO":2}
     assigned: Dict[str, Dict[str, object]] = {}
     for p in profiles:
@@ -1478,7 +1483,7 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
             return False
         return True
 
-    def assign_slot(slot_name: str):
+    def assign_slot(slot_name: str, alt_min: float):
         ids = [i for i,s in kw_slot.items() if s == slot_name]
         if scoring_mode == "Low Hanging Fruit":
             vols_local = pd.to_numeric(df[vol_col], errors="coerce").fillna(0).clip(lower=0)
@@ -1512,18 +1517,167 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
                     if head and (head not in _slug_tokens(u)) and (head not in title_tokens):
                         continue
                 if slot_name in {"VEO","AIO"}:
-                    if assigned[u][slot_name] is None and (j == 0 or fit >= 0.22):
+                    if assigned[u][slot_name] is None and (j == 0 or fit >= alt_min):
                         assigned[u][slot_name] = i; mapped[i] = u; break
                 else:
-                    if (len(assigned[u]["SEO"]) < caps["SEO"]) and (j == 0 or fit >= 0.22):
+                    if (len(assigned[u]["SEO"]) < caps["SEO"]) and (j == 0 or fit >= alt_min):
                         assigned[u]["SEO"].append(i); mapped[i] = u; break
 
-    assign_slot("VEO"); assign_slot("AIO"); assign_slot("SEO")
+    assign_slot("VEO", _ALT_FIT_MIN); assign_slot("AIO", _ALT_FIT_MIN); assign_slot("SEO", _ALT_FIT_MIN)
 
     for u, slots in assigned.items():
         if isinstance(slots["SEO"], list) and len(slots["SEO"]) > caps["SEO"]:
             for drop_idx in slots["SEO"][caps["SEO"]:]: mapped[drop_idx] = ""
             slots["SEO"] = slots["SEO"][:caps["SEO"]]
+
+    # ---------- Pass 2 (gentle relax) for In The Game & Competitive only ----------
+    if scoring_mode in ("In The Game", "Competitive"):
+        unfilled = [i for i in df.index if not mapped[i]]
+        if unfilled:
+            # Rebuild a quick index for profiles by URL
+            prof_by_url = {p["url"]: p for p in profiles}
+
+            def relaxed_candidates(idx: int) -> List[Tuple[str,float,float,str,float]]:
+                raw_kw = str(df.loc[idx].get(kw_col, "")) if kw_col else str(df.loc[idx].get("Keyword",""))
+                tokens_norm = _ntokens(raw_kw)
+                slot = kw_slot[idx]
+                head = _head_noun(tokens_norm)
+
+                # relaxed core gate: site lex, slug or nav presence also allowed
+                core_ok = _has_core_token(tokens_norm) or any(t in site_lex for t in tokens_norm)
+                if not core_ok and head and head in site_lex:
+                    core_ok = True
+                if not core_ok:
+                    return []
+
+                fits_page: List[Tuple[str,float,float,str,float]] = []
+                fits_other: List[Tuple[str,float,float,str,float]] = []
+
+                for p in profiles:
+                    stype = (
+                        src_by_key.get(_url_key(p.get("url",""))) or
+                        src_by_key.get(_url_key(p.get("final_url",""))) or
+                        src_by_key.get(_url_key(p.get("requested_url",""))) or
+                        "other"
+                    )
+                    is_nav_flag = (_url_key(p["url"]) in nav_anchor_map) or (_url_key(p.get("requested_url","")) in nav_anchor_map)
+                    is_page_like = _is_page_like(stype, p["url"], is_nav_flag)
+
+                    base_fit = _fit_score(raw_kw, p)
+                    if base_fit <= 0:
+                        continue
+
+                    title_tokens = set((p.get("title_h1_norm") or "").split())
+                    title_raw = (p.get("title") or "").strip().lower()
+                    covered = sum(1 for t in tokens_norm if t in title_tokens)
+                    covered_ratio = covered / max(1, len(tokens_norm))
+                    lead_tokens = set((p.get("lead_norm") or "").split())
+                    lead_cov = sum(1 for t in tokens_norm if t in lead_tokens) / max(1, len(tokens_norm))
+                    v_intent, _home_nap = _veo_intent(p, nav_anchor_map)
+                    a_score = p.get("a_score", 0.0)
+
+                    bonus = _url_priority_bonus(p["url"], is_nav_flag, stype)
+                    # Lighter penalties in pass 2
+                    if is_page_like:
+                        bonus += max(-0.15, _post_heavy_penalty(tokens_norm))
+                    slug_toks = _slug_tokens(p["url"])
+                    if head and (head in slug_toks or head in title_tokens): bonus += 0.08
+                    phrase_str = " ".join(tokens_norm)
+                    if head and (title_raw.startswith(head + " ") or title_raw == head):
+                        bonus += 0.08
+                    elif phrase_str and (title_raw.startswith(phrase_str + " ") or title_raw == phrase_str):
+                        bonus += 0.08
+
+                    # Small extra nudge for page-sitemap URLs
+                    if stype == "page":
+                        bonus += 0.03
+
+                    # Concept/intent micro-boosts (same caps)
+                    concept_bonus = 0.0
+                    if kw_is_veo[idx] and v_intent:
+                        concept_bonus += CONCEPT_BIAS["veo"]
+                    if kw_is_aio[idx] and a_score >= 0.22:  # slightly more lenient
+                        concept_bonus += CONCEPT_BIAS["aio"]
+                    page_ev = set(title_tokens) | slug_toks | nav_anchor_map.get(_url_key(p["url"]), set())
+                    for c in kw_concepts[idx]:
+                        if c in CONCEPT_BIAS and (page_ev & CONCEPT_EVIDENCE.get(c, set())):
+                            concept_bonus += CONCEPT_BIAS[c]
+                    if concept_bonus > MAX_CONCEPT_BONUS:
+                        concept_bonus = MAX_CONCEPT_BONUS
+
+                    f = max(0.0, min(2.0, base_fit + bonus + concept_bonus))
+
+                    # relaxed minima
+                    passed = True
+                    if slot == "SEO":
+                        # head noun guardrail: allow generic heads without strict slug/title requirement
+                        if head and head not in {"organization","organizations","service","services","program","programs","resources"}:
+                            if head not in title_tokens and head not in slug_toks and f < 0.70:
+                                passed = False
+                        if (lead_cov < 0.16) and (covered_ratio < 0.45):
+                            passed = False
+                    elif slot == "AIO":
+                        if (lead_cov < 0.10) and (covered_ratio < 0.35) and (a_score < 0.22):
+                            passed = False
+                    else:  # VEO
+                        if kw_is_veo[idx] and not v_intent and f < 0.55:
+                            passed = False
+
+                    if not passed:
+                        continue
+
+                    if is_page_like:
+                        fits_page.append((p["url"], f, covered_ratio, stype, a_score))
+                    else:
+                        fits_other.append((p["url"], f, covered_ratio, stype, a_score))
+
+                fits_page.sort(key=lambda x: x[1], reverse=True)
+                fits_other.sort(key=lambda x: x[1], reverse=True)
+                if not fits_page and not fits_other:
+                    return []
+
+                best_overall = max(fits_page[0][1] if fits_page else 0.0, fits_other[0][1] if fits_other else 0.0)
+                # Prefer page if close enough to best
+                if fits_page:
+                    page_fit = fits_page[0][1]
+                    page_min = 0.22 if slot=="SEO" else 0.16  # relaxed minima
+                    if (page_fit >= 0.55 * best_overall) and (page_fit >= page_min):
+                        return fits_page[:5] if fits_page else []
+                # Else fallback to mixed (still page-first in ordering)
+                mixed = (fits_page + fits_other) if fits_page else fits_other
+                mixed.sort(key=lambda x: x[1], reverse=True)
+                return mixed[:5]
+
+            # Assign in relaxed pass (respect caps; allow alt >= _ALT_FIT_MIN_PASS2)
+            def assign_slot_pass2(slot_name: str):
+                ids = [i for i in unfilled if kw_slot.get(i) == slot_name]
+                # keep same ordering as pass1 (rank desc)
+                ids.sort(key=lambda i: (-kw_rank.get(i,0.0), i))
+                for i in ids:
+                    cands = relaxed_candidates(i)
+                    if not cands: continue
+                    kw_text = str(df.loc[i].get(kw_col, "")) if kw_col else str(df.loc[i].get("Keyword",""))
+                    head = _head_noun(_ntokens(kw_text))
+                    for j, (u, fit, covered_ratio, stype, a_score) in enumerate(cands):
+                        title_tokens = set()
+                        p = prof_by_url.get(u)
+                        if p:
+                            title_tokens = set((p.get("title_h1_norm") or "").split())
+                        if slot_name == "SEO":
+                            # looser check now; still avoid posts unless strong
+                            if _is_post_like(stype, u):
+                                if not (covered_ratio >= 0.55 and fit >= 0.75 and head and (head in title_tokens or head in _slug_tokens(u))):
+                                    continue
+                        if slot_name in {"VEO","AIO"}:
+                            if assigned[u]["AIO" if slot_name=="AIO" else "VEO"] is None and (j == 0 or fit >= _ALT_FIT_MIN_PASS2):
+                                assigned[u][slot_name] = i; mapped[i] = u; break
+                        else:
+                            if len(assigned[u]["SEO"]) < caps["SEO"] and (j == 0 or fit >= _ALT_FIT_MIN_PASS2):
+                                assigned[u]["SEO"].append(i); mapped[i] = u; break
+
+            assign_slot_pass2("VEO")
+            assign_slot_pass2("AIO")
+            assign_slot_pass2("SEO")
 
     return pd.Series([mapped[i] for i in df.index], index=df.index, dtype="string")
 
@@ -1620,7 +1774,7 @@ if uploaded is not None:
         # Strategy-gated mapping for "In The Game" and "Competitive"
         eligible_only = scoring_mode in ("In The Game", "Competitive")
         sig_base = (
-            f"site-map-v13-strategy-gated|{_normalize_base(base_site_url.strip()).lower()}|"
+            f"site-map-v14-IGC_relax1|{_normalize_base(base_site_url.strip()).lower()}|"
             f"{scoring_mode}|{kw_col}|{vol_col}|{kd_col}|{len(export_df)}|subdomains={include_subdomains}|eligible_only={int(eligible_only)}"
         )
         curr_signature = hashlib.md5((sig_base + "\n" + sig_csv).encode("utf-8")).hexdigest()
@@ -1657,16 +1811,15 @@ if uploaded is not None:
                     if eligible_only:
                         mask = export_df["Eligible"].astype(str).eq("Yes")
                         df_subset = export_df.loc[mask]
-                        # Map only eligible subset
+                        # Pass 1 + Pass 2 mapping only on eligible subset
                         subset_series = map_keywords_to_urls(
                             df_subset, kw_col=kw_col, vol_col=vol_col, kd_col=kd_col,
                             base_url=base_site_url.strip(), include_subdomains=True, use_sitemap_first=True
                         )
-                        # Recombine into full-length series (ineligible blank)
                         mapped_full = pd.Series([""]*len(export_df), index=export_df.index, dtype="string")
                         mapped_full.loc[mask] = subset_series
                     else:
-                        # LHF: map whole set (as before)
+                        # LHF: unchanged behavior, map whole set
                         mapped_full = map_keywords_to_urls(
                             export_df, kw_col=kw_col, vol_col=vol_col, kd_col=kd_col,
                             base_url=base_site_url.strip(), include_subdomains=True, use_sitemap_first=True
@@ -1679,7 +1832,7 @@ if uploaded is not None:
             loader.empty()
             st.session_state["mapping_running"] = False
 
-        # ---------- Build CSV for download (enabled only when mapped & signature matches) ----------
+        # ---------- Build CSV for download ----------
         if st.session_state.get("map_ready") and st.session_state.get("map_signature") == curr_signature:
             export_df["Map URL"] = st.session_state["map_result"]
             can_download = True
