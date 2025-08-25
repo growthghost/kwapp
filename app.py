@@ -253,11 +253,6 @@ div[data-testid="stCheckbox"] > label {{ color: var(--ink) !important; font-weig
   border-color: var(--ink) !important;         /* blue border */
   box-shadow: 0 0 0 3px rgba(36,47,64,.15) !important;
 }}
-
-/* ---------- NEW: Hand cursor for the scoring strategy dropdown (scoped) ---------- */
-#strategy-scope + div [data-baseweb="select"] {{
-  cursor: pointer !important;
-}}
 </style>
 """,
     unsafe_allow_html=True,
@@ -296,16 +291,19 @@ strategy_descriptions = {
 }
 
 # ---------- Strategy ----------
-st.markdown('<div id="strategy-scope"></div>', unsafe_allow_html=True)  # scope marker for hand cursor
 scoring_mode = st.selectbox("Choose Scoring Strategy", ["Low Hanging Fruit","In The Game","Competitive"])
 
-# Reset mapping state when strategy changes
+# Track strategy change (reset map)
 if "last_strategy" not in st.session_state:
     st.session_state["last_strategy"] = scoring_mode
 if st.session_state.get("last_strategy") != scoring_mode:
     st.session_state["last_strategy"] = scoring_mode
     for k in ["map_cache","map_result","map_signature","map_ready","mapping_running"]:
         st.session_state.pop(k, None)
+
+IS_LHF = (scoring_mode == "Low Hanging Fruit")
+IS_IG  = (scoring_mode == "In The Game")
+IS_COMP= (scoring_mode == "Competitive")
 
 if scoring_mode == "Low Hanging Fruit":
     MIN_VALID_VOLUME = 10
@@ -489,6 +487,30 @@ STOPWORDS = {
     "vs","or","and","as"
 }
 
+# IG-only helpers (no Spanish)
+ACRONYM_MAP = {
+    "ssi": ["supplemental","security","income"],
+    "rsdi": ["social","security","disability","insurance"],
+    "ltss": ["long","term","services","supports","service","support"],
+    "tefra": ["tax","equity","fiscal","responsibility","act"],
+    "lre": ["least","restrictive","environment"],
+    "iee": ["independent","educational","evaluation"],
+    "mcos": ["managed","care","organizations","organization"],
+    "pca": ["personal","care","assistant"],
+}
+CAREER_TOKS = {"dsp","job","jobs","career","careers","employment"}
+BENEFIT_TOKS = {"ssi","rsdi","ltss","tefra","lre","iee","mcos","pca","waiver","medicaid","medical","assistance","eligibility","504","evaluation","benefit","benefits"}
+IG_SERVICE_PHRASES = [
+    "person centered planning",
+    "group home",
+    "group homes",
+    "residential",
+    "transportation",
+    "early intervention",
+    "vocational rehabilitation",
+    "vocational rehab",
+]
+
 def _normalize_phrases(text: str) -> str:
     if not text: return ""
     out = text
@@ -515,6 +537,16 @@ def _tokenize(text: str) -> List[str]:
 def _ntokens(text: str) -> List[str]:
     text = _normalize_phrases(text or "")
     return [_norm_token(t) for t in _tokenize(text)]
+
+def _apply_ig_expansions(tokens: List[str]) -> List[str]:
+    """English-only acronym expansions for IG mode."""
+    if not IS_IG:  # only in In The Game
+        return tokens
+    out = list(tokens)
+    for t in list(tokens):
+        if t in ACRONYM_MAP:
+            out.extend(ACRONYM_MAP[t])
+    return out
 
 HEAD_BLACKLIST = {
     "near","nearme","contact","call","email","address","directions","phone","hours",
@@ -1066,6 +1098,7 @@ def cached_fetch_profiles(urls: Tuple[str, ...]) -> List[Dict]:
 # ---------- Fit & priority ----------
 def _fit_score(keyword: str, profile: Dict) -> float:
     tokens = _ntokens(keyword)
+    tokens = _apply_ig_expansions(tokens)  # IG-only expansions; no-op in other modes
     if not tokens: return 0.0
     w = profile.get("weights", {})
     overlap = 0.0
@@ -1150,6 +1183,13 @@ def _detect_concepts(tokens: List[str]) -> Set[str]:
             hits.add(c)
     return hits
 
+def _is_careers_url(u: str, nav_anchor_map: Dict[str, Set[str]]) -> bool:
+    path = urlparse(u).path.lower()
+    if any(seg in path for seg in ("/career","/careers","/jobs","/job","/employment","/work-with-us","/join-our-team")):
+        return True
+    anchors = nav_anchor_map.get(_url_key(u), set())
+    return any(t in anchors for t in {"career","careers","jobs","employment","work","join","team"})
+
 # ---------- Mapping ----------
 _ALT_FIT_MIN = 0.22
 _ALT_FIT_MIN_PASS2 = 0.18
@@ -1217,9 +1257,9 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
     max_log = float((vols + 1).apply(lambda x: math.log(1 + x)).max()) or 1.0
 
     def strat_weights():
-        if scoring_mode == "Low Hanging Fruit": return 0.30, 0.40, 0.30
-        elif scoring_mode == "In The Game":     return 0.30, 0.35, 0.35
-        else:                                    return 0.30, 0.20, 0.50
+        if IS_LHF: return 0.30, 0.40, 0.30
+        elif IS_IG: return 0.30, 0.35, 0.35
+        else:       return 0.30, 0.20, 0.50
     W_FIT, W_KD, W_VOL = strat_weights()
 
     def _has_core_token(tokens: List[str]) -> bool:
@@ -1238,6 +1278,11 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
         cnt = sum(1 for t in tokens if very_common.get(t, False))
         return -0.05 * cnt
 
+    def _has_phrase_seq(tokens: List[str], phrase: str) -> bool:
+        if not tokens or not phrase: return False
+        joined = " ".join(tokens)
+        return phrase in joined
+
     TOP_K = 5
     kw_candidates: Dict[int, List[Tuple[str,float,float,str,float]]] = {}
     kw_slot: Dict[int,str] = {}
@@ -1246,14 +1291,22 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
     kw_is_aio: Dict[int, bool] = {}
     kw_is_veo: Dict[int, bool] = {}
     kw_concepts: Dict[int, Set[str]] = {}
+    kw_is_careers: Dict[int, bool] = {}
+    kw_has_benefit: Dict[int, bool] = {}
+    kw_has_service: Dict[int, bool] = {}
 
     for idx, row in df.iterrows():
         raw_kw = str(row.get(kw_col, "")) if kw_col else str(row.get("Keyword",""))
         tokens_norm = _ntokens(raw_kw)
+        if IS_IG:
+            tokens_norm = _apply_ig_expansions(tokens_norm)
 
         kw_is_veo[idx] = any(t in VEO_TRIGGER_TOKS for t in tokens_norm)
         kw_is_aio[idx] = bool(AIO_PAT.search(raw_kw) or any(t in AIO_TRIGGER_TOKS for t in tokens_norm))
         kw_concepts[idx] = _detect_concepts(tokens_norm)
+        kw_is_careers[idx] = any(t in CAREER_TOKS for t in tokens_norm)
+        kw_has_benefit[idx] = any(t in BENEFIT_TOKS for t in tokens_norm)
+        kw_has_service[idx] = any(_has_phrase_seq(tokens_norm, p) for p in IG_SERVICE_PHRASES) if IS_IG else False
 
         cats = set(categorize_keyword(raw_kw))
         if "VEO" in cats: slot = "VEO"
@@ -1278,16 +1331,12 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
             if base_fit <= 0:
                 continue
             stype = (
+                srcmap.get(_url_key(p["url"])) or
+                srcmap.get(_url_key(p.get("final_url",""))) or
+                srcmap.get(_url_key(p.get("requested_url",""))) or
                 "other"
-                if p.get("url") is None
-                else (
-                    srcmap.get(_url_key(p["url"])) or
-                    srcmap.get(_url_key(p.get("final_url",""))) or
-                    srcmap.get(_url_key(p.get("requested_url",""))) or
-                    "other"
-                )
             )
-            is_nav_flag = (_url_key(p["url"]) in nav_anchor_map) or (_url_key(p.get("requested_url","")) in nav_anchor_map)
+            is_nav_flag = ((_url_key(p["url"]) in nav_anchor_map) or (_url_key(p.get("requested_url","")) in nav_anchor_map))
             is_page_like = _is_page_like(stype, p["url"], is_nav_flag)
 
             title_tokens = set((p.get("title_h1_norm") or "").split())
@@ -1297,7 +1346,7 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
             lead_tokens = set((p.get("lead_norm") or "").split())
             lead_cov = sum(1 for t in tokens_norm if t in lead_tokens) / max(1, len(tokens_norm))
 
-            v_intent, home_nap = _veo_intent(p, nav_anchor_map)
+            v_intent, _home_nap = _veo_intent(p, nav_anchor_map)
             a_score = p.get("a_score", 0.0)
 
             bonus = _url_priority_bonus(p["url"], is_nav_flag, stype)
@@ -1311,6 +1360,24 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
                 bonus += 0.12
             elif phrase_str and (title_raw.startswith(phrase_str + " ") or title_raw == phrase_str):
                 bonus += 0.12
+
+            # IG-only: stronger phrase/slug nudges + careers resolver + services/benefits micro nudges
+            if IS_IG:
+                # career resolver
+                if kw_is_careers[idx] and _is_careers_url(p["url"], nav_anchor_map):
+                    bonus += 0.20
+                # services phrase nudges
+                svc_hits = 0
+                for ph in IG_SERVICE_PHRASES:
+                    if _has_phrase_seq(tokens_norm, ph):
+                        if ph in (p.get("title_h1_norm") or "") or any(t in slug_toks for t in ph.split()):
+                            svc_hits += 1
+                if svc_hits:
+                    bonus += min(0.12, 0.06 * svc_hits)
+                # benefits nudge
+                if kw_has_benefit[idx]:
+                    if any(t in title_tokens or t in slug_toks for t in {"ssi","waiver","medicaid","504","evaluation","eligibility","benefit","benefits","assist"}):
+                        bonus += 0.06
 
             # Concept/intent micro-boosts (capped)
             concept_bonus = 0.0
@@ -1352,6 +1419,11 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
                 if (head not in title_tokens) and (head not in slug_toks):
                     if not phrase_str or phrase_str not in (p.get("title_h1_norm") or "") or f < 0.70:
                         passed = False
+
+            # IG-only: slightly relax for careers pages when careers intent
+            if IS_IG and kw_is_careers[idx] and _is_careers_url(p["url"], nav_anchor_map):
+                if slot == "SEO" and f >= 0.60:
+                    passed = True
 
             if not passed:
                 if is_page_like:
@@ -1452,9 +1524,9 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
         vol_norm = math.log(1 + max(0.0, vol_val)) / max_log
 
         lhf_opportunity = vol_norm * kd_norm
-        if scoring_mode == "Low Hanging Fruit":
+        if IS_LHF:
             kw_rank[idx] = 0.30*fit_norm + 0.30*kd_norm + 0.20*vol_norm + 0.20*lhf_opportunity
-        elif scoring_mode == "In The Game":
+        elif IS_IG:
             kw_rank[idx] = 0.35*fit_norm + 0.30*kd_norm + 0.35*vol_norm
         else:
             kw_rank[idx] = 0.40*fit_norm + 0.20*kd_norm + 0.40*vol_norm
@@ -1491,7 +1563,7 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
 
     def assign_slot(slot_name: str, alt_min: float):
         ids = [i for i,s in kw_slot.items() if s == slot_name]
-        if scoring_mode == "Low Hanging Fruit":
+        if IS_LHF:
             vols_local = pd.to_numeric(df[vol_col], errors="coerce").fillna(0).clip(lower=0)
             max_log_local = float((vols_local + 1).apply(lambda x: math.log(1 + x)).max()) or 1.0
             opp = {}
@@ -1511,6 +1583,9 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
             if not choices: continue
             kw_text = str(df.loc[i].get(kw_col, "")) if kw_col else str(df.loc[i].get("Keyword",""))
             head = _head_noun(_ntokens(kw_text))
+            if IS_IG:
+                # include expansions for head presence checks
+                head = _head_noun(_apply_ig_expansions(_ntokens(kw_text)))
             for j, (u, fit, covered_ratio, stype, a_score) in enumerate(choices):
                 title_tokens = set()
                 for p in profiles:
@@ -1536,23 +1611,20 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
             for drop_idx in slots["SEO"][caps["SEO"]:]: mapped[drop_idx] = ""
             slots["SEO"] = slots["SEO"][:caps["SEO"]]
 
-    # ---------- Pass 2 (gentle relax) for In The Game & Competitive only ----------
-    if scoring_mode in ("In The Game", "Competitive"):
+    # ---------- Pass 2 (gentle relax) — IG only ----------
+    if IS_IG:
         unfilled = [i for i in df.index if not mapped[i]]
         if unfilled:
-            # Rebuild a quick index for profiles by URL
             prof_by_url = {p["url"]: p for p in profiles}
 
             def relaxed_candidates(idx: int) -> List[Tuple[str,float,float,str,float]]:
                 raw_kw = str(df.loc[idx].get(kw_col, "")) if kw_col else str(df.loc[idx].get("Keyword",""))
                 tokens_norm = _ntokens(raw_kw)
+                tokens_norm = _apply_ig_expansions(tokens_norm)
                 slot = kw_slot[idx]
                 head = _head_noun(tokens_norm)
 
-                # relaxed core gate: site lex, slug or nav presence also allowed
-                core_ok = _has_core_token(tokens_norm) or any(t in site_lex for t in tokens_norm)
-                if not core_ok and head and head in site_lex:
-                    core_ok = True
+                core_ok = _has_core_token(tokens_norm) or any(t in site_lex for t in tokens_norm) or (head and head in site_lex)
                 if not core_ok:
                     return []
 
@@ -1583,7 +1655,6 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
                     a_score = p.get("a_score", 0.0)
 
                     bonus = _url_priority_bonus(p["url"], is_nav_flag, stype)
-                    # Lighter penalties in pass 2
                     if is_page_like:
                         bonus += max(-0.15, _post_heavy_penalty(tokens_norm))
                     slug_toks = _slug_tokens(p["url"])
@@ -1594,32 +1665,26 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
                     elif phrase_str and (title_raw.startswith(phrase_str + " ") or title_raw == phrase_str):
                         bonus += 0.08
 
-                    # Small extra nudge for page-sitemap URLs
-                    if stype == "page":
-                        bonus += 0.03
+                    # IG-only nudges in relax pass:
+                    if kw_is_careers[idx] and _is_careers_url(p["url"], nav_anchor_map):
+                        bonus += 0.16
+                    if kw_has_benefit[idx]:
+                        if any(t in title_tokens or t in slug_toks for t in {"ssi","waiver","medicaid","504","evaluation","eligibility","benefit","benefits","assist"}):
+                            bonus += 0.05
+                    svc_hits = 0
+                    for ph in IG_SERVICE_PHRASES:
+                        if _has_phrase_seq(tokens_norm, ph):
+                            if ph in (p.get("title_h1_norm") or "") or any(t in slug_toks for t in ph.split()):
+                                svc_hits += 1
+                    if svc_hits:
+                        bonus += min(0.10, 0.05 * svc_hits)
 
-                    # Concept/intent micro-boosts (same caps)
-                    concept_bonus = 0.0
-                    if kw_is_veo[idx] and v_intent:
-                        concept_bonus += CONCEPT_BIAS["veo"]
-                    if kw_is_aio[idx] and a_score >= 0.22:  # slightly more lenient
-                        concept_bonus += CONCEPT_BIAS["aio"]
-                    page_ev = set(title_tokens) | slug_toks | nav_anchor_map.get(_url_key(p["url"]), set())
-                    for c in kw_concepts[idx]:
-                        if c in CONCEPT_BIAS and (page_ev & CONCEPT_EVIDENCE.get(c, set())):
-                            concept_bonus += CONCEPT_BIAS[c]
-                    if concept_bonus > MAX_CONCEPT_BONUS:
-                        concept_bonus = MAX_CONCEPT_BONUS
+                    f = max(0.0, min(2.0, base_fit + bonus))
 
-                    f = max(0.0, min(2.0, base_fit + bonus + concept_bonus))
-
-                    # relaxed minima
                     passed = True
                     if slot == "SEO":
-                        # head noun guardrail: allow generic heads without strict slug/title requirement
-                        if head and head not in {"organization","organizations","service","services","program","programs","resources"}:
-                            if head not in title_tokens and head not in slug_toks and f < 0.70:
-                                passed = False
+                        if head and head not in title_tokens and head not in slug_toks and f < 0.70:
+                            passed = False
                         if (lead_cov < 0.16) and (covered_ratio < 0.45):
                             passed = False
                     elif slot == "AIO":
@@ -1643,34 +1708,29 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
                     return []
 
                 best_overall = max(fits_page[0][1] if fits_page else 0.0, fits_other[0][1] if fits_other else 0.0)
-                # Prefer page if close enough to best
                 if fits_page:
                     page_fit = fits_page[0][1]
-                    page_min = 0.22 if slot=="SEO" else 0.16  # relaxed minima
+                    page_min = 0.22 if slot=="SEO" else 0.16
                     if (page_fit >= 0.55 * best_overall) and (page_fit >= page_min):
                         return fits_page[:5] if fits_page else []
-                # Else fallback to mixed (still page-first in ordering)
                 mixed = (fits_page + fits_other) if fits_page else fits_other
                 mixed.sort(key=lambda x: x[1], reverse=True)
                 return mixed[:5]
 
-            # Assign in relaxed pass (respect caps; allow alt >= _ALT_FIT_MIN_PASS2)
             def assign_slot_pass2(slot_name: str):
                 ids = [i for i in unfilled if kw_slot.get(i) == slot_name]
-                # keep same ordering as pass1 (rank desc)
                 ids.sort(key=lambda i: (-kw_rank.get(i,0.0), i))
                 for i in ids:
                     cands = relaxed_candidates(i)
                     if not cands: continue
                     kw_text = str(df.loc[i].get(kw_col, "")) if kw_col else str(df.loc[i].get("Keyword",""))
-                    head = _head_noun(_ntokens(kw_text))
+                    head = _head_noun(_apply_ig_expansions(_ntokens(kw_text)))
                     for j, (u, fit, covered_ratio, stype, a_score) in enumerate(cands):
                         title_tokens = set()
                         p = prof_by_url.get(u)
                         if p:
                             title_tokens = set((p.get("title_h1_norm") or "").split())
                         if slot_name == "SEO":
-                            # looser check now; still avoid posts unless strong
                             if _is_post_like(stype, u):
                                 if not (covered_ratio >= 0.55 and fit >= 0.75 and head and (head in title_tokens or head in _slug_tokens(u))):
                                     continue
@@ -1777,15 +1837,13 @@ if uploaded is not None:
             sig_df = export_df[[col for col in sig_cols if col in export_df.columns]].copy()
         sig_csv = sig_df.fillna("").astype(str).to_csv(index=False)
 
-        # Strategy-gated mapping for "In The Game" and "Competitive"
-        eligible_only = scoring_mode in ("In The Game", "Competitive")
+        eligible_only = IS_IG or IS_COMP
         sig_base = (
-            f"site-map-v14-IGC_relax1|{_normalize_base(base_site_url.strip()).lower()}|"
+            f"site-map-v15-IGonly|{_normalize_base(base_site_url.strip()).lower()}|"
             f"{scoring_mode}|{kw_col}|{vol_col}|{kd_col}|{len(export_df)}|subdomains={include_subdomains}|eligible_only={int(eligible_only)}"
         )
         curr_signature = hashlib.md5((sig_base + "\n" + sig_csv).encode("utf-8")).hexdigest()
 
-        # Invalidate previous map if inputs changed
         if st.session_state.get("map_signature") != curr_signature:
             st.session_state["map_ready"] = False
 
@@ -1795,12 +1853,6 @@ if uploaded is not None:
             st.markdown('<div id="mapbtn-scope"></div>', unsafe_allow_html=True)
             map_btn = st.button("Map keywords to site", type="primary", disabled=not can_map,
                                 help="Runs a fast crawl & assigns the best page per eligible keyword for this strategy.")
-            # NEW: Blue helper text under the button until mapping is ready
-            if base_site_url.strip() and not (st.session_state.get("map_ready") and st.session_state.get("map_signature") == curr_signature):
-                st.markdown(
-                    "<div style='margin-top:6px; color: var(--ink);'>Click map keywords button to generate Map URLs for this strategy</div>",
-                    unsafe_allow_html=True
-                )
 
         if map_btn and not st.session_state.get("mapping_running", False):
             st.session_state["mapping_running"] = True
@@ -1823,7 +1875,6 @@ if uploaded is not None:
                     if eligible_only:
                         mask = export_df["Eligible"].astype(str).eq("Yes")
                         df_subset = export_df.loc[mask]
-                        # Pass 1 + Pass 2 mapping only on eligible subset
                         subset_series = map_keywords_to_urls(
                             df_subset, kw_col=kw_col, vol_col=vol_col, kd_col=kd_col,
                             base_url=base_site_url.strip(), include_subdomains=True, use_sitemap_first=True
@@ -1831,7 +1882,6 @@ if uploaded is not None:
                         mapped_full = pd.Series([""]*len(export_df), index=export_df.index, dtype="string")
                         mapped_full.loc[mask] = subset_series
                     else:
-                        # LHF: unchanged behavior, map whole set
                         mapped_full = map_keywords_to_urls(
                             export_df, kw_col=kw_col, vol_col=vol_col, kd_col=kd_col,
                             base_url=base_site_url.strip(), include_subdomains=True, use_sitemap_first=True
@@ -1851,7 +1901,8 @@ if uploaded is not None:
         else:
             export_df["Map URL"] = pd.Series([""]*len(export_df), index=export_df.index, dtype="string")
             can_download = False
-            # NOTE: old st.info helper removed; helper now shown under the Map button
+            if base_site_url.strip():
+                st.info("Click **Map keywords to site** to generate Map URLs for this strategy and dataset.")
 
         export_cols = base_cols + ["Strategy","Map URL"]
         export_df = export_df[export_cols]
