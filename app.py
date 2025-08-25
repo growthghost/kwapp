@@ -253,6 +253,11 @@ div[data-testid="stCheckbox"] > label {{ color: var(--ink) !important; font-weig
   border-color: var(--ink) !important;         /* blue border */
   box-shadow: 0 0 0 3px rgba(36,47,64,.15) !important;
 }}
+
+/* ---------- NEW: Hand cursor for the scoring strategy dropdown (scoped) ---------- */
+#strategy-scope + div [data-baseweb="select"] {{
+  cursor: pointer !important;
+}}
 </style>
 """,
     unsafe_allow_html=True,
@@ -291,6 +296,7 @@ strategy_descriptions = {
 }
 
 # ---------- Strategy ----------
+st.markdown('<div id="strategy-scope"></div>', unsafe_allow_html=True)  # scope marker for hand cursor
 scoring_mode = st.selectbox("Choose Scoring Strategy", ["Low Hanging Fruit","In The Game","Competitive"])
 
 # Reset mapping state when strategy changes
@@ -1789,6 +1795,12 @@ if uploaded is not None:
             st.markdown('<div id="mapbtn-scope"></div>', unsafe_allow_html=True)
             map_btn = st.button("Map keywords to site", type="primary", disabled=not can_map,
                                 help="Runs a fast crawl & assigns the best page per eligible keyword for this strategy.")
+            # NEW: Blue helper text under the button until mapping is ready
+            if base_site_url.strip() and not (st.session_state.get("map_ready") and st.session_state.get("map_signature") == curr_signature):
+                st.markdown(
+                    "<div style='margin-top:6px; color: var(--ink);'>Click map keywords button to generate Map URLs for this strategy</div>",
+                    unsafe_allow_html=True
+                )
 
         if map_btn and not st.session_state.get("mapping_running", False):
             st.session_state["mapping_running"] = True
@@ -1839,8 +1851,7 @@ if uploaded is not None:
         else:
             export_df["Map URL"] = pd.Series([""]*len(export_df), index=export_df.index, dtype="string")
             can_download = False
-            if base_site_url.strip():
-                st.info("Click **Map keywords to site** to generate Map URLs for this strategy and dataset.")
+            # NOTE: old st.info helper removed; helper now shown under the Map button
 
         export_cols = base_cols + ["Strategy","Map URL"]
         export_df = export_df[export_cols]
