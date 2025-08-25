@@ -72,7 +72,7 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--ink) !important; }}
 .oiq-header-inner {{
   max-width: 1000px;
   margin: 0 auto;
-  padding-left: 16px;
+  padding-left: 16px;  /* left margin within page */
   text-align: left;
 }}
 .oiq-header .oiq-title {{
@@ -102,7 +102,7 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--ink) !important; }}
   border: 2px solid rgba(36,47,64,0.08) !important;
 }}
 
-/* Force BLUE base border on select + number (your request) */
+/* BLUE base border on select + number (your request) */
 .stSelectbox div[data-baseweb="select"] > div {{
   border: 2px solid var(--ink) !important;        /* dropdown default = BLUE */
 }}
@@ -497,9 +497,16 @@ ACRONYM_MAP = {
     "iee": ["independent","educational","evaluation"],
     "mcos": ["managed","care","organizations","organization"],
     "pca": ["personal","care","assistant"],
+    # New IG-only acronyms
+    "cdcs": ["consumer","directed","community","supports","support"],
+    "cadi": ["community","access","disability","inclusion"],
+    "icf":  ["intermediate","care","facility"],
+    "idd":  ["intellectual","developmental","disability","disabilities"],
+    "iep":  ["individualized","education","program"],
+    "hcbs": ["home","community","based","services","service"],
 }
 CAREER_TOKS = {"dsp","job","jobs","career","careers","employment"}
-BENEFIT_TOKS = {"ssi","rsdi","ltss","tefra","lre","iee","mcos","pca","waiver","medicaid","medical","assistance","eligibility","504","evaluation","benefit","benefits"}
+BENEFIT_TOKS = {"ssi","rsdi","ltss","tefra","lre","iee","mcos","pca","waiver","medicaid","medical","assistance","eligibility","504","evaluation","benefit","benefits","cdcs","cadi","hcbs"}
 IG_SERVICE_PHRASES = [
     "person centered planning",
     "group home",
@@ -653,9 +660,9 @@ def _session():
 def _fetch_text_requests(url: str, session, timeout: Tuple[int,int]) -> Optional[str]:
     try:
         if session is not None:
-            resp = session.get(url, headers={"User-Agent":"OutrankIQMapper/1.2 (voice-engine-optimization)"}, timeout=timeout, stream=True, allow_redirects=True)
+            resp = session.get(url, headers={"User-Agent":"OutrankIQMapper/1.3 (voice-engine-optimization)"}, timeout=timeout, stream=True, allow_redirects=True)
         elif requests is not None:
-            resp = requests.get(url, headers={"User-Agent":"OutrankIQMapper/1.2 (voice-engine-optimization)"}, timeout=timeout, stream=True, allow_redirects=True)
+            resp = requests.get(url, headers={"User-Agent":"OutrankIQMapper/1.3 (voice-engine-optimization)"}, timeout=timeout, stream=True, allow_redirects=True)
         else:
             return None
         if resp.status_code >= 400: return None
@@ -822,7 +829,7 @@ def shallow_crawl(base_url: str, include_subdomains: bool) -> List[str]:
         async def _run():
             timeout = aiohttp.ClientTimeout(total=60, sock_connect=5, sock_read=8)
             conn = aiohttp.TCPConnector(limit=16, ssl=False)
-            async with aiohttp.ClientSession(timeout=timeout, connector=conn, headers={"User-Agent":"OutrankIQMapper/1.2 (voice-engine-optimization)"}) as session:
+            async with aiohttp.ClientSession(timeout=timeout, connector=conn, headers={"User-Agent":"OutrankIQMapper/1.3 (voice-engine-optimization)"}) as session:
                 while frontier and len(out) < 120:
                     url, depth = frontier.pop(0)
                     try:
@@ -850,7 +857,7 @@ def shallow_crawl(base_url: str, include_subdomains: bool) -> List[str]:
                 while frontier and len(out) < 120:
                     url, depth = frontier.pop(0)
                     try:
-                        r = sess.get(url, headers={"User-Agent":"OutrankIQMapper/1.2 (voice-engine-optimization)"}, timeout=(5,8), allow_redirects=True)
+                        r = sess.get(url, headers={"User-Agent":"OutrankIQMapper/1.3 (voice-engine-optimization)"}, timeout=(5,8), allow_redirects=True)
                         if r.status_code >= 400: continue
                         ctype = r.headers.get("Content-Type","").lower()
                         if "html" not in ctype and "text" not in ctype: continue
@@ -873,7 +880,7 @@ def shallow_crawl(base_url: str, include_subdomains: bool) -> List[str]:
             while frontier and len(out) < 120:
                 url, depth = frontier.pop(0)
                 try:
-                    r = sess.get(url, headers={"User-Agent":"OutrankIQMapper/1.2 (voice-engine-optimization)"}, timeout=(5,8), allow_redirects=True)
+                    r = sess.get(url, headers={"User-Agent":"OutrankIQMapper/1.3 (voice-engine-optimization)"}, timeout=(5,8), allow_redirects=True)
                     if r.status_code >= 400: continue
                     ctype = r.headers.get("Content-Type","").lower()
                     if "html" not in ctype and "text" not in ctype: continue
@@ -1030,7 +1037,7 @@ def _fetch_profiles(urls: List[str]) -> List[Dict]:
         async def _run():
             timeout = aiohttp.ClientTimeout(total=60, sock_connect=5, sock_read=8)
             conn = aiohttp.TCPConnector(limit=16, ssl=False)
-            async with aiohttp.ClientSession(timeout=timeout, connector=conn, headers={"User-Agent":"OutrankIQMapper/1.2 (voice-engine-optimization)"}) as session:
+            async with aiohttp.ClientSession(timeout=timeout, connector=conn, headers={"User-Agent":"OutrankIQMapper/1.3 (voice-engine-optimization)"}) as session:
                 sem = asyncio.Semaphore(16)
                 async def fetch(u: str):
                     async with sem:
@@ -1056,7 +1063,7 @@ def _fetch_profiles(urls: List[str]) -> List[Dict]:
             try:
                 for u in urls[:120]:
                     try:
-                        r = sess.get(u, headers={"User-Agent":"OutrankIQMapper/1.2 (voice-engine-optimization)"}, timeout=(5,8), allow_redirects=True)
+                        r = sess.get(u, headers={"User-Agent":"OutrankIQMapper/1.3 (voice-engine-optimization)"}, timeout=(5,8), allow_redirects=True)
                         if r.status_code >= 400: continue
                         ctype = r.headers.get("Content-Type","").lower()
                         if "html" not in ctype and "text" not in ctype: continue
@@ -1074,7 +1081,7 @@ def _fetch_profiles(urls: List[str]) -> List[Dict]:
         try:
             for u in urls[:120]:
                 try:
-                    r = sess.get(u, headers={"User-Agent":"OutrankIQMapper/1.2 (voice-engine-optimization)"}, timeout=(5,8), allow_redirects=True)
+                    r = sess.get(u, headers={"User-Agent":"OutrankIQMapper/1.3 (voice-engine-optimization)"}, timeout=(5,8), allow_redirects=True)
                     if r.status_code >= 400: continue
                     ctype = r.headers.get("Content-Type","").lower()
                     if "html" not in ctype and "text" not in ctype: continue
@@ -1376,7 +1383,7 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
                     bonus += min(0.12, 0.06 * svc_hits)
                 # benefits nudge
                 if kw_has_benefit[idx]:
-                    if any(t in title_tokens or t in slug_toks for t in {"ssi","waiver","medicaid","504","evaluation","eligibility","benefit","benefits","assist"}):
+                    if any(t in title_tokens or t in slug_toks for t in {"ssi","waiver","medicaid","504","evaluation","eligibility","benefit","benefits","assist","cdcs","cadi","hcbs"}):
                         bonus += 0.06
 
             # Concept/intent micro-boosts (capped)
@@ -1404,10 +1411,18 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
                             best_page_probe = (p["url"], f, covered_ratio, stype, a_score)
                     continue
 
+            # Base pass tests
             passed = True
             if slot == "SEO":
-                if (lead_cov < 0.18) and (covered_ratio < 0.50):
-                    passed = False
+                seo_head_ok = (head and (head in title_tokens or head in slug_toks))
+                # IG-only head-noun relax: allow high coverage + phrase presence
+                if IS_IG and not seo_head_ok:
+                    phrase_ok = (phrase_str and (phrase_str in (p.get("title_h1_norm") or "") or phrase_str in (p.get("lead_norm") or "")))
+                    if not (covered_ratio >= 0.65 and phrase_ok):
+                        passed = False
+                else:
+                    if (lead_cov < 0.18) and (covered_ratio < 0.50):
+                        passed = False
             elif slot == "AIO":
                 if (lead_cov < 0.12) and (covered_ratio < 0.40) and (a_score < 0.25):
                     passed = False
@@ -1415,15 +1430,20 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
                 if lead_cov < 0.10 and v_intent and covered_ratio < 0.33:
                     passed = False
 
-            if passed and slot == "SEO" and head:
-                if (head not in title_tokens) and (head not in slug_toks):
-                    if not phrase_str or phrase_str not in (p.get("title_h1_norm") or "") or f < 0.70:
-                        passed = False
-
-            # IG-only: slightly relax for careers pages when careers intent
-            if IS_IG and kw_is_careers[idx] and _is_careers_url(p["url"], nav_anchor_map):
-                if slot == "SEO" and f >= 0.60:
-                    passed = True
+            # Concept bridge (IG-only) for benefits/services → allow if IG minima met on relevant pages
+            if IS_IG and slot == "SEO" and not passed and (kw_has_benefit[idx] or kw_has_service[idx]):
+                relevant = False
+                ev_toks = title_tokens | slug_toks
+                if kw_has_benefit[idx] and ev_toks & {"ssi","waiver","medicaid","504","evaluation","eligibility","benefit","benefits","assist","cdcs","cadi","hcbs"}:
+                    relevant = True
+                if kw_has_service[idx]:
+                    for ph in IG_SERVICE_PHRASES:
+                        if ph in (p.get("title_h1_norm") or "") or any(t in slug_toks for t in ph.split()):
+                            relevant = True; break
+                if relevant:
+                    page_min = 0.25
+                    if f >= page_min:
+                        passed = True
 
             if not passed:
                 if is_page_like:
@@ -1439,11 +1459,13 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
         fits_page.sort(key=lambda x: x[1], reverse=True)
         fits_other.sort(key=lambda x: x[1], reverse=True)
 
+        # If no page fits but post exists, allow a close page candidate (IG ratio 45%, else 50%)
         if not fits_page and fits_other and best_page_probe is not None:
             best_fit = fits_other[0][1]
             page_fit = best_page_probe[1]
+            ratio_needed = 0.45 if IS_IG else 0.50
             page_min = 0.25 if slot=="SEO" else (0.18 if slot=="AIO" else 0.18)
-            if (page_fit >= 0.50 * best_fit) and (page_fit >= (page_min - 0.03)):
+            if (page_fit >= ratio_needed * best_fit) and (page_fit >= (page_min - 0.03)):
                 fits_page = [best_page_probe]
 
         # Mix page and other (page-first bias)
@@ -1547,19 +1569,36 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
             kw_rank[idx] = 0.0
 
     # ---------- Assignment (Pass 1) ----------
-    caps = {"VEO":1, "AIO":1, "SEO":2}
+    # base caps; IG flex to 3 SEO if no AIO/VEO assigned on that URL (total max 4)
+    base_caps = {"VEO":1, "AIO":1, "SEO":2}
     assigned: Dict[str, Dict[str, object]] = {}
     for p in profiles:
         assigned[p["url"]] = {"VEO":None, "AIO":None, "SEO":[]}
 
     mapped = {i:"" for i in df.index}
 
-    def _seo_allowed(stype: str, u: str, fit: float, covered_ratio: float, head: str, title_tokens: Set[str]) -> bool:
+    def _seo_allowed(stype: str, u: str, fit: float, covered_ratio: float, head: str, title_tokens: Set[str], phrase: str, lead_norm: str, title_norm: str) -> bool:
         if _is_post_like(stype, u):
             if (covered_ratio >= 0.60 and fit >= 0.80 and head and (head in title_tokens or head in _slug_tokens(u))):
                 return True
             return False
+        # IG relax case already handled above but keep defensive
+        if IS_IG and not head:
+            if (covered_ratio >= 0.65) and (phrase and (phrase in title_norm or phrase in lead_norm)):
+                return True
         return True
+
+    def _url_total_load(u: str) -> int:
+        seo_count = len(assigned[u]["SEO"]) if isinstance(assigned[u]["SEO"], list) else 0
+        aio_taken = 1 if assigned[u]["AIO"] is not None else 0
+        veo_taken = 1 if assigned[u]["VEO"] is not None else 0
+        return seo_count + aio_taken + veo_taken
+
+    def _seo_cap_for_url(u: str) -> int:
+        cap = base_caps["SEO"]
+        if IS_IG and assigned[u]["AIO"] is None and assigned[u]["VEO"] is None:
+            cap = 3  # IG-only flex
+        return cap
 
     def assign_slot(slot_name: str, alt_min: float):
         ids = [i for i,s in kw_slot.items() if s == slot_name]
@@ -1578,38 +1617,40 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
         else:
             ids.sort(key=lambda i: (-kw_rank.get(i,0.0), i))
 
+        # quick index for title/lead tokens
+        title_norms: Dict[str, Set[str]] = {}
+        lead_norms: Dict[str, Set[str]] = {}
+        for p in profiles:
+            title_norms[p["url"]] = set((p.get("title_h1_norm") or "").split())
+            lead_norms[p["url"]]  = set((p.get("lead_norm") or "").split())
+
         for i in ids:
             choices = kw_candidates.get(i, [])
             if not choices: continue
             kw_text = str(df.loc[i].get(kw_col, "")) if kw_col else str(df.loc[i].get("Keyword",""))
-            head = _head_noun(_ntokens(kw_text))
-            if IS_IG:
-                # include expansions for head presence checks
-                head = _head_noun(_apply_ig_expansions(_ntokens(kw_text)))
+            tokens_norm = _apply_ig_expansions(_ntokens(kw_text)) if IS_IG else _ntokens(kw_text)
+            head = _head_noun(tokens_norm)
+            phrase = " ".join(tokens_norm)
             for j, (u, fit, covered_ratio, stype, a_score) in enumerate(choices):
-                title_tokens = set()
-                for p in profiles:
-                    if p["url"] == u:
-                        title_tokens = set((p.get("title_h1_norm") or "").split())
-                        break
+                # enforce overall per-URL capacity
+                if _url_total_load(u) >= 4:
+                    continue
                 if slot_name == "SEO":
-                    if not _seo_allowed(stype, u, fit, covered_ratio, head, title_tokens):
+                    title_toks = title_norms.get(u, set())
+                    lead_toks  = lead_norms.get(u, set())
+                    if not _seo_allowed(stype, u, fit, covered_ratio, head, title_toks, phrase, " ".join(lead_toks), " ".join(title_toks)):
                         continue
-                    if head and (head not in _slug_tokens(u)) and (head not in title_tokens):
+                    # SEO cap (IG flex if no AIO/VEO yet)
+                    if len(assigned[u]["SEO"]) >= _seo_cap_for_url(u):
                         continue
-                if slot_name in {"VEO","AIO"}:
-                    if assigned[u][slot_name] is None and (j == 0 or fit >= alt_min):
+                    if j > 0 and fit < alt_min:
+                        continue
+                    assigned[u]["SEO"].append(i); mapped[i] = u; break
+                elif slot_name in {"VEO","AIO"}:
+                    if assigned[u][slot_name] is None and (j == 0 or fit >= alt_min) and _url_total_load(u) < 4:
                         assigned[u][slot_name] = i; mapped[i] = u; break
-                else:
-                    if (len(assigned[u]["SEO"]) < caps["SEO"]) and (j == 0 or fit >= alt_min):
-                        assigned[u]["SEO"].append(i); mapped[i] = u; break
 
     assign_slot("VEO", _ALT_FIT_MIN); assign_slot("AIO", _ALT_FIT_MIN); assign_slot("SEO", _ALT_FIT_MIN)
-
-    for u, slots in assigned.items():
-        if isinstance(slots["SEO"], list) and len(slots["SEO"]) > caps["SEO"]:
-            for drop_idx in slots["SEO"][caps["SEO"]:]: mapped[drop_idx] = ""
-            slots["SEO"] = slots["SEO"][:caps["SEO"]]
 
     # ---------- Pass 2 (gentle relax) — IG only ----------
     if IS_IG:
@@ -1619,8 +1660,7 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
 
             def relaxed_candidates(idx: int) -> List[Tuple[str,float,float,str,float]]:
                 raw_kw = str(df.loc[idx].get(kw_col, "")) if kw_col else str(df.loc[idx].get("Keyword",""))
-                tokens_norm = _ntokens(raw_kw)
-                tokens_norm = _apply_ig_expansions(tokens_norm)
+                tokens_norm = _apply_ig_expansions(_ntokens(raw_kw))
                 slot = kw_slot[idx]
                 head = _head_noun(tokens_norm)
 
@@ -1665,11 +1705,11 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
                     elif phrase_str and (title_raw.startswith(phrase_str + " ") or title_raw == phrase_str):
                         bonus += 0.08
 
-                    # IG-only nudges in relax pass:
+                    # IG-only relax nudges:
                     if kw_is_careers[idx] and _is_careers_url(p["url"], nav_anchor_map):
                         bonus += 0.16
                     if kw_has_benefit[idx]:
-                        if any(t in title_tokens or t in slug_toks for t in {"ssi","waiver","medicaid","504","evaluation","eligibility","benefit","benefits","assist"}):
+                        if any(t in title_tokens or t in slug_toks for t in {"ssi","waiver","medicaid","504","evaluation","eligibility","benefit","benefits","assist","cdcs","cadi","hcbs"}):
                             bonus += 0.05
                     svc_hits = 0
                     for ph in IG_SERVICE_PHRASES:
@@ -1683,8 +1723,13 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
 
                     passed = True
                     if slot == "SEO":
-                        if head and head not in title_tokens and head not in slug_toks and f < 0.70:
-                            passed = False
+                        title_norm = (p.get("title_h1_norm") or "")
+                        lead_norm = (p.get("lead_norm") or "")
+                        seo_head_ok = (head and (head in title_tokens or head in slug_toks))
+                        if not seo_head_ok:
+                            phrase_ok = (phrase_str and (phrase_str in title_norm or phrase_str in lead_norm))
+                            if not (covered_ratio >= 0.65 and phrase_ok):
+                                passed = False
                         if (lead_cov < 0.16) and (covered_ratio < 0.45):
                             passed = False
                     elif slot == "AIO":
@@ -1724,26 +1769,106 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
                     cands = relaxed_candidates(i)
                     if not cands: continue
                     kw_text = str(df.loc[i].get(kw_col, "")) if kw_col else str(df.loc[i].get("Keyword",""))
-                    head = _head_noun(_apply_ig_expansions(_ntokens(kw_text)))
+                    tokens_norm = _apply_ig_expansions(_ntokens(kw_text))
+                    head = _head_noun(tokens_norm)
+                    phrase = " ".join(tokens_norm)
                     for j, (u, fit, covered_ratio, stype, a_score) in enumerate(cands):
+                        if _url_total_load(u) >= 4:
+                            continue
                         title_tokens = set()
                         p = prof_by_url.get(u)
+                        title_norm = ""
+                        lead_norm = ""
                         if p:
                             title_tokens = set((p.get("title_h1_norm") or "").split())
+                            title_norm = p.get("title_h1_norm") or ""
+                            lead_norm  = p.get("lead_norm") or ""
                         if slot_name == "SEO":
                             if _is_post_like(stype, u):
                                 if not (covered_ratio >= 0.55 and fit >= 0.75 and head and (head in title_tokens or head in _slug_tokens(u))):
                                     continue
-                        if slot_name in {"VEO","AIO"}:
-                            if assigned[u]["AIO" if slot_name=="AIO" else "VEO"] is None and (j == 0 or fit >= _ALT_FIT_MIN_PASS2):
-                                assigned[u][slot_name] = i; mapped[i] = u; break
+                            # IG relax: allow high coverage + phrase in title/lead when head missing
+                            head_ok = (head and (head in title_tokens or head in _slug_tokens(u)))
+                            if not head_ok:
+                                phrase_ok = (phrase and (phrase in title_norm or phrase in lead_norm))
+                                if not (covered_ratio >= 0.65 and phrase_ok):
+                                    continue
+                            # SEO cap for URL (IG flex)
+                            if len(assigned[u]["SEO"]) >= _seo_cap_for_url(u):
+                                continue
+                            if j > 0 and fit < _ALT_FIT_MIN_PASS2:
+                                continue
+                            assigned[u]["SEO"].append(i); mapped[i] = u; break
                         else:
-                            if len(assigned[u]["SEO"]) < caps["SEO"] and (j == 0 or fit >= _ALT_FIT_MIN_PASS2):
-                                assigned[u]["SEO"].append(i); mapped[i] = u; break
+                            if assigned[u][slot_name] is None and (j == 0 or fit >= _ALT_FIT_MIN_PASS2):
+                                assigned[u][slot_name] = i; mapped[i] = u; break
 
             assign_slot_pass2("VEO")
             assign_slot_pass2("AIO")
             assign_slot_pass2("SEO")
+
+    # ---------- IG-only Under-used Page Backfill (capacity-aware) ----------
+    if IS_IG:
+        remaining = [i for i in df.index if not mapped[i]]
+        if remaining:
+            # Build quick lookup of candidates per kw by URL
+            cands_by_kw = {i: kw_candidates.get(i, []) for i in remaining}
+            # Page list ordered by desirability: pages first, shallow paths first
+            def _path_depth(u: str) -> int:
+                return len([seg for seg in urlparse(u).path.split("/") if seg])
+            page_urls = sorted(
+                list(assigned.keys()),
+                key=lambda u: (
+                    0 if src_by_key.get(_url_key(u), "other") == "page" else 1,
+                    _path_depth(u)
+                )
+            )
+
+            # Helper: check if kw→url can be placed respecting slot rules and minima
+            def can_place(i: int, u: str, fit: float, stype: str, covered_ratio: float, slot_name: str) -> bool:
+                if _url_total_load(u) >= 4:
+                    return False
+                if slot_name == "SEO":
+                    # respect IG SEO cap flex
+                    if len(assigned[u]["SEO"]) >= _seo_cap_for_url(u):
+                        return False
+                    # enforce SEO minima similar to pass2
+                    if _is_post_like(stype, u):
+                        if covered_ratio < 0.55 or fit < 0.75:
+                            return False
+                else:
+                    # AIO/VEO single slot each
+                    if assigned[u][slot_name] is not None:
+                        return False
+                return True
+
+            # Try to place remaining in capacity gaps
+            for u in page_urls:
+                if not remaining:
+                    break
+                # compute available room on this URL
+                while _url_total_load(u) < 4 and remaining:
+                    # select best kw among remaining that has u among candidates and clears rules
+                    best_choice = None  # (score, i, fit, covered_ratio, stype, slot)
+                    for i in list(remaining):
+                        slot_name = kw_slot.get(i, "SEO")
+                        for (cu, fit, cr, st, a) in cands_by_kw.get(i, []):
+                            if cu != u:
+                                continue
+                            if can_place(i, u, fit, st, cr, slot_name):
+                                # prioritize by kw_rank, then fit
+                                rank = kw_rank.get(i, 0.0)
+                                score = (rank, fit)
+                                if (best_choice is None) or (score > best_choice[0]):
+                                    best_choice = (score, i, fit, cr, st, slot_name)
+                    if best_choice is None:
+                        break
+                    _, i, fit, cr, st, slot_name = best_choice
+                    if slot_name == "SEO":
+                        assigned[u]["SEO"].append(i); mapped[i] = u
+                    else:
+                        assigned[u][slot_name] = i; mapped[i] = u
+                    remaining.remove(i)
 
     return pd.Series([mapped[i] for i in df.index], index=df.index, dtype="string")
 
@@ -1839,7 +1964,7 @@ if uploaded is not None:
 
         eligible_only = IS_IG or IS_COMP
         sig_base = (
-            f"site-map-v15-IGonly|{_normalize_base(base_site_url.strip()).lower()}|"
+            f"site-map-v16-IGrecall|{_normalize_base(base_site_url.strip()).lower()}|"
             f"{scoring_mode}|{kw_col}|{vol_col}|{kd_col}|{len(export_df)}|subdomains={include_subdomains}|eligible_only={int(eligible_only)}"
         )
         curr_signature = hashlib.md5((sig_base + "\n" + sig_csv).encode("utf-8")).hexdigest()
