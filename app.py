@@ -1425,8 +1425,9 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
         kd_norm = max(0.0, 1.0 - kd_val/100.0)
         vol_norm = math.log(1 + max(0.0, vol_val)) / max_log
 
-        lhf_opportunity = vol_norm * kd_norm
+        # Note: ranking score (kw_rank) still respects per-strategy weights
         if scoring_mode == "Low Hanging Fruit":
+            lhf_opportunity = vol_norm * kd_norm
             kw_rank[idx] = 0.30*fit_norm + 0.30*kd_norm + 0.20*vol_norm + 0.20*lhf_opportunity
         elif scoring_mode == "In The Game":
             kw_rank[idx] = 0.35*fit_norm + 0.30*kd_norm + 0.35*vol_norm
@@ -1441,7 +1442,7 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
         any_ok = False
         for (u, f, cr, st, a) in fits:
             is_post = _is_post_like(st, u)
-            if f >= _class_min_for_type(slot, is_post):
+            if f >= _class_min_for_type(kw_slot[idx], is_post):
                 any_ok = True
                 break
         if not any_ok:
@@ -1465,20 +1466,21 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
 
     def assign_slot(slot_name: str):
         ids = [i for i,s in kw_slot.items() if s == slot_name]
-        if scoring_mode == "Low Hanging Fruit":
-            vols_local = pd.to_numeric(df[vol_col], errors="coerce").fillna(0).clip(lower=0)
-            max_log_local = float((vols_local + 1).apply(lambda x: math.log(1 + x)).max()) or 1.0
-            opp = {}
-            for i in ids:
-                row = df.loc[i]
-                kd_val = float(pd.to_numeric(row.get(kd_col,0), errors="coerce") or 0)
-                vol_val = float(pd.to_numeric(row.get(vol_col,0), errors="coerce") or 0)
-                kd_norm = max(0.0, 1.0 - kd_val/100.0)
-                vol_norm = math.log(1 + max(0.0, vol_val)) / max_log_local
-                opp[i] = vol_norm * kd_norm
-            ids.sort(key=lambda i: (-opp.get(i,0.0), -kw_rank.get(i,0.0), i))
-        else:
-            ids.sort(key=lambda i: (-kw_rank.get(i,0.0), i))
+
+        # --- Unified LHF-style opportunity ordering across ALL strategies ---
+        vols_local = pd.to_numeric(df[vol_col], errors="coerce").fillna(0).clip(lower=0)
+        max_log_local = float((vols_local + 1).apply(lambda x: math.log(1 + x)).max()) or 1.0
+        opp = {}
+        for i in ids:
+            row = df.loc[i]
+            kd_val = float(pd.to_numeric(row.get(kd_col,0), errors="coerce") or 0)
+            vol_val = float(pd.to_numeric(row.get(vol_col,0), errors="coerce") or 0)
+            kd_norm = max(0.0, 1.0 - kd_val/100.0)
+            vol_norm = math.log(1 + max(0.0, vol_val)) / max_log_local
+            opp[i] = vol_norm * kd_norm
+
+        # Sort primarily by opportunity (LHF style), then by kw_rank (strategy weights), then by index for stability
+        ids.sort(key=lambda i: (-opp.get(i,0.0), -kw_rank.get(i,0.0), i))
 
         for i in ids:
             choices = kw_candidates.get(i, [])
