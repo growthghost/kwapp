@@ -276,15 +276,16 @@ strategy_descriptions = {
 # ---------- Strategy ----------
 scoring_mode = st.selectbox("Choose Scoring Strategy", ["Low Hanging Fruit","In The Game","Competitive"])
 
-# --- Strategy-specific reset of mapping state ---
+# --- Quiet, hard reset on strategy change (no banner, no UI output) ---
 if "last_strategy" not in st.session_state:
     st.session_state["last_strategy"] = scoring_mode
 if st.session_state.get("last_strategy") != scoring_mode:
-    # Clear mapping-related state so each strategy gets a truly fresh run
     st.session_state["last_strategy"] = scoring_mode
+    # Clear all mapping-related state so URLs/keywords are fully reusable per run
     for k in ["map_cache","map_result","map_signature","map_ready","mapping_running"]:
         st.session_state.pop(k, None)
 
+# Strategy-specific thresholds (LHF untouched)
 if scoring_mode == "Low Hanging Fruit":
     MIN_VALID_VOLUME = 10
     KD_BUCKETS = [(0,15,6),(16,20,5),(21,25,4),(26,50,3),(51,75,2),(76,100,1)]
@@ -494,12 +495,12 @@ def _ntokens(text: str) -> List[str]:
     text = _normalize_phrases(text or "")
     return [_norm_token(t) for t in _tokenize(text)]
 
-# ------------ HEAD-NOUN BLACKLIST (expanded conservatively) ------------
+# ------------ HEAD-NOUN BLACKLIST (conservative) ------------
 HEAD_BLACKLIST = {
     "near","nearme","contact","call","email","address","directions","phone","hours",
     "best","top","vs","review","pricing","cost","cheap","free","template","example",
     "what","how","who","where","why","when","which",
-    # New generic terms to avoid false heads on core pages
+    # generic terms that cause false heads on core pages
     "service","services","solution","solutions","offering","offerings"
 }
 HEAD_STOP = STOPWORDS | HEAD_BLACKLIST
@@ -1226,14 +1227,13 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
     kw_concepts: Dict[int, Set[str]] = {}
 
     for idx, row in df.iterrows():
-        # ---------------- Eligibility enforcement (skip mapping if not eligible) ----------------
+        # Eligibility enforcement
         vol_val_raw = row.get(vol_col, 0)
         vol_val = float(pd.to_numeric(vol_val_raw, errors="coerce") or 0)
         if vol_val < MIN_VALID_VOLUME:
             kw_candidates[idx] = []
             kw_rank[idx] = 0.0
             continue
-        # ----------------------------------------------------------------------------------------
 
         raw_kw = str(row.get(kw_col, "")) if kw_col else str(row.get("Keyword",""))
         tokens_norm = _ntokens(raw_kw)
@@ -1460,8 +1460,8 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
             kw_candidates[idx] = []
             kw_rank[idx] = 0.0
 
-    # ---------- Assignment (no backfill; caps enforced) ----------
-    caps = {"VEO":1, "AIO":1, "SEO":2}
+    # ---------- Assignment (per-page caps only) ----------
+    caps = {"VEO":1, "AIO":1, "SEO":2}  # per URL only
     assigned: Dict[str, Dict[str, object]] = {}
     for p in profiles:
         assigned[p["url"]] = {"VEO":None, "AIO":None, "SEO":[]}
@@ -1477,7 +1477,6 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
 
     def assign_slot(slot_name: str):
         ids = [i for i,s in kw_slot.items() if s == slot_name]
-        # unified opportunity ordering across strategies
         vols_local = pd.to_numeric(df[vol_col], errors="coerce").fillna(0).clip(lower=0)
         max_log_local = float((vols_local + 1).apply(lambda x: math.log(1 + x)).max()) or 1.0
         opp = {}
@@ -1539,7 +1538,7 @@ with st.form("single"):
 st.markdown("---")
 st.subheader("Bulk Scoring (CSV Upload)")
 
-# Mapping controls (Include subdomains removed from UI; dev default = True)
+# Mapping controls
 base_site_url = st.text_input("Base site URL (for URL mapping)", placeholder="https://example.com")
 include_subdomains = True
 use_sitemap_first = True  # always use sitemap first
@@ -1614,7 +1613,7 @@ if uploaded is not None:
         sig_base = f"site-map-v12-synonyms-gated|{_normalize_base(base_site_url.strip()).lower()}|{scoring_mode}|{kw_col}|{vol_col}|{kd_col}|{len(export_df)}|subdomains={include_subdomains}"
         curr_signature = hashlib.md5((sig_base + "\n" + sig_csv).encode("utf-8")).hexdigest()
 
-        # Invalidate previous map if inputs changed
+        # Invalidate previous map if inputs changed (quiet)
         if st.session_state.get("map_signature") != curr_signature:
             st.session_state["map_ready"] = False
 
@@ -1650,10 +1649,10 @@ if uploaded is not None:
             loader.empty()
             st.session_state["mapping_running"] = False
 
-        # ---------- Build CSV for download (enabled only when mapped & signature matches) ----------
+        # ---------- Build CSV for download ----------
         if st.session_state.get("map_ready") and st.session_state.get("map_signature") == curr_signature:
             export_df["Map URL"] = st.session_state["map_result"]
-            # Hard stop: do not show a URL where row is not eligible
+            # hard stop: no URL if not eligible
             export_df.loc[export_df["Eligible"] != "Yes", "Map URL"] = ""
             can_download = True
         else:
