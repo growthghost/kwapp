@@ -276,16 +276,15 @@ strategy_descriptions = {
 # ---------- Strategy ----------
 scoring_mode = st.selectbox("Choose Scoring Strategy", ["Low Hanging Fruit","In The Game","Competitive"])
 
-# --- Quiet, hard reset on strategy change (no banner, no UI output) ---
+# --- Strategy-specific reset of mapping state ---
 if "last_strategy" not in st.session_state:
     st.session_state["last_strategy"] = scoring_mode
 if st.session_state.get("last_strategy") != scoring_mode:
+    # Clear mapping-related state so each strategy gets a truly fresh run
     st.session_state["last_strategy"] = scoring_mode
-    # Clear all mapping-related state so URLs/keywords are fully reusable per run
     for k in ["map_cache","map_result","map_signature","map_ready","mapping_running"]:
         st.session_state.pop(k, None)
 
-# Strategy-specific thresholds (LHF untouched)
 if scoring_mode == "Low Hanging Fruit":
     MIN_VALID_VOLUME = 10
     KD_BUCKETS = [(0,15,6),(16,20,5),(21,25,4),(26,50,3),(51,75,2),(76,100,1)]
@@ -308,7 +307,7 @@ st.markdown(
 # ---------- Category Tagging ----------
 AIO_PAT = re.compile(r"\b(what is|what's|define|definition|how to|step[- ]?by[- ]?step|tutorial|guide|is)\b", re.I)
 AEO_PAT = re.compile(r"^\s*(who|what|when|where|why|how|which|can|should)\b", re.I)
-VEO_PAT = re.compile(r"\b(near me|open now|closest|call now|directions|ok google|alexa|siri|hey google)\b", re.I)
+VEO_PAT = re.compile(r"\b(near me|open now|closest|call now|directions|ok google|alexa|siri|hey google)\b", re.I)  # Voice Engine Optimization
 GEO_PAT = re.compile(r"\b(how to|best way to|steps? to|examples? of|checklist|framework|template)\b", re.I)
 SXO_PAT = re.compile(r"\b(best|top|compare|comparison|vs\.?|review|pricing|cost|cheap|free download|template|examples?)\b", re.I)
 LLM_PAT = re.compile(r"\b(prompt|prompting|prompt[- ]?engineering|chatgpt|gpt[- ]?\d|llm|rag|embedding|vector|few[- ]?shot|zero[- ]?shot)\b", re.I)
@@ -495,12 +494,10 @@ def _ntokens(text: str) -> List[str]:
     text = _normalize_phrases(text or "")
     return [_norm_token(t) for t in _tokenize(text)]
 
-# ------------ HEAD-NOUN BLACKLIST (conservative) ------------
 HEAD_BLACKLIST = {
     "near","nearme","contact","call","email","address","directions","phone","hours",
     "best","top","vs","review","pricing","cost","cheap","free","template","example",
     "what","how","who","where","why","when","which",
-    # generic terms that cause false heads on core pages
     "service","services","solution","solutions","offering","offerings"
 }
 HEAD_STOP = STOPWORDS | HEAD_BLACKLIST
@@ -592,6 +589,19 @@ def _slug_tokens(u: str) -> Set[str]:
                 toks.add(tt)
     return toks
 
+# ---- Core utility pages guard ----
+CORE_UTILITY_SEGMENTS = {
+    "admissions","apply","donate","give","about","privacy","terms",
+    "login","register","cart","checkout","events","calendar"
+}
+
+def _is_core_utility(url: str) -> bool:
+    path = urlparse(url).path.lower().strip("/")
+    if not path:
+        return False
+    first = path.split("/")[0]
+    return first in CORE_UTILITY_SEGMENTS
+
 # ---------- Robots & sitemaps ----------
 @contextlib.contextmanager
 def _session():
@@ -653,7 +663,7 @@ def _parse_sitemap_xml_entries(xml_text: str) -> List[Tuple[str, Optional[float]
         entries.append((loc, pr, lastmod))
     if not entries:
         for lm in re.finditer(r"<loc>\s*([^<]+)\s*</loc>", xml_text, re.I):
-            entries.append((lm.group(1).strip(), None, None))
+            entries.append((lm.group(1)).strip(), None, None)
     return entries
 
 def _sm_classify(u: str) -> str:
@@ -1141,6 +1151,7 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
     if not profiles:
         return pd.Series([""]*len(df), index=df.index, dtype="string")
 
+    profile_by_url = {p["url"]: p for p in profiles}
     nav_anchor_map, all_nav_tokens = cached_nav(base_url)
 
     domain_toks = _domain_tokens(base_url)
@@ -1195,11 +1206,8 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
     vols = pd.to_numeric(df[vol_col], errors="coerce").fillna(0).clip(lower=0)
     max_log = float((vols + 1).apply(lambda x: math.log(1 + x)).max()) or 1.0
 
-    def strat_weights():
-        if scoring_mode == "Low Hanging Fruit": return 0.30, 0.40, 0.30
-        elif scoring_mode == "In The Game":     return 0.30, 0.35, 0.35
-        else:                                    return 0.30, 0.20, 0.50
-    W_FIT, W_KD, W_VOL = strat_weights()
+    # Use LHF mapping weights for non-LHF strategies; LHF untouched
+    W_FIT, W_KD, W_VOL = 0.30, 0.40, 0.30
 
     def _has_core_token(tokens: List[str]) -> bool:
         for t in tokens:
@@ -1217,6 +1225,12 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
         cnt = sum(1 for t in tokens if very_common.get(t, False))
         return -0.05 * cnt
 
+    def _anchored(u: str, head: str, phrase: str) -> bool:
+        p = profile_by_url.get(u)
+        if not p: return False
+        title_tokens = set((p.get("title_h1_norm") or "").split())
+        return (head and (head in title_tokens or head in _slug_tokens(u))) or (phrase and phrase in (p.get("title_h1_norm") or ""))
+
     TOP_K = 5
     kw_candidates: Dict[int, List[Tuple[str,float,float,str,float]]] = {}
     kw_slot: Dict[int,str] = {}
@@ -1227,7 +1241,7 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
     kw_concepts: Dict[int, Set[str]] = {}
 
     for idx, row in df.iterrows():
-        # Eligibility enforcement
+        # Eligibility enforcement: skip mapping when below strategy volume threshold
         vol_val_raw = row.get(vol_col, 0)
         vol_val = float(pd.to_numeric(vol_val_raw, errors="coerce") or 0)
         if vol_val < MIN_VALID_VOLUME:
@@ -1264,6 +1278,7 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
             base_fit = _fit_score(raw_kw, p)
             if base_fit <= 0:
                 continue
+
             stype = (
                 "other"
                 if p.get("url") is None
@@ -1292,8 +1307,8 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
                 bonus += _post_heavy_penalty(tokens_norm)
 
             slug_toks = _slug_tokens(p["url"])
-            if head and (head in slug_toks or head in title_tokens): bonus += 0.12
             phrase_str = " ".join(tokens_norm)
+            if head and (head in slug_toks or head in title_tokens): bonus += 0.12
             if head and (title_raw.startswith(head + " ") or title_raw == head):
                 bonus += 0.12
             elif phrase_str and (title_raw.startswith(phrase_str + " ") or title_raw == phrase_str):
@@ -1304,7 +1319,7 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
             if kw_is_veo[idx] and v_intent:
                 concept_bonus += CONCEPT_BIAS["veo"]
             if kw_is_aio[idx] and a_score >= 0.25:
-                concept_bonus += CONCEPT_BIAS["aio"]
+                concept_bonus += CONCEPT_BONUS_AIO if 'CONCEPT_BONUS_AIO' in globals() else CONCEPT_BIAS["aio"]
             page_ev = set(title_tokens) | slug_toks | nav_anchor_map.get(_url_key(p["url"]), set())
             for c in kw_concepts[idx]:
                 if c in CONCEPT_BIAS:
@@ -1316,14 +1331,13 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
             bonus += _commonness_penalty(tokens_norm)
             f = max(0.0, min(2.0, base_fit + bonus + concept_bonus))
 
+            # --- Strict VEO gating ---
             if slot == "VEO" and not v_intent:
-                f = max(0.0, f - 0.20)
-                if f < 0.60:
-                    if is_page_like:
-                        if (best_page_probe is None) or (f > best_page_probe[1]):
-                            best_page_probe = (p["url"], f, covered_ratio, stype, a_score)
-                    continue
+                if is_page_like and ((best_page_probe is None) or (f > (best_page_probe[1] if best_page_probe else 0))):
+                    best_page_probe = (p["url"], f, covered_ratio, stype, a_score)
+                continue
 
+            # Core acceptance tests
             passed = True
             if slot == "SEO":
                 if (lead_cov < 0.18) and (covered_ratio < 0.50):
@@ -1335,9 +1349,27 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
                 if lead_cov < 0.10 and v_intent and covered_ratio < 0.33:
                     passed = False
 
+            title_tokens = set((p.get("title_h1_norm") or "").split())
+            anchored_head = head and (head in title_tokens or head in slug_toks)
+            anchored_phrase = phrase_str and (phrase_str in (p.get("title_h1_norm") or ""))
+            anchored = bool(anchored_head or anchored_phrase)
+
+            # Extra AIO anchoring (or strong AIO w/ phrase)
+            if passed and slot == "AIO":
+                if not anchored:
+                    strong_aio = (a_score >= 0.35) and (phrase_str and ((phrase_str in (p.get("title_h1_norm") or "")) or (phrase_str in (p.get("lead_norm") or ""))))
+                    if not strong_aio:
+                        passed = False
+
+            # Core-page guard for generic utility pages (unless anchored)
+            if passed and (slot in {"SEO","AIO"}):
+                if _is_core_utility(p["url"]) and not anchored:
+                    passed = False
+
+            # Existing SEO head guard (kept)
             if passed and slot == "SEO" and head:
                 if (head not in title_tokens) and (head not in slug_toks):
-                    if not phrase_str or phrase_str not in (p.get("title_h1_norm") or "") or f < 0.70:
+                    if not anchored_phrase or f < 0.70:
                         passed = False
 
             if not passed:
@@ -1364,19 +1396,23 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
         fits: List[Tuple[str,float,float,str,float]] = []
         if slot == "AIO" and fits_page and fits_other:
             best_page = fits_page[0][1]
-            aio_posts = [t for t in fits_other if _is_post_like(t[3], t[0]) and t[4] >= 0.35]
+            phrase_str = " ".join(tokens_norm)
+            aio_posts = []
+            for (u,f,cr,st,a) in fits_other:
+                if _is_post_like(st, u) and a >= 0.30 and _anchored(u, head, phrase_str):
+                    aio_posts.append((u,f,cr,st,a))
             if aio_posts:
                 aio_posts.sort(key=lambda x: x[1], reverse=True)
                 best_post = aio_posts[0][1]
-                if best_post >= (best_page + 0.08):
+                if best_post >= (best_page - 0.03):
                     fits.extend(aio_posts[:5])
                     if len(fits) < 5:
                         fits.extend(fits_page[:5 - len(fits)])
                 else:
-                    if best_page >= (best_post - 0.10):
-                        fits.extend(fits_page[:5])
+                    if best_post >= (best_page + 0.08):
+                        fits.extend(aio_posts[:5])
                         if len(fits) < 5:
-                            fits.extend(fits_other[:5 - len(fits)])
+                            fits.extend(fits_page[:5 - len(fits)])
                     else:
                         fits.extend(fits_page[:5])
                         if len(fits) < 5:
@@ -1440,10 +1476,8 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
         if scoring_mode == "Low Hanging Fruit":
             lhf_opportunity = vol_norm * kd_norm
             kw_rank[idx] = 0.30*fit_norm + 0.30*kd_norm + 0.20*vol_norm + 0.20*lhf_opportunity
-        elif scoring_mode == "In The Game":
-            kw_rank[idx] = 0.35*fit_norm + 0.30*kd_norm + 0.35*vol_norm
         else:
-            kw_rank[idx] = 0.40*fit_norm + 0.20*kd_norm + 0.40*vol_norm
+            kw_rank[idx] = W_FIT*fit_norm + W_KD*kd_norm + W_VOL*vol_norm
 
         def _class_min_for_type(slot_name: str, is_post: bool) -> float:
             if slot_name == "SEO": return 0.55 if is_post else 0.25
@@ -1461,7 +1495,7 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
             kw_rank[idx] = 0.0
 
     # ---------- Assignment (per-page caps only) ----------
-    caps = {"VEO":1, "AIO":1, "SEO":2}  # per URL only
+    caps = {"VEO":1, "AIO":1, "SEO":2}
     assigned: Dict[str, Dict[str, object]] = {}
     for p in profiles:
         assigned[p["url"]] = {"VEO":None, "AIO":None, "SEO":[]}
@@ -1538,7 +1572,7 @@ with st.form("single"):
 st.markdown("---")
 st.subheader("Bulk Scoring (CSV Upload)")
 
-# Mapping controls
+# Mapping controls (Include subdomains removed from UI; dev default = True)
 base_site_url = st.text_input("Base site URL (for URL mapping)", placeholder="https://example.com")
 include_subdomains = True
 use_sitemap_first = True  # always use sitemap first
@@ -1596,7 +1630,8 @@ if uploaded is not None:
 
         # ---------- Build export_df (no mapping yet) ----------
         filename_base = f"outrankiq_{scoring_mode.lower().replace(' ', '_')}_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
-        base_cols = ([kw_col] if kw_col else []) + [vol_col, kd_col, "Score","Tier","Eligible","Reason","Category"]
+        # Hide "Reason" from user export
+        base_cols = ([kw_col] if kw_col else []) + [vol_col, kd_col, "Score","Tier","Eligible","Category"]
         export_df = scored[base_cols].copy()
         export_df["Strategy"] = scoring_mode
 
@@ -1613,7 +1648,7 @@ if uploaded is not None:
         sig_base = f"site-map-v12-synonyms-gated|{_normalize_base(base_site_url.strip()).lower()}|{scoring_mode}|{kw_col}|{vol_col}|{kd_col}|{len(export_df)}|subdomains={include_subdomains}"
         curr_signature = hashlib.md5((sig_base + "\n" + sig_csv).encode("utf-8")).hexdigest()
 
-        # Invalidate previous map if inputs changed (quiet)
+        # Invalidate previous map if inputs changed
         if st.session_state.get("map_signature") != curr_signature:
             st.session_state["map_ready"] = False
 
@@ -1649,10 +1684,11 @@ if uploaded is not None:
             loader.empty()
             st.session_state["mapping_running"] = False
 
-        # ---------- Build CSV for download ----------
+        # ---------- Build CSV for download (enabled only when mapped & signature matches) ----------
+        # If we have a fresh map result, attach it; otherwise leave Map URL blank
         if st.session_state.get("map_ready") and st.session_state.get("map_signature") == curr_signature:
             export_df["Map URL"] = st.session_state["map_result"]
-            # hard stop: no URL if not eligible
+            # hard stop: no mapping shown for ineligible rows
             export_df.loc[export_df["Eligible"] != "Yes", "Map URL"] = ""
             can_download = True
         else:
