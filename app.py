@@ -118,12 +118,12 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--ink) !important; }}
   outline: none !important;
 }}
 
-/* --- FORCE BLUE BASE BORDERS (requested) --- */
+/* --- FORCE BLUE BASE BORDERS --- */
 .stSelectbox div[data-baseweb="select"] > div {{
-  border: 2px solid var(--ink) !important;        /* dropdown default border = BLUE */
+  border: 2px solid var(--ink) !important;
 }}
 .stNumberInput input {{
-  border: 2px solid var(--ink) !important;        /* A/B boxes default border = BLUE */
+  border: 2px solid var(--ink) !important;
 }}
 
 /* Number steppers */
@@ -146,86 +146,13 @@ div[data-testid="stNumberInput"] > label,
 div[data-testid="stTextInput"] > label,
 div[data-testid="stCheckbox"] > label {{ color: var(--ink) !important; font-weight: 700; }}
 
-/* Expander header ("See example") — blue text + blue arrow */
+/* Expander header */
 [data-testid="stExpander"] > details > summary {{
   background: #ffffff !important;
   border: 1px solid rgba(36,47,64,0.12) !important;
   border-radius: 10px !important;
   color: var(--ink) !important;
   font-weight: 700;
-}}
-[data-testid="stExpander"] > details > summary::-webkit-details-marker {{ color: var(--ink) !important; }}
-[data-testid="stExpander"] > details > summary::marker {{ color: var(--ink) !important; }}
-
-/* Expander body */
-[data-testid="stExpander"] .st-emotion-cache-1h9usn1,
-[data-testid="stExpander"] > details > div {{
-  background: #ffffff !important;
-}}
-
-/* Uploader + Browse button (BLUE -> WHITE on hover) */
-[data-testid="stFileUploaderDropzone"] {{ background: rgba(255,255,255,0.98); border: 2px dashed var(--accent); }}
-[data-testid="stFileUploader"] * {{ color: var(--ink) !important; }}
-[data-testid="stFileUploaderDropzone"] button,
-[data-testid="stFileUploaderDropzone"] label,
-[data-testid="stFileUploaderDropzone"] [role="button"] {{
-  background-color: var(--ink) !important;
-  color: #ffffff !important;
-  border: 2px solid var(--ink) !important;
-  border-radius: 8px !important;
-  padding: 2px 10px !important;
-  font-weight: 700 !important;
-  transition: background-color .15s ease, color .15s ease, border-color .15s ease, box-shadow .15s ease;
-}}
-[data-testid="stFileUploaderDropzone"] button:hover,
-[data-testid="stFileUploaderDropzone"] label:hover,
-[data-testid="stFileUploaderDropzone"] [role="button"]:hover {{
-  background-color: var(--light) !important; 
-  color: var(--ink) !important;             
-  border-color: var(--ink) !important;      
-  box-shadow: 0 0 0 3px rgba(36,47,64,.15) !important;
-}}
-
-/* Make Streamlit spinner text blue */
-[data-testid="stSpinner"] * {{ color: var(--ink) !important; }}
-
-/* Custom loader (blue circular spinner) */
-.oiq-loader {{ display:flex; align-items:center; gap:12px; }}
-.oiq-spinner {{
-  width:22px; height:22px; border:3px solid rgba(36,47,64,0.25);
-  border-top-color: var(--ink);
-  border-radius:50%; animation: oiq-spin 1s linear infinite;
-}}
-@keyframes oiq-spin {{ to {{ transform: rotate(360deg); }} }}
-.oiq-loader-text {{ color: var(--ink); font-weight:700; }}
-
-/* Tables */
-.stDataFrame, .stDataFrame *, .stTable, .stTable * {{ color: var(--ink) !important; }}
-
-/* Action buttons */
-.stButton > button, .stDownloadButton > button {{
-  background-color: var(--accent) !important; 
-  color: var(--ink) !important;
-  border: 2px solid rgba(36,47,64,0.08) !important; 
-  border-radius: 10px !important; 
-  font-weight: 700 !important;
-  box-shadow: 0 2px 0 rgba(0,0,0,.12);
-  transition: background-color .15s ease, color .15s ease, border-color .15s ease, box-shadow .15s ease;
-}}
-/* Hover/focus/active = transparent, BLUE text, BLUE outline */
-.stButton > button:hover, .stDownloadButton > button:hover,
-.stButton > button:focus-visible, .stDownloadButton > button:focus-visible,
-.stButton > button:active, .stDownloadButton > button:active {{
-  background-color: transparent !important; 
-  color: var(--ink) !important; 
-  border-color: var(--ink) !important;
-  box-shadow: 0 0 0 3px rgba(36,47,64,.15) !important;
-}}
-
-/* Strategy banner */
-.info-banner {{
-  background: linear-gradient(90deg, var(--ink) 0%, var(--accent) 100%);
-  padding: 16px; border-radius: 12px; color: var(--light);
 }}
 
 /* Footer */
@@ -268,20 +195,19 @@ def find_column(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
 LABEL_MAP = {6:"Elite",5:"Excellent",4:"Good",3:"Fair",2:"Low",1:"Very Low",0:"Not rated"}
 COLOR_MAP = {6:"#2ecc71",5:"#a3e635",4:"#facc15",3:"#fb923c",2:"#f87171",1:"#ef4444",0:"#9ca3af"}
 strategy_descriptions = {
-    "Low Hanging Fruit":"Keywords that can be used to rank quickly with minimal effort. Ideal for new content or low-authority sites. Try targeting long-tail keywords, create quick-win content, and build a few internal links.",
-    "In The Game":"Moderate difficulty keywords that are within reach for growing sites. Focus on optimizing content, earning backlinks, and matching search intent to climb the ranks.",
-    "Competitive":"High-volume, high-difficulty keywords dominated by authoritative domains. Requires strong content, domain authority, and strategic SEO to compete. Great for long-term growth.",
+    "Low Hanging Fruit":"Keywords that can be used to rank quickly with minimal effort. Ideal for new content or low-authority sites.",
+    "In The Game":"Moderate difficulty keywords within reach for growing sites. Optimize content, earn backlinks, and match search intent.",
+    "Competitive":"High-volume, high-difficulty keywords dominated by authoritative domains. Long-term growth plays.",
 }
 
 # ---------- Strategy ----------
 scoring_mode = st.selectbox("Choose Scoring Strategy", ["Low Hanging Fruit","In The Game","Competitive"])
 
-# --- Quiet, hard reset on strategy change (no banner, no UI output) ---
+# Quiet reset on strategy change
 if "last_strategy" not in st.session_state:
     st.session_state["last_strategy"] = scoring_mode
 if st.session_state.get("last_strategy") != scoring_mode:
     st.session_state["last_strategy"] = scoring_mode
-    # Clear all mapping-related state so URLs/keywords are fully reusable per run
     for k in ["map_cache","map_result","map_signature","map_ready","mapping_running"]:
         st.session_state.pop(k, None)
 
@@ -500,7 +426,6 @@ HEAD_BLACKLIST = {
     "near","nearme","contact","call","email","address","directions","phone","hours",
     "best","top","vs","review","pricing","cost","cheap","free","template","example",
     "what","how","who","where","why","when","which",
-    # generic terms that cause false heads on core pages
     "service","services","solution","solutions","offering","offerings"
 }
 HEAD_STOP = STOPWORDS | HEAD_BLACKLIST
@@ -550,8 +475,7 @@ def _url_key(u: str) -> str:
         scheme = 'https' if p.scheme in ('', 'http', 'https') else p.scheme
         host = p.netloc.lower()
         path = re.sub(r'/+', '/', p.path or '/')
-        if path != '/' and path.endswith('/'):
-            path = path[:-1]
+        if path != '/' and path.endswith('/'): path = path[:-1]
         return f"{scheme}://{host}{path}"
     except Exception:
         return (u or "").strip().lower()
@@ -591,6 +515,19 @@ def _slug_tokens(u: str) -> Set[str]:
             if tt and tt not in STOPWORDS:
                 toks.add(tt)
     return toks
+
+# ---- Core utility pages guard ----
+CORE_UTILITY_SEGMENTS = {
+    "admissions","apply","donate","give","about","privacy","terms",
+    "login","register","cart","checkout","events","calendar"
+}
+
+def _is_core_utility(url: str) -> bool:
+    path = urlparse(url).path.lower().strip("/")
+    if not path:
+        return False
+    first = path.split("/")[0]
+    return first in CORE_UTILITY_SEGMENTS
 
 # ---------- Robots & sitemaps ----------
 @contextlib.contextmanager
@@ -712,7 +649,7 @@ def discover_urls_with_sources(base_url: str, include_subdomains: bool, use_site
             maps = _extract_sitemaps_from_robots(base, sess)
             if not maps:
                 maps = [urljoin(base + "/", "sitemap.xml"), urljoin(base + "/", "sitemap_index.xml")]
-            maps.sort(key=_sm_bucket)  # pages before posts/tax/other
+            maps.sort(key=_sm_bucket)
             seen = set()
             for sm in maps:
                 if len(discovered) >= 120: break
@@ -1141,6 +1078,7 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
     if not profiles:
         return pd.Series([""]*len(df), index=df.index, dtype="string")
 
+    profile_by_url = {p["url"]: p for p in profiles}
     nav_anchor_map, all_nav_tokens = cached_nav(base_url)
 
     domain_toks = _domain_tokens(base_url)
@@ -1217,6 +1155,12 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
         cnt = sum(1 for t in tokens if very_common.get(t, False))
         return -0.05 * cnt
 
+    def _anchored(u: str, head: str, phrase: str) -> bool:
+        p = profile_by_url.get(u)
+        if not p: return False
+        title_tokens = set((p.get("title_h1_norm") or "").split())
+        return (head and (head in title_tokens or head in _slug_tokens(u))) or (phrase and phrase in (p.get("title_h1_norm") or ""))
+
     TOP_K = 5
     kw_candidates: Dict[int, List[Tuple[str,float,float,str,float]]] = {}
     kw_slot: Dict[int,str] = {}
@@ -1264,6 +1208,7 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
             base_fit = _fit_score(raw_kw, p)
             if base_fit <= 0:
                 continue
+
             stype = (
                 "other"
                 if p.get("url") is None
@@ -1292,8 +1237,8 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
                 bonus += _post_heavy_penalty(tokens_norm)
 
             slug_toks = _slug_tokens(p["url"])
-            if head and (head in slug_toks or head in title_tokens): bonus += 0.12
             phrase_str = " ".join(tokens_norm)
+            if head and (head in slug_toks or head in title_tokens): bonus += 0.12
             if head and (title_raw.startswith(head + " ") or title_raw == head):
                 bonus += 0.12
             elif phrase_str and (title_raw.startswith(phrase_str + " ") or title_raw == phrase_str):
@@ -1316,14 +1261,14 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
             bonus += _commonness_penalty(tokens_norm)
             f = max(0.0, min(2.0, base_fit + bonus + concept_bonus))
 
+            # --- Strict VEO gating ---
             if slot == "VEO" and not v_intent:
-                f = max(0.0, f - 0.20)
-                if f < 0.60:
-                    if is_page_like:
-                        if (best_page_probe is None) or (f > best_page_probe[1]):
-                            best_page_probe = (p["url"], f, covered_ratio, stype, a_score)
-                    continue
+                # Non-VEO pages cannot satisfy VEO queries
+                if is_page_like and ((best_page_probe is None) or (f > (best_page_probe[1] if best_page_probe else 0))):
+                    best_page_probe = (p["url"], f, covered_ratio, stype, a_score)
+                continue
 
+            # Core acceptance tests
             passed = True
             if slot == "SEO":
                 if (lead_cov < 0.18) and (covered_ratio < 0.50):
@@ -1335,9 +1280,26 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
                 if lead_cov < 0.10 and v_intent and covered_ratio < 0.33:
                     passed = False
 
+            anchored_head = head and (head in title_tokens or head in slug_toks)
+            anchored_phrase = phrase_str and (phrase_str in (p.get("title_h1_norm") or ""))
+            anchored = bool(anchored_head or anchored_phrase)
+
+            # Extra AIO anchoring (or strong AIO w/ phrase)
+            if passed and slot == "AIO":
+                if not anchored:
+                    strong_aio = (a_score >= 0.35) and (phrase_str and ((phrase_str in (p.get("title_h1_norm") or "")) or (phrase_str in (p.get("lead_norm") or ""))))
+                    if not strong_aio:
+                        passed = False
+
+            # Core-page guard for generic utility pages (unless anchored)
+            if passed and (slot in {"SEO","AIO"}):
+                if _is_core_utility(p["url"]) and not anchored:
+                    passed = False
+
+            # Existing SEO head guard (kept)
             if passed and slot == "SEO" and head:
                 if (head not in title_tokens) and (head not in slug_toks):
-                    if not phrase_str or phrase_str not in (p.get("title_h1_norm") or "") or f < 0.70:
+                    if not anchored_phrase or f < 0.70:
                         passed = False
 
             if not passed:
@@ -1364,19 +1326,24 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
         fits: List[Tuple[str,float,float,str,float]] = []
         if slot == "AIO" and fits_page and fits_other:
             best_page = fits_page[0][1]
-            aio_posts = [t for t in fits_other if _is_post_like(t[3], t[0]) and t[4] >= 0.35]
+            # Prefer well-anchored posts with AIO signals; mild tolerance
+            phrase_str = " ".join(tokens_norm)
+            aio_posts = []
+            for (u,f,cr,st,a) in fits_other:
+                if _is_post_like(st, u) and a >= 0.30 and _anchored(u, head, phrase_str):
+                    aio_posts.append((u,f,cr,st,a))
             if aio_posts:
                 aio_posts.sort(key=lambda x: x[1], reverse=True)
                 best_post = aio_posts[0][1]
-                if best_post >= (best_page + 0.08):
+                if best_post >= (best_page - 0.03):
                     fits.extend(aio_posts[:5])
                     if len(fits) < 5:
                         fits.extend(fits_page[:5 - len(fits)])
                 else:
-                    if best_page >= (best_post - 0.10):
-                        fits.extend(fits_page[:5])
+                    if best_post >= (best_page + 0.08):
+                        fits.extend(aio_posts[:5])
                         if len(fits) < 5:
-                            fits.extend(fits_other[:5 - len(fits)])
+                            fits.extend(fits_page[:5 - len(fits)])
                     else:
                         fits.extend(fits_page[:5])
                         if len(fits) < 5:
@@ -1461,7 +1428,7 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
             kw_rank[idx] = 0.0
 
     # ---------- Assignment (per-page caps only) ----------
-    caps = {"VEO":1, "AIO":1, "SEO":2}  # per URL only
+    caps = {"VEO":1, "AIO":1, "SEO":2}
     assigned: Dict[str, Dict[str, object]] = {}
     for p in profiles:
         assigned[p["url"]] = {"VEO":None, "AIO":None, "SEO":[]}
