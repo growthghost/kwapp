@@ -307,7 +307,7 @@ st.markdown(
 # ---------- Category Tagging ----------
 AIO_PAT = re.compile(r"\b(what is|what's|define|definition|how to|step[- ]?by[- ]?step|tutorial|guide|is)\b", re.I)
 AEO_PAT = re.compile(r"^\s*(who|what|when|where|why|how|which|can|should)\b", re.I)
-VEO_PAT = re.compile(r"\b(near me|open now|closest|call now|directions|ok google|alexa|siri|hey google)\b", re.I)  # Voice Engine Optimization
+VEO_PAT = re.compile(r"\b(near me|open now|closest|call now|directions|ok google|alexa|siri|hey google)\b", re.I)
 GEO_PAT = re.compile(r"\b(how to|best way to|steps? to|examples? of|checklist|framework|template)\b", re.I)
 SXO_PAT = re.compile(r"\b(best|top|compare|comparison|vs\.?|review|pricing|cost|cheap|free download|template|examples?)\b", re.I)
 LLM_PAT = re.compile(r"\b(prompt|prompting|prompt[- ]?engineering|chatgpt|gpt[- ]?\d|llm|rag|embedding|vector|few[- ]?shot|zero[- ]?shot)\b", re.I)
@@ -494,10 +494,13 @@ def _ntokens(text: str) -> List[str]:
     text = _normalize_phrases(text or "")
     return [_norm_token(t) for t in _tokenize(text)]
 
+# ------------ HEAD-NOUN BLACKLIST (expanded conservatively) ------------
 HEAD_BLACKLIST = {
     "near","nearme","contact","call","email","address","directions","phone","hours",
     "best","top","vs","review","pricing","cost","cheap","free","template","example",
-    "what","how","who","where","why","when","which"
+    "what","how","who","where","why","when","which",
+    # New generic terms to avoid false heads on core pages
+    "service","services","solution","solutions","offering","offerings"
 }
 HEAD_STOP = STOPWORDS | HEAD_BLACKLIST
 
@@ -631,7 +634,7 @@ def _parse_sitemap_xml_entries(xml_text: str) -> List[Tuple[str, Optional[float]
     if not xml_text:
         return []
     entries: List[Tuple[str, Optional[float], Optional[str]]] = []
-    for m in re.finditer(r"<url>\s*(.*?)\s*</url>", xml_text, re.I | re.S):
+    for m in re.finditer(r"<url>\s*(.*?)</url>", xml_text, re.I | re.S):
         block = m.group(1)
         lm = re.search(r"<loc>\s*([^<]+)\s*</loc>", block, re.I)
         if not lm:
@@ -649,7 +652,7 @@ def _parse_sitemap_xml_entries(xml_text: str) -> List[Tuple[str, Optional[float]
         entries.append((loc, pr, lastmod))
     if not entries:
         for lm in re.finditer(r"<loc>\s*([^<]+)\s*</loc>", xml_text, re.I):
-            entries.append((lm.group(1)).strip(), None, None)
+            entries.append((lm.group(1).strip(), None, None))
     return entries
 
 def _sm_classify(u: str) -> str:
@@ -672,7 +675,7 @@ def _collect_sitemap_urls(sm_url: str, session, base_host: str, base_root: str,
     xml = _fetch_text_requests(sm_url, session, (5,8))
     if not xml: return
     entries = _parse_sitemap_xml_entries(xml)
-    is_index = bool(research(r"<sitemapindex", xml, re.I)) or any(u.lower().endswith((".xml",".xml.gz")) for (u,_,_) in entries)
+    is_index = bool(re.search(r"<sitemapindex", xml, re.I)) or any(u.lower().endswith((".xml",".xml.gz")) for (u,_,_) in entries)
 
     if is_index:
         children = [u for (u,_,_) in entries if u]
@@ -1223,6 +1226,15 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
     kw_concepts: Dict[int, Set[str]] = {}
 
     for idx, row in df.iterrows():
+        # ---------------- Eligibility enforcement (skip mapping if not eligible) ----------------
+        vol_val_raw = row.get(vol_col, 0)
+        vol_val = float(pd.to_numeric(vol_val_raw, errors="coerce") or 0)
+        if vol_val < MIN_VALID_VOLUME:
+            kw_candidates[idx] = []
+            kw_rank[idx] = 0.0
+            continue
+        # ----------------------------------------------------------------------------------------
+
         raw_kw = str(row.get(kw_col, "")) if kw_col else str(row.get("Keyword",""))
         tokens_norm = _ntokens(raw_kw)
 
@@ -1425,8 +1437,8 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
         kd_norm = max(0.0, 1.0 - kd_val/100.0)
         vol_norm = math.log(1 + max(0.0, vol_val)) / max_log
 
-        lhf_opportunity = vol_norm * kd_norm
         if scoring_mode == "Low Hanging Fruit":
+            lhf_opportunity = vol_norm * kd_norm
             kw_rank[idx] = 0.30*fit_norm + 0.30*kd_norm + 0.20*vol_norm + 0.20*lhf_opportunity
         elif scoring_mode == "In The Game":
             kw_rank[idx] = 0.35*fit_norm + 0.30*kd_norm + 0.35*vol_norm
@@ -1441,7 +1453,7 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
         any_ok = False
         for (u, f, cr, st, a) in fits:
             is_post = _is_post_like(st, u)
-            if f >= _class_min_for_type(slot, is_post):
+            if f >= _class_min_for_type(kw_slot[idx], is_post):
                 any_ok = True
                 break
         if not any_ok:
@@ -1465,20 +1477,18 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
 
     def assign_slot(slot_name: str):
         ids = [i for i,s in kw_slot.items() if s == slot_name]
-        if scoring_mode == "Low Hanging Fruit":
-            vols_local = pd.to_numeric(df[vol_col], errors="coerce").fillna(0).clip(lower=0)
-            max_log_local = float((vols_local + 1).apply(lambda x: math.log(1 + x)).max()) or 1.0
-            opp = {}
-            for i in ids:
-                row = df.loc[i]
-                kd_val = float(pd.to_numeric(row.get(kd_col,0), errors="coerce") or 0)
-                vol_val = float(pd.to_numeric(row.get(vol_col,0), errors="coerce") or 0)
-                kd_norm = max(0.0, 1.0 - kd_val/100.0)
-                vol_norm = math.log(1 + max(0.0, vol_val)) / max_log_local
-                opp[i] = vol_norm * kd_norm
-            ids.sort(key=lambda i: (-opp.get(i,0.0), -kw_rank.get(i,0.0), i))
-        else:
-            ids.sort(key=lambda i: (-kw_rank.get(i,0.0), i))
+        # unified opportunity ordering across strategies
+        vols_local = pd.to_numeric(df[vol_col], errors="coerce").fillna(0).clip(lower=0)
+        max_log_local = float((vols_local + 1).apply(lambda x: math.log(1 + x)).max()) or 1.0
+        opp = {}
+        for i in ids:
+            row = df.loc[i]
+            kd_val = float(pd.to_numeric(row.get(kd_col,0), errors="coerce") or 0)
+            vol_val = float(pd.to_numeric(row.get(vol_col,0), errors="coerce") or 0)
+            kd_norm = max(0.0, 1.0 - kd_val/100.0)
+            vol_norm = math.log(1 + max(0.0, vol_val)) / max_log_local
+            opp[i] = vol_norm * kd_norm
+        ids.sort(key=lambda i: (-opp.get(i,0.0), -kw_rank.get(i,0.0), i))
 
         for i in ids:
             choices = kw_candidates.get(i, [])
@@ -1614,7 +1624,6 @@ if uploaded is not None:
 
         if map_btn and not st.session_state.get("mapping_running", False):
             st.session_state["mapping_running"] = True
-            # Also clear per-run cache if strategy changed earlier
             if "map_cache" not in st.session_state:
                 st.session_state["map_cache"] = {}
             loader = st.empty()
@@ -1626,7 +1635,6 @@ if uploaded is not None:
                 </div>
                 """, unsafe_allow_html=True)
             with st.spinner("Launching fast crawl & scoring fit…"):
-                # Use cache keyed by signature (fast re-map if same inputs)
                 cache = st.session_state["map_cache"]
                 if curr_signature in cache and len(cache[curr_signature]) == len(export_df):
                     map_series = pd.Series(cache[curr_signature], index=export_df.index, dtype="string")
@@ -1636,7 +1644,6 @@ if uploaded is not None:
                         base_url=base_site_url.strip(), include_subdomains=True, use_sitemap_first=True
                     )
                     cache[curr_signature] = map_series.fillna("").astype(str).tolist()
-                # Save map result to session for download step
                 st.session_state["map_result"] = map_series
                 st.session_state["map_signature"] = curr_signature
                 st.session_state["map_ready"] = True
@@ -1644,9 +1651,10 @@ if uploaded is not None:
             st.session_state["mapping_running"] = False
 
         # ---------- Build CSV for download (enabled only when mapped & signature matches) ----------
-        # If we have a fresh map result, attach it; otherwise leave Map URL blank
         if st.session_state.get("map_ready") and st.session_state.get("map_signature") == curr_signature:
             export_df["Map URL"] = st.session_state["map_result"]
+            # Hard stop: do not show a URL where row is not eligible
+            export_df.loc[export_df["Eligible"] != "Yes", "Map URL"] = ""
             can_download = True
         else:
             export_df["Map URL"] = pd.Series([""]*len(export_df), index=export_df.index, dtype="string")
