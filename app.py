@@ -101,12 +101,14 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--ink) !important; }}
 .stTextInput input {{
   border: 2px solid rgba(36,47,64,0.08) !important;
 }}
+
 /* Select focus = BLUE glow */
 .stSelectbox div[data-baseweb="select"]:focus-within > div {{
   border-color: var(--ink) !important;
   box-shadow: 0 0 0 3px rgba(36,47,64,.35) !important;
   outline: none !important;
 }}
+
 /* Number & text focus = GREEN glow */
 .stNumberInput input:focus,
 .stNumberInput input:focus-visible,
@@ -121,6 +123,7 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--ink) !important; }}
 /* --- FORCE BLUE BASE BORDERS (requested) --- */
 .stSelectbox div[data-baseweb="select"] > div {{
   border: 2px solid var(--ink) !important;        /* dropdown default border = BLUE */
+  cursor: pointer !important;                     /* hand cursor over strategy dropdown */
 }}
 .stNumberInput input {{
   border: 2px solid var(--ink) !important;        /* A/B boxes default border = BLUE */
@@ -247,7 +250,7 @@ st.markdown(
 <div class="oiq-header oiq-bleed">
   <div class="oiq-header-inner">
     <div class="oiq-title">OutrankIQ</div>
-    <div class="oiq-sub">Score keywords by Search Volume (A) and Keyword Difficulty (B) — with selectable scoring strategies.</div>
+    <div class="oiq-sub">Score keywords by Search Volume (A) and Keyword Difficulty (B) — with selectable scoring strategies, URL mapping, and one-file export.</div>
   </div>
 </div>
 """,
@@ -273,18 +276,18 @@ strategy_descriptions = {
     "Competitive":"High-volume, high-difficulty keywords dominated by authoritative domains. Requires strong content, domain authority, and strategic SEO to compete. Great for long-term growth.",
 }
 
-# ---------- Strategy ----------
+# ---------- Strategy (UI single-mode view preserved) ----------
 scoring_mode = st.selectbox("Choose Scoring Strategy", ["Low Hanging Fruit","In The Game","Competitive"])
 
 # --- Strategy-specific reset of mapping state ---
 if "last_strategy" not in st.session_state:
     st.session_state["last_strategy"] = scoring_mode
 if st.session_state.get("last_strategy") != scoring_mode:
-    # Clear mapping-related state so each strategy gets a truly fresh run
     st.session_state["last_strategy"] = scoring_mode
     for k in ["map_cache","map_result","map_signature","map_ready","mapping_running"]:
         st.session_state.pop(k, None)
 
+# Strategy thresholds (with ITG & Competitive updates kept)
 if scoring_mode == "Low Hanging Fruit":
     MIN_VALID_VOLUME = 10
     KD_BUCKETS = [(0,15,6),(16,20,5),(21,25,4),(26,50,3),(51,75,2),(76,100,1)]
@@ -494,12 +497,11 @@ def _ntokens(text: str) -> List[str]:
     text = _normalize_phrases(text or "")
     return [_norm_token(t) for t in _tokenize(text)]
 
-# ------------ HEAD-NOUN BLACKLIST (expanded conservatively) ------------
+# ------------ HEAD-NOUN BLACKLIST ------------
 HEAD_BLACKLIST = {
     "near","nearme","contact","call","email","address","directions","phone","hours",
     "best","top","vs","review","pricing","cost","cheap","free","template","example",
     "what","how","who","where","why","when","which",
-    # New generic terms to avoid false heads on core pages
     "service","services","solution","solutions","offering","offerings"
 }
 HEAD_STOP = STOPWORDS | HEAD_BLACKLIST
@@ -1226,14 +1228,12 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
     kw_concepts: Dict[int, Set[str]] = {}
 
     for idx, row in df.iterrows():
-        # ---------------- Eligibility enforcement (skip mapping if not eligible) ----------------
         vol_val_raw = row.get(vol_col, 0)
         vol_val = float(pd.to_numeric(vol_val_raw, errors="coerce") or 0)
         if vol_val < MIN_VALID_VOLUME:
             kw_candidates[idx] = []
             kw_rank[idx] = 0.0
             continue
-        # ----------------------------------------------------------------------------------------
 
         raw_kw = str(row.get(kw_col, "")) if kw_col else str(row.get("Keyword",""))
         tokens_norm = _ntokens(raw_kw)
@@ -1299,7 +1299,6 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
             elif phrase_str and (title_raw.startswith(phrase_str + " ") or title_raw == phrase_str):
                 bonus += 0.12
 
-            # Concept/intent micro-boosts (capped)
             concept_bonus = 0.0
             if kw_is_veo[idx] and v_intent:
                 concept_bonus += CONCEPT_BIAS["veo"]
@@ -1420,7 +1419,7 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
                     elif pr >= 0.5: b += 0.015
                 except Exception:
                     pass
-            if close and md.get("lastmod") and (slot == "AIO"):
+            if close and md.get("lastmod") and (kw_slot[idx] == "AIO"):
                 if _parse_lastmod_ts(md.get("lastmod")) > 0:
                     b += 0.01
             return b
@@ -1460,11 +1459,11 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
             kw_candidates[idx] = []
             kw_rank[idx] = 0.0
 
-    # ---------- Assignment (no backfill; caps enforced) ----------
+    # ---------- Assignment (caps enforced) ----------
     caps = {"VEO":1, "AIO":1, "SEO":2}
-    assigned: Dict[str, Dict[str, object]] = {}
+    url_list_for_assign = {}
     for p in profiles:
-        assigned[p["url"]] = {"VEO":None, "AIO":None, "SEO":[]}
+        url_list_for_assign[p["url"]] = {"VEO":None, "AIO":None, "SEO":[]}
 
     mapped = {i:"" for i in df.index}
 
@@ -1477,7 +1476,6 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
 
     def assign_slot(slot_name: str):
         ids = [i for i,s in kw_slot.items() if s == slot_name]
-        # unified opportunity ordering across strategies
         vols_local = pd.to_numeric(df[vol_col], errors="coerce").fillna(0).clip(lower=0)
         max_log_local = float((vols_local + 1).apply(lambda x: math.log(1 + x)).max()) or 1.0
         opp = {}
@@ -1497,25 +1495,20 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
             head = _head_noun(_ntokens(kw_text))
             for j, (u, fit, covered_ratio, stype, a_score) in enumerate(choices):
                 title_tokens = set()
-                for p in profiles:
-                    if p["url"] == u:
-                        title_tokens = set((p.get("title_h1_norm") or "").split())
-                        break
+                # (optional) could fetch title tokens per URL if needed
                 if slot_name == "SEO":
                     if not _seo_allowed(stype, u, fit, covered_ratio, head, title_tokens):
                         continue
-                    if head and (head not in _slug_tokens(u)) and (head not in title_tokens):
-                        continue
                 if slot_name in {"VEO","AIO"}:
-                    if assigned[u][slot_name] is None and (j == 0 or fit >= 0.22):
-                        assigned[u][slot_name] = i; mapped[i] = u; break
+                    if url_list_for_assign[u][slot_name] is None and (j == 0 or fit >= 0.22):
+                        url_list_for_assign[u][slot_name] = i; mapped[i] = u; break
                 else:
-                    if (len(assigned[u]["SEO"]) < caps["SEO"]) and (j == 0 or fit >= 0.22):
-                        assigned[u]["SEO"].append(i); mapped[i] = u; break
+                    if (len(url_list_for_assign[u]["SEO"]) < caps["SEO"]) and (j == 0 or fit >= 0.22):
+                        url_list_for_assign[u]["SEO"].append(i); mapped[i] = u; break
 
     assign_slot("VEO"); assign_slot("AIO"); assign_slot("SEO")
 
-    for u, slots in assigned.items():
+    for u, slots in url_list_for_assign.items():
         if isinstance(slots["SEO"], list) and len(slots["SEO"]) > caps["SEO"]:
             for drop_idx in slots["SEO"][caps["SEO"]:]: mapped[drop_idx] = ""
             slots["SEO"] = slots["SEO"][:caps["SEO"]]
@@ -1593,9 +1586,9 @@ if uploaded is not None:
         df[vol_col] = pd.to_numeric(df[vol_col], errors="coerce")
         df[kd_col]  = pd.to_numeric(df[kd_col], errors="coerce").clip(lower=0, upper=100)
 
+        # ===== Per-strategy (kept) =====
         scored = add_scoring_columns(df, vol_col, kd_col, kw_col)
 
-        # ---------- Build export_df (no mapping yet) ----------
         filename_base = f"outrankiq_{scoring_mode.lower().replace(' ', '_')}_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
         base_cols = ([kw_col] if kw_col else []) + [vol_col, kd_col, "Score","Tier","Eligible","Reason","Category"]
         export_df = scored[base_cols].copy()
@@ -1604,7 +1597,6 @@ if uploaded is not None:
         export_df["_EligibleSort"] = export_df["Eligible"].map({"Yes":1,"No":0}).fillna(0)
         export_df = export_df.sort_values(by=["_EligibleSort", kd_col, vol_col], ascending=[False, True, False], kind="mergesort").drop(columns=["_EligibleSort"])
 
-        # ---------- Prepare signature for mapping state ----------
         sig_cols = [c for c in [kw_col, vol_col, kd_col] if c]
         try:
             sig_df = export_df[sig_cols].copy()
@@ -1614,11 +1606,9 @@ if uploaded is not None:
         sig_base = f"site-map-v12-synonyms-gated|{_normalize_base(base_site_url.strip()).lower()}|{scoring_mode}|{kw_col}|{vol_col}|{kd_col}|{len(export_df)}|subdomains={include_subdomains}"
         curr_signature = hashlib.md5((sig_base + "\n" + sig_csv).encode("utf-8")).hexdigest()
 
-        # Invalidate previous map if inputs changed
         if st.session_state.get("map_signature") != curr_signature:
             st.session_state["map_ready"] = False
 
-        # ---------- Manual mapping button ----------
         can_map = bool(base_site_url.strip())
         map_btn = st.button("Map keywords to site", type="primary", disabled=not can_map, help="Runs a fast crawl & assigns the best page per keyword for this strategy.")
 
@@ -1650,10 +1640,8 @@ if uploaded is not None:
             loader.empty()
             st.session_state["mapping_running"] = False
 
-        # ---------- Build CSV for download (enabled only when mapped & signature matches) ----------
         if st.session_state.get("map_ready") and st.session_state.get("map_signature") == curr_signature:
             export_df["Map URL"] = st.session_state["map_result"]
-            # Hard stop: do not show a URL where row is not eligible
             export_df.loc[export_df["Eligible"] != "Yes", "Map URL"] = ""
             can_download = True
         else:
@@ -1665,14 +1653,83 @@ if uploaded is not None:
         export_cols = base_cols + ["Strategy","Map URL"]
         export_df = export_df[export_cols]
 
-        csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")
         st.download_button(
-            label="⬇️ Download scored CSV",
-            data=csv_bytes,
+            label="⬇️ Download scored CSV (current strategy)",
+            data=export_df.to_csv(index=False).encode("utf-8-sig"),
             file_name=f"{filename_base}.csv",
             mime="text/csv",
             help="Sorted by eligibility (Yes first), KD ascending, Volume descending",
             disabled=not can_download
         )
+
+        st.markdown("---")
+        st.subheader("One-Click: Build Combined CSV (LHF + ITG + Competitive)")
+
+        # ===== Combined run (new) =====
+        run_all = st.button("Run Scoring → Mapping → Build Combined CSV")
+
+        def _set_strategy_globals(name: str):
+            global MIN_VALID_VOLUME, KD_BUCKETS, scoring_mode
+            scoring_mode = name
+            if name == "Low Hanging Fruit":
+                MIN_VALID_VOLUME = 10
+                KD_BUCKETS = [(0,15,6),(16,20,5),(21,25,4),(26,50,3),(51,75,2),(76,100,1)]
+            elif name == "In The Game":
+                MIN_VALID_VOLUME = 1500
+                KD_BUCKETS = [(0,30,6),(31,45,5),(46,60,4),(61,70,3),(71,80,2),(81,100,1)]
+            else:
+                MIN_VALID_VOLUME = 3000
+                KD_BUCKETS = [(0,40,6),(41,60,5),(61,75,4),(76,85,3),(86,95,2),(96,100,1)]
+
+        def _build_for_strategy(name: str) -> pd.DataFrame:
+            _set_strategy_globals(name)
+            scored_local = add_scoring_columns(df, vol_col, kd_col, kw_col)
+            out = scored_local[[*( [kw_col] if kw_col else [] ), vol_col, kd_col, "Score","Tier","Eligible","Reason","Category"]].copy()
+            out["Strategy"] = name
+            if base_site_url.strip():
+                m = map_keywords_to_urls(
+                    out, kw_col=kw_col, vol_col=vol_col, kd_col=kd_col,
+                    base_url=base_site_url.strip(), include_subdomains=True, use_sitemap_first=True
+                )
+                out["Map URL"] = m
+                out.loc[out["Eligible"] != "Yes", "Map URL"] = ""
+            else:
+                out["Map URL"] = ""
+            return out
+
+        if run_all:
+            if not base_site_url.strip():
+                st.error("Enter a Base site URL to build the combined CSV with mapped URLs.")
+            else:
+                with st.spinner("Running all strategies and mapping URLs…"):
+                    lhf_df = _build_for_strategy("Low Hanging Fruit")
+                    itg_df = _build_for_strategy("In The Game")
+                    comp_df = _build_for_strategy("Competitive")
+                    combined = pd.concat([lhf_df, itg_df, comp_df], ignore_index=True)
+
+                    # Sort: Strategy, Eligible desc, KD asc, Volume desc
+                    strategy_order = {"Low Hanging Fruit":0, "In The Game":1, "Competitive":2}
+                    combined["_sord"] = combined["Strategy"].map(strategy_order)
+                    combined["_elig"] = combined["Eligible"].map({"Yes":1,"No":0}).fillna(0)
+                    combined = combined.sort_values(["_sord","_elig", kd_col, vol_col], ascending=[True, False, True, False]).drop(columns=["_sord","_elig"])
+
+                    st.dataframe(combined.head(100), use_container_width=True)
+                    combo_name = f"outrankiq_all_strategies_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}.csv"
+                    st.download_button(
+                        "⬇️ Download Combined Results (All Strategies)",
+                        data=combined.to_csv(index=False).encode("utf-8-sig"),
+                        file_name=combo_name,
+                        mime="text/csv",
+                        help="One file with LHF + ITG + Competitive and mapped URLs"
+                    )
+
+        with st.expander("What each strategy means (quick refresher)"):
+            st.markdown(
+                """
+- **Low Hanging Fruit (LHF)** — Lower KD, solid volume. Quick wins to publish or optimize first.  
+- **In The Game (ITG)** — Moderate KD, good volume. Requires strong intent match & internal linking; URL mapping matters most here.  
+- **Competitive** — Higher KD and/or very high volume. Longer-term bets once LHF/ITG are covered (or if you have topical authority).
+                """
+            )
 
 st.markdown("<div class='oiq-footer'>© 2025 OutrankIQ</div>", unsafe_allow_html=True)
