@@ -101,14 +101,12 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--ink) !important; }}
 .stTextInput input {{
   border: 2px solid rgba(36,47,64,0.08) !important;
 }}
-
 /* Select focus = BLUE glow */
 .stSelectbox div[data-baseweb="select"]:focus-within > div {{
   border-color: var(--ink) !important;
   box-shadow: 0 0 0 3px rgba(36,47,64,.35) !important;
   outline: none !important;
 }}
-
 /* Number & text focus = GREEN glow */
 .stNumberInput input:focus,
 .stNumberInput input:focus-visible,
@@ -123,7 +121,6 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--ink) !important; }}
 /* --- FORCE BLUE BASE BORDERS (requested) --- */
 .stSelectbox div[data-baseweb="select"] > div {{
   border: 2px solid var(--ink) !important;        /* dropdown default border = BLUE */
-  cursor: pointer !important;                     /* hand cursor over strategy dropdown */
 }}
 .stNumberInput input {{
   border: 2px solid var(--ink) !important;        /* A/B boxes default border = BLUE */
@@ -250,7 +247,7 @@ st.markdown(
 <div class="oiq-header oiq-bleed">
   <div class="oiq-header-inner">
     <div class="oiq-title">OutrankIQ</div>
-    <div class="oiq-sub">Score keywords by Search Volume (A) and Keyword Difficulty (B) — with selectable scoring strategies, URL mapping, and one-file export.</div>
+    <div class="oiq-sub">Score keywords by Search Volume (A) and Keyword Difficulty (B) — with selectable scoring strategies.</div>
   </div>
 </div>
 """,
@@ -276,10 +273,10 @@ strategy_descriptions = {
     "Competitive":"High-volume, high-difficulty keywords dominated by authoritative domains. Requires strong content, domain authority, and strategic SEO to compete. Great for long-term growth.",
 }
 
-# ---------- Strategy (UI single-mode view preserved) ----------
+# ---------- Strategy ----------
 scoring_mode = st.selectbox("Choose Scoring Strategy", ["Low Hanging Fruit","In The Game","Competitive"])
 
-# --- Strategy-specific reset of mapping state ---
+# Reset mapping state on strategy switch
 if "last_strategy" not in st.session_state:
     st.session_state["last_strategy"] = scoring_mode
 if st.session_state.get("last_strategy") != scoring_mode:
@@ -287,7 +284,6 @@ if st.session_state.get("last_strategy") != scoring_mode:
     for k in ["map_cache","map_result","map_signature","map_ready","mapping_running"]:
         st.session_state.pop(k, None)
 
-# Strategy thresholds (with ITG & Competitive updates kept)
 if scoring_mode == "Low Hanging Fruit":
     MIN_VALID_VOLUME = 10
     KD_BUCKETS = [(0,15,6),(16,20,5),(21,25,4),(26,50,3),(51,75,2),(76,100,1)]
@@ -445,24 +441,6 @@ _SYN_MAP = {
     "aboutus":"about","mission":"about","vision":"about","team":"about","board":"about","staff":"about",
 }
 
-VEO_TRIGGER_TOKS = {"contact","nearme","phone","address","hours","location","locations","map","email","call","directions","parking"}
-AIO_TRIGGER_TOKS = {"what","how","guide","tutorial","checklist","framework","template","example","examples","definition","define","is"}
-
-CONCEPT_BIAS = {
-    "veo": 0.06,
-    "aio": 0.06,
-    "contact": 0.06,
-    "locations": 0.06,
-    "donate": 0.06,
-    "volunteer": 0.05,
-    "about": 0.04,
-    "program": 0.04,
-    "service": 0.04,
-    "resources": 0.04,
-    "careers": 0.04,
-}
-MAX_CONCEPT_BONUS = 0.12
-
 STOPWORDS = {
     "the","and","for","to","a","an","of","with"," in","on","at","by","from","about",
     "is","are","be","can","should","how","what","who","where","why","when","which",
@@ -496,21 +474,6 @@ def _tokenize(text: str) -> List[str]:
 def _ntokens(text: str) -> List[str]:
     text = _normalize_phrases(text or "")
     return [_norm_token(t) for t in _tokenize(text)]
-
-# ------------ HEAD-NOUN BLACKLIST ------------
-HEAD_BLACKLIST = {
-    "near","nearme","contact","call","email","address","directions","phone","hours",
-    "best","top","vs","review","pricing","cost","cheap","free","template","example",
-    "what","how","who","where","why","when","which",
-    "service","services","solution","solutions","offering","offerings"
-}
-HEAD_STOP = STOPWORDS | HEAD_BLACKLIST
-
-def _head_noun(tokens: List[str]) -> str:
-    for t in reversed(tokens):
-        if len(t) >= 3 and t.isalpha() and t not in HEAD_STOP:
-            return t
-    return ""
 
 # ---------- Domain helpers ----------
 def _derive_roots(base_url: str) -> Tuple[str,str]:
@@ -561,10 +524,6 @@ def _is_home(u: str) -> bool:
     p = urlparse(u)
     path = re.sub(r'/+', '/', p.path or '/')
     return path == '/'
-
-def _is_contact_like(u: str) -> bool:
-    path = urlparse(u).path.lower()
-    return any(seg in path for seg in ("/contact", "/contact-us", "/locations", "/find-us", "/visit"))
 
 def _is_post_like(stype: str, url: str) -> bool:
     path = urlparse(url).path.lower()
@@ -894,24 +853,6 @@ def cached_nav(base_url: str) -> Tuple[Dict[str, Set[str]], Set[str]]:
 _PHONE_PAT = re.compile(r"(\+?\d{1,2}[\s.-]?)?(\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4})")
 _ADDR_PAT = re.compile(r"\b(suite|ste\.?|unit|rd\.?|road|st\.?|street|ave\.?|avenue|blvd\.?|boulevard|ln\.?|lane|dr\.?|drive|ct\.?|court)\b", re.I)
 
-def _answerability_score(html: str, title_h1_text: str) -> float:
-    score = 0.0
-    t = title_h1_text.lower()
-    if AIO_PAGE_SIG.search(t):
-        score += 0.2
-    if re.search(r"<(ol|ul)[\s>].*?<li", html or "", re.I | re.S):
-        score += 0.1
-    if re.search(r"\bFAQ\b|\bQ:\b|\bA:\b", html or "", re.I):
-        score += 0.1
-    first = re.sub(r"<.*?>", " ", (html or ""))
-    first = re.sub(r"\s+", " ", first).strip()
-    head = " ".join(first.split()[:200]).lower()
-    if re.search(r"\b(is|are)\b.+?\.", head):
-        score += 0.05
-    if re.search(r"FAQPage|HowTo|QAPage", html or "", re.I):
-        score += 0.1
-    return min(0.5, score)
-
 def _extract_profile(html: str, final_url: str, requested_url: Optional[str] = None) -> Dict:
     title = ""; h1_texts: List[str] = []; h2h3_texts: List[str] = []; body_text = ""; canonical = ""
 
@@ -934,6 +875,7 @@ def _extract_profile(html: str, final_url: str, requested_url: Optional[str] = N
         m = re.search(r"<title>(.*?)</title>", html or "", re.I|re.S)
         if m: title = re.sub(r"\s+"," ",m.group(1)).strip()
     if not canonical: canonical = final_url
+
     if body_text:
         words = body_text.split()
         lead_text = " ".join(words[:200])
@@ -941,12 +883,11 @@ def _extract_profile(html: str, final_url: str, requested_url: Optional[str] = N
     else:
         lead_text = ""
 
+    # Build normalized token weights (legacy; we'll use keys only)
     weights: Dict[str,float] = defaultdict(float)
-    for tok in _ntokens(title): weights[tok] += 3.0
-    for t in h1_texts:
-        for tok in _ntokens(t): weights[tok] += 2.5
-    for t in h2h3_texts:
-        for tok in _ntokens(t): weights[tok] += 1.5
+    for tok in _ntokens(title): weights[tok] += 1.0
+    for t in h1_texts + h2h3_texts:
+        for tok in _ntokens(t): weights[tok] += 1.0
     for tok in _ntokens(body_text): weights[tok] += 1.0
 
     title_h1 = " ".join([title] + h1_texts)
@@ -954,11 +895,16 @@ def _extract_profile(html: str, final_url: str, requested_url: Optional[str] = N
     lead_norm = " ".join(_ntokens(lead_text))
 
     veo_ready = False
-    if _is_contact_like(canonical): veo_ready = True
     if _PHONE_PAT.search(html or "") or _ADDR_PAT.search(html or ""): veo_ready = True
     if re.search(r"LocalBusiness|Organization", html or "", re.I): veo_ready = True
 
-    a_score = _answerability_score(html or "", title_h1)
+    # Concatenated text for exact-phrase checks (lowercased)
+    text_concat = " ".join([
+        (title or "").lower(),
+        " ".join([t.lower() for t in h1_texts]),
+        " ".join([t.lower() for t in h2h3_texts]),
+        (lead_text or "").lower(),
+    ])
 
     return {
         "url": canonical or final_url,
@@ -966,11 +912,11 @@ def _extract_profile(html: str, final_url: str, requested_url: Optional[str] = N
         "title_h1": title_h1.lower(),
         "title_h1_norm": title_h1_norm,
         "lead_norm": lead_norm,
-        "weights": dict(weights),
+        "weights": dict(weights),  # we will treat keys as unweighted tokens
         "final_url": final_url,
         "requested_url": requested_url or final_url,
         "veo_ready": veo_ready,
-        "a_score": a_score,
+        "text_concat": text_concat,  # NEW: phrase checks
     }
 
 def _fetch_profiles(urls: List[str]) -> List[Dict]:
@@ -1046,472 +992,211 @@ def cached_discover_and_sources(base_url: str, include_subdomains: bool, use_sit
 def cached_fetch_profiles(urls: Tuple[str, ...]) -> List[Dict]:
     return _fetch_profiles(list(urls))
 
-# ---------- Fit & priority ----------
-def _fit_score(keyword: str, profile: Dict) -> float:
-    tokens = _ntokens(keyword)
-    if not tokens: return 0.0
-    w = profile.get("weights", {})
-    overlap = 0.0
-    for t in tokens:
-        tf = w.get(t, 0.0)
-        if tf > 0:
-            overlap += math.sqrt(tf)
-    overlap /= max(1, len(tokens))
-    title_tokens = set((profile.get("title_h1_norm") or "").split())
-    covered = sum(1 for t in tokens if t in title_tokens)
-    if covered == len(tokens): overlap += 0.25
-    elif covered/len(tokens) >= 0.5: overlap += 0.12
-    phrase = " ".join(tokens)
-    thn = profile.get("title_h1_norm","")
-    if phrase and phrase in thn: overlap += 0.22
-    if covered == 0 and not _is_home(profile.get("url","")) and not _is_contact_like(profile.get("url","")):
-        overlap -= 0.15
-    return max(0.0, min(2.0, overlap))
-
-def _url_priority_bonus(u: str, is_nav: bool, source_type: Optional[str]) -> float:
-    path = urlparse(u).path.lower()
-    depth = len([seg for seg in path.split("/") if seg])
-    bonus = 0.0
-    if source_type == "page":
-        bonus += 0.35
-        bonus += 0.05
-    elif source_type == "post":
-        bonus -= 0.20
-    elif source_type == "tax":
-        bonus -= 0.25
-    if "/blog/" in path or "/news/" in path:
-        bonus -= 0.20
-    if re.search(r"/\d{4}/\d{2}/", path):
-        bonus -= 0.20
-    if depth <= 1:
-        bonus += 0.12
-    if is_nav:
-        bonus += 0.15
-    return bonus
-
-VEO_NAV_TOKS = {"contact","contacts","phone","call","address","directions","hours","location","locations","visit","map","email"}
-
-def _veo_intent(profile: Dict, nav_anchor_map: Dict[str, Set[str]]) -> Tuple[bool, bool]:
-    u = profile.get("url","")
-    key = _url_key(u)
-    nav_toks = nav_anchor_map.get(key, set())
-    nav_hit = any(t in nav_toks for t in VEO_NAV_TOKS)
-    page_hit = profile.get("veo_ready", False) or _is_contact_like(u)
-    home_nap = _is_home(u) and profile.get("veo_ready", False)
-    return (nav_hit or page_hit), home_nap
-
-def _parse_lastmod_ts(s: Optional[str]) -> float:
-    if not s: return 0.0
-    ss = s.strip()
-    with contextlib.suppress(Exception):
-        if ss.endswith("Z"): ss = ss[:-1] + "+00:00"
-        return datetime.fromisoformat(ss).timestamp()
-    m = re.match(r"(\d{4}-\d{2}-\d{2})", s)
-    if m:
-        try:
-            return datetime.fromisoformat(m.group(1)).timestamp()
-        except Exception:
-            return 0.0
-    return 0.0
-
-CONCEPT_EVIDENCE = {
-    "contact": {"contact","contacts","email","call","phone","locations","address"},
-    "locations": {"location","locations","address","map","directions","hours","visit"},
-    "donate": {"donate","donation","donations","give","giving","gift","support"},
-    "volunteer": {"volunteer","involved","serve","signup"},
-    "about": {"about","mission","vision","team","board","staff","leadership","story"},
-    "program": {"program","programs","initiative","initiatives","ministry","ministries","project","projects"},
-    "service": {"service","services","offering","offerings","solution","solutions"},
-    "resources": {"resources","library","toolkit","templates","guides","playbook","downloads"},
-    "careers": {"careers","jobs","employment","hiring","openings"},
-}
-
-def _detect_concepts(tokens: List[str]) -> Set[str]:
-    hits = set()
-    for c, ev in CONCEPT_EVIDENCE.items():
-        if any(t in tokens for t in ev):
-            hits.add(c)
-    return hits
-
-# ---------- Mapping ----------
+# ---------- Mapping (UNWEIGHTED overlap with exact-phrase precedence) ----------
 def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, kd_col: str,
                          base_url: str, include_subdomains: bool, use_sitemap_first: bool) -> pd.Series:
-    url_list, srcmap, smeta = cached_discover_and_sources(base_url, include_subdomains, use_sitemap_first)
+    url_list, srcmap, _smeta = cached_discover_and_sources(base_url, include_subdomains, use_sitemap_first)
     profiles = cached_fetch_profiles(tuple(url_list))
-    profiles = [p for p in profiles if p.get("weights")]
-    if not profiles:
+
+    # Build per-profile token sets (unweighted union) + helpers
+    nav_anchor_map, _ = cached_nav(base_url)
+    nav_keys = set(nav_anchor_map.keys())
+
+    def _is_nav(purl: str) -> bool:
+        k = _url_key(purl)
+        return k in nav_keys
+
+    page_tokens: List[Set[str]] = []
+    page_urls: List[str] = []
+    page_src_types: List[str] = []
+    page_texts: List[str] = []
+    page_depths: List[int] = []
+    for p in profiles:
+        u = p.get("url") or p.get("final_url") or p.get("requested_url")
+        if not u: 
+            continue
+        tokens = set()
+        # union of everything we know (unweighted)
+        tokens |= set((p.get("title_h1_norm") or "").split())
+        tokens |= set((p.get("lead_norm") or "").split())
+        tokens |= set(p.get("weights", {}).keys())
+        tokens |= _slug_tokens(u)
+
+        if not tokens:
+            continue
+
+        page_urls.append(u)
+        page_tokens.append(tokens)
+        page_src_types.append(srcmap.get(_url_key(u), "other"))
+        page_texts.append((p.get("text_concat") or "").lower() + " " + u.lower().replace('-', ' ').replace('_', ' ').replace('/', ' '))
+        page_depths.append(len([seg for seg in urlparse(u).path.split('/') if seg]))
+
+    n_pages = len(page_urls)
+    if n_pages == 0:
         return pd.Series([""]*len(df), index=df.index, dtype="string")
 
-    nav_anchor_map, all_nav_tokens = cached_nav(base_url)
-
-    domain_toks = _domain_tokens(base_url)
-    page_counts: Dict[str,int] = defaultdict(int)
-    post_counts: Dict[str,int] = defaultdict(int)
-    src_by_key = { _url_key(k): v for k, v in srcmap.items() }
-
-    def _src_type_for_profile(p: Dict) -> str:
-        return (
-            src_by_key.get(_url_key(p.get("url",""))) or
-            src_by_key.get(_url_key(p.get("final_url",""))) or
-            src_by_key.get(_url_key(p.get("requested_url",""))) or
-            "other"
-        )
-
-    nav_keys = set(nav_anchor_map.keys())
-    def _is_nav(p: Dict) -> bool:
-        return (_url_key(p.get("url","")) in nav_keys) or (_url_key(p.get("requested_url","")) in nav_keys)
-
-    global_counts: Dict[str,int] = defaultdict(int)
-    for p in profiles:
-        stype = _src_type_for_profile(p)
-        is_nav_flag = _is_nav(p)
-        is_page = _is_page_like(stype, p["url"], is_nav_flag)
-        is_post = _is_post_like(stype, p["url"])
-        toks = set(p.get("weights", {}).keys())
-        toks.update((p.get("title_h1_norm") or "").split())
-        toks.update(_ntokens(p.get("title","") or ""))
+    # Build inverted index token -> set(page indices)
+    inv: Dict[str, Set[int]] = defaultdict(set)
+    for i, toks in enumerate(page_tokens):
         for t in toks:
-            global_counts[t] += 1
-            if is_page: page_counts[t] += 1
-            if is_post: post_counts[t] += 1
+            inv[t].add(i)
 
-    for key, toks in nav_anchor_map.items():
-        for t in toks:
-            page_counts[t] += 3
-    for t in domain_toks:
-        page_counts[t] += 2
+    # slot detection
+    def kw_slot_for(text: str) -> str:
+        cats = set(categorize_keyword(text))
+        if "VEO" in cats: return "VEO"
+        if "AIO" in cats: return "AIO"
+        return "SEO"
 
-    page_core_lex = set(page_counts.keys())
-    post_lex = set(post_counts.keys())
-    site_lex = set(page_core_lex) | set(post_lex) | set(all_nav_tokens) | set(domain_toks)
+    # Opportunity ordering (per strategy; same as before)
+    vols_local = pd.to_numeric(df[vol_col], errors="coerce").fillna(0).clip(lower=0)
+    max_log_local = float((vols_local + 1).apply(lambda x: math.log(1 + x)).max()) or 1.0
 
-    post_heavy: Dict[str,bool] = {}
-    very_common: Dict[str,bool] = {}
-    total_docs = max(1, len(profiles))
-    for t in set(list(page_counts.keys()) + list(post_counts.keys()) + list(global_counts.keys())):
-        r = post_counts.get(t,0) / max(1, page_counts.get(t,0))
-        post_heavy[t] = (r >= 5.0)
-        very_common[t] = (global_counts.get(t,0) >= max(3, total_docs // 3))
-
-    vols = pd.to_numeric(df[vol_col], errors="coerce").fillna(0).clip(lower=0)
-    max_log = float((vols + 1).apply(lambda x: math.log(1 + x)).max()) or 1.0
-
-    def strat_weights():
-        if scoring_mode == "Low Hanging Fruit": return 0.30, 0.40, 0.30
-        elif scoring_mode == "In The Game":     return 0.30, 0.35, 0.35
-        else:                                    return 0.30, 0.20, 0.50
-    W_FIT, W_KD, W_VOL = strat_weights()
-
-    def _has_core_token(tokens: List[str]) -> bool:
-        for t in tokens:
-            if len(t) >= 4 and t not in STOPWORDS and t in page_core_lex:
-                return True
-        return False
-
-    def _post_heavy_penalty(tokens: List[str]) -> float:
-        cnt = sum(1 for t in tokens if post_heavy.get(t, False))
-        if cnt >= 2: return -0.30
-        if cnt == 1: return -0.20
-        return 0.0
-
-    def _commonness_penalty(tokens: List[str]) -> float:
-        cnt = sum(1 for t in tokens if very_common.get(t, False))
-        return -0.05 * cnt
-
-    TOP_K = 5
-    kw_candidates: Dict[int, List[Tuple[str,float,float,str,float]]] = {}
-    kw_slot: Dict[int,str] = {}
-    kw_rank: Dict[int,float] = {}
-    head_noun_by_kw: Dict[int, str] = {}
-    kw_is_aio: Dict[int, bool] = {}
-    kw_is_veo: Dict[int, bool] = {}
-    kw_concepts: Dict[int, Set[str]] = {}
-
-    for idx, row in df.iterrows():
-        vol_val_raw = row.get(vol_col, 0)
-        vol_val = float(pd.to_numeric(vol_val_raw, errors="coerce") or 0)
-        if vol_val < MIN_VALID_VOLUME:
-            kw_candidates[idx] = []
-            kw_rank[idx] = 0.0
-            continue
-
-        raw_kw = str(row.get(kw_col, "")) if kw_col else str(row.get("Keyword",""))
-        tokens_norm = _ntokens(raw_kw)
-
-        kw_is_veo[idx] = any(t in VEO_TRIGGER_TOKS for t in tokens_norm)
-        kw_is_aio[idx] = bool(AIO_PAT.search(raw_kw) or any(t in AIO_TRIGGER_TOKS for t in tokens_norm))
-        kw_concepts[idx] = _detect_concepts(tokens_norm)
-
-        cats = set(categorize_keyword(raw_kw))
-        if "VEO" in cats: slot = "VEO"
-        elif "AIO" in cats: slot = "AIO"
-        else: slot = "SEO"
-        kw_slot[idx] = slot
-
-        head = _head_noun(tokens_norm)
-        head_noun_by_kw[idx] = head
-
-        if slot in {"SEO","VEO"} and not _has_core_token(tokens_norm):
-            kw_candidates[idx] = []
-            kw_rank[idx] = 0.0
-            continue
-
-        fits_page: List[Tuple[str,float,float,str,float]] = []
-        fits_other: List[Tuple[str,float,float,str,float]] = []
-        best_page_probe: Optional[Tuple[str,float,float,str,float]] = None
-
-        for p in profiles:
-            base_fit = _fit_score(raw_kw, p)
-            if base_fit <= 0:
-                continue
-            stype = (
-                "other"
-                if p.get("url") is None
-                else (
-                    srcmap.get(_url_key(p["url"])) or
-                    srcmap.get(_url_key(p.get("final_url",""))) or
-                    srcmap.get(_url_key(p.get("requested_url",""))) or
-                    "other"
-                )
-            )
-            is_nav_flag = (_url_key(p["url"]) in nav_anchor_map) or (_url_key(p.get("requested_url","")) in nav_anchor_map)
-            is_page_like = _is_page_like(stype, p["url"], is_nav_flag)
-
-            title_tokens = set((p.get("title_h1_norm") or "").split())
-            title_raw = (p.get("title") or "").strip().lower()
-            covered = sum(1 for t in tokens_norm if t in title_tokens)
-            covered_ratio = covered / max(1, len(tokens_norm))
-            lead_tokens = set((p.get("lead_norm") or "").split())
-            lead_cov = sum(1 for t in tokens_norm if t in lead_tokens) / max(1, len(tokens_norm))
-
-            v_intent, home_nap = _veo_intent(p, nav_anchor_map)
-            a_score = p.get("a_score", 0.0)
-
-            bonus = _url_priority_bonus(p["url"], is_nav_flag, stype)
-            if is_page_like:
-                bonus += _post_heavy_penalty(tokens_norm)
-
-            slug_toks = _slug_tokens(p["url"])
-            if head and (head in slug_toks or head in title_tokens): bonus += 0.12
-            phrase_str = " ".join(tokens_norm)
-            if head and (title_raw.startswith(head + " ") or title_raw == head):
-                bonus += 0.12
-            elif phrase_str and (title_raw.startswith(phrase_str + " ") or title_raw == phrase_str):
-                bonus += 0.12
-
-            concept_bonus = 0.0
-            if kw_is_veo[idx] and v_intent:
-                concept_bonus += CONCEPT_BIAS["veo"]
-            if kw_is_aio[idx] and a_score >= 0.25:
-                concept_bonus += CONCEPT_BIAS["aio"]
-            page_ev = set(title_tokens) | slug_toks | nav_anchor_map.get(_url_key(p["url"]), set())
-            for c in kw_concepts[idx]:
-                if c in CONCEPT_BIAS:
-                    if page_ev & CONCEPT_EVIDENCE.get(c, set()):
-                        concept_bonus += CONCEPT_BIAS[c]
-            if concept_bonus > MAX_CONCEPT_BONUS:
-                concept_bonus = MAX_CONCEPT_BONUS
-
-            bonus += _commonness_penalty(tokens_norm)
-            f = max(0.0, min(2.0, base_fit + bonus + concept_bonus))
-
-            if slot == "VEO" and not v_intent:
-                f = max(0.0, f - 0.20)
-                if f < 0.60:
-                    if is_page_like:
-                        if (best_page_probe is None) or (f > best_page_probe[1]):
-                            best_page_probe = (p["url"], f, covered_ratio, stype, a_score)
-                    continue
-
-            passed = True
-            if slot == "SEO":
-                if (lead_cov < 0.18) and (covered_ratio < 0.50):
-                    passed = False
-            elif slot == "AIO":
-                if (lead_cov < 0.12) and (covered_ratio < 0.40) and (a_score < 0.25):
-                    passed = False
-            else:  # VEO
-                if lead_cov < 0.10 and v_intent and covered_ratio < 0.33:
-                    passed = False
-
-            if passed and slot == "SEO" and head:
-                if (head not in title_tokens) and (head not in slug_toks):
-                    if not phrase_str or phrase_str not in (p.get("title_h1_norm") or "") or f < 0.70:
-                        passed = False
-
-            if not passed:
-                if is_page_like:
-                    if (best_page_probe is None) or (f > best_page_probe[1]):
-                        best_page_probe = (p["url"], f, covered_ratio, stype, a_score)
-                continue
-
-            if is_page_like:
-                fits_page.append((p["url"], f, covered_ratio, stype, a_score))
-            else:
-                fits_other.append((p["url"], f, covered_ratio, stype, a_score))
-
-        fits_page.sort(key=lambda x: x[1], reverse=True)
-        fits_other.sort(key=lambda x: x[1], reverse=True)
-
-        if not fits_page and fits_other and best_page_probe is not None:
-            best_fit = fits_other[0][1]
-            page_fit = best_page_probe[1]
-            page_min = 0.25 if slot=="SEO" else (0.18 if slot=="AIO" else 0.18)
-            if (page_fit >= 0.50 * best_fit) and (page_fit >= (page_min - 0.03)):
-                fits_page = [best_page_probe]
-
-        fits: List[Tuple[str,float,float,str,float]] = []
-        if slot == "AIO" and fits_page and fits_other:
-            best_page = fits_page[0][1]
-            aio_posts = [t for t in fits_other if _is_post_like(t[3], t[0]) and t[4] >= 0.35]
-            if aio_posts:
-                aio_posts.sort(key=lambda x: x[1], reverse=True)
-                best_post = aio_posts[0][1]
-                if best_post >= (best_page + 0.08):
-                    fits.extend(aio_posts[:5])
-                    if len(fits) < 5:
-                        fits.extend(fits_page[:5 - len(fits)])
-                else:
-                    if best_page >= (best_post - 0.10):
-                        fits.extend(fits_page[:5])
-                        if len(fits) < 5:
-                            fits.extend(fits_other[:5 - len(fits)])
-                    else:
-                        fits.extend(fits_page[:5])
-                        if len(fits) < 5:
-                            fits.extend(fits_other[:5 - len(fits)])
-            else:
-                fits.extend(fits_page[:5])
-                if len(fits) < 5:
-                    fits.extend(fits_other[:5 - len(fits)])
-        else:
-            if fits_page and fits_other:
-                best_page = fits_page[0][1]
-                best_other = fits_other[0][1]
-                best_overall = max(best_page, best_other)
-                if best_page >= (best_overall - 0.10):
-                    fits.extend(fits_page[:5])
-                    if len(fits) < 5:
-                        fits.extend(fits_other[:5 - len(fits)])
-                else:
-                    fits.extend(fits_page[:5])
-                    if len(fits) < 5:
-                        fits.extend(fits_other[:5 - len(fits)])
-            elif fits_page:
-                fits = fits_page[:5]
-            else:
-                fits = fits_other[:5]
-
-        if not fits:
-            kw_candidates[idx] = []
-            kw_rank[idx] = 0.0
-            continue
-
-        top_fit = fits[0][1]
-        def _smeta_boost(u: str, base_fit: float) -> float:
-            b = 0.0
-            md = smeta.get(u, {})
-            close = (top_fit - base_fit) <= 0.04
-            if close and md.get("priority"):
-                try:
-                    pr = float(md.get("priority") or 0)
-                    if pr >= 0.8: b += 0.03
-                    elif pr >= 0.5: b += 0.015
-                except Exception:
-                    pass
-            if close and md.get("lastmod") and (kw_slot[idx] == "AIO"):
-                if _parse_lastmod_ts(md.get("lastmod")) > 0:
-                    b += 0.01
-            return b
-
-        fits = [(u, f + _smeta_boost(u, f), cr, st, a) for (u, f, cr, st, a) in fits]
-        fits.sort(key=lambda x: x[1], reverse=True)
-
-        kw_candidates[idx] = fits[:5]
-
-        best_fit = fits[0][1]
+    def opportunity(idx: int) -> float:
+        row = df.loc[idx]
         kd_val = float(pd.to_numeric(row.get(kd_col,0), errors="coerce") or 0)
         vol_val = float(pd.to_numeric(row.get(vol_col,0), errors="coerce") or 0)
-        fit_norm = best_fit / 2.0
         kd_norm = max(0.0, 1.0 - kd_val/100.0)
-        vol_norm = math.log(1 + max(0.0, vol_val)) / max_log
+        vol_norm = math.log(1 + max(0.0, vol_val)) / max_log_local
+        return vol_norm * kd_norm
 
-        if scoring_mode == "Low Hanging Fruit":
-            lhf_opportunity = vol_norm * kd_norm
-            kw_rank[idx] = 0.30*fit_norm + 0.30*kd_norm + 0.20*vol_norm + 0.20*lhf_opportunity
-        elif scoring_mode == "In The Game":
-            kw_rank[idx] = 0.35*fit_norm + 0.30*kd_norm + 0.35*vol_norm
-        else:
-            kw_rank[idx] = 0.40*fit_norm + 0.20*kd_norm + 0.40*vol_norm
-
-        def _class_min_for_type(slot_name: str, is_post: bool) -> float:
-            if slot_name == "SEO": return 0.55 if is_post else 0.25
-            if slot_name == "AIO": return 0.22 if is_post else 0.18
-            return 0.30 if is_post else 0.18
-
-        any_ok = False
-        for (u, f, cr, st, a) in fits:
-            is_post = _is_post_like(st, u)
-            if f >= _class_min_for_type(kw_slot[idx], is_post):
-                any_ok = True
-                break
-        if not any_ok:
-            kw_candidates[idx] = []
-            kw_rank[idx] = 0.0
-
-    # ---------- Assignment (caps enforced) ----------
+    # Caps per URL (per current strategy run)
     caps = {"VEO":1, "AIO":1, "SEO":2}
-    url_list_for_assign = {}
-    for p in profiles:
-        url_list_for_assign[p["url"]] = {"VEO":None, "AIO":None, "SEO":[]}
+    per_url_caps: Dict[str, Dict[str, List[int] or Optional[int]]] = {}
+    for u in page_urls:
+        per_url_caps[u] = {"VEO": None, "AIO": None, "SEO": []}
 
     mapped = {i:"" for i in df.index}
 
-    def _seo_allowed(stype: str, u: str, fit: float, covered_ratio: float, head: str, title_tokens: Set[str]) -> bool:
-        if _is_post_like(stype, u):
-            if (covered_ratio >= 0.60 and fit >= 0.80 and head and (head in title_tokens or head in _slug_tokens(u))):
-                return True
-            return False
-        return True
+    # Prepare eligible ids by slot, sorted by opportunity (desc)
+    ids_by_slot: Dict[str, List[int]] = {"VEO": [], "AIO": [], "SEO": []}
+    kw_texts: Dict[int, str] = {}
+    for idx, row in df.iterrows():
+        vol_val = float(pd.to_numeric(row.get(vol_col,0), errors="coerce") or 0)
+        if vol_val < MIN_VALID_VOLUME:
+            continue  # ineligible for mapping under current strategy
+        kw_text = str(row.get(kw_col, "")) if kw_col else str(row.get("Keyword",""))
+        kw_texts[idx] = kw_text
+        ids_by_slot[kw_slot_for(kw_text)].append(idx)
 
-    def assign_slot(slot_name: str):
-        ids = [i for i,s in kw_slot.items() if s == slot_name]
-        vols_local = pd.to_numeric(df[vol_col], errors="coerce").fillna(0).clip(lower=0)
-        max_log_local = float((vols_local + 1).apply(lambda x: math.log(1 + x)).max()) or 1.0
-        opp = {}
-        for i in ids:
-            row = df.loc[i]
-            kd_val = float(pd.to_numeric(row.get(kd_col,0), errors="coerce") or 0)
-            vol_val = float(pd.to_numeric(row.get(vol_col,0), errors="coerce") or 0)
-            kd_norm = max(0.0, 1.0 - kd_val/100.0)
-            vol_norm = math.log(1 + max(0.0, vol_val)) / max_log_local
-            opp[i] = vol_norm * kd_norm
-        ids.sort(key=lambda i: (-opp.get(i,0.0), -kw_rank.get(i,0.0), i))
+    for slot_name in ["VEO","AIO","SEO"]:
+        ids = ids_by_slot[slot_name]
+        ids.sort(key=lambda i: (-opportunity(i), i))
 
         for i in ids:
-            choices = kw_candidates.get(i, [])
-            if not choices: continue
-            kw_text = str(df.loc[i].get(kw_col, "")) if kw_col else str(df.loc[i].get("Keyword",""))
-            head = _head_noun(_ntokens(kw_text))
-            for j, (u, fit, covered_ratio, stype, a_score) in enumerate(choices):
-                title_tokens = set()
-                # (optional) could fetch title tokens per URL if needed
-                if slot_name == "SEO":
-                    if not _seo_allowed(stype, u, fit, covered_ratio, head, title_tokens):
+            kw_text = kw_texts.get(i, "")
+            kw_tokens = set(_ntokens(kw_text))
+            if not kw_tokens:
+                continue
+
+            # candidate pages via inverted index
+            candidates: Set[int] = set()
+            for t in kw_tokens:
+                candidates |= inv.get(t, set())
+            if not candidates:
+                continue
+
+            # First: exact-phrase precedence
+            kw_lower = kw_text.strip().lower()
+            exact_hits = []
+            for pi in candidates:
+                if kw_lower and (kw_lower in page_texts[pi]):
+                    exact_hits.append(pi)
+
+            def tie_key(pi: int) -> Tuple:
+                # Deterministic tie-breaks:
+                # 1) shallower depth
+                # 2) page-like over post-like
+                # 3) shorter URL
+                # 4) alphabetical URL
+                stype = srcmap.get(_url_key(page_urls[pi]), "other")
+                is_nav_flag = _is_nav(page_urls[pi])
+                page_like = _is_page_like(stype, page_urls[pi], is_nav_flag)
+                return (
+                    page_depths[pi],                # smaller is better
+                    0 if page_like else 1,          # page-like first
+                    len(page_urls[pi]),             # shorter is better
+                    page_urls[pi]                   # alphabetical
+                )
+
+            chosen_index: Optional[int] = None
+
+            if exact_hits:
+                # exact phrase always wins; break ties deterministically
+                exact_hits.sort(key=lambda pi: tie_key(pi))
+                chosen_index = exact_hits[0]
+            else:
+                # No exact hit — use unweighted coverage, then overlap, then tie-break
+                scored: List[Tuple[float,int,int,int]] = []
+                for pi in candidates:
+                    inter = kw_tokens & page_tokens[pi]
+                    if not inter:
                         continue
-                if slot_name in {"VEO","AIO"}:
-                    if url_list_for_assign[u][slot_name] is None and (j == 0 or fit >= 0.22):
-                        url_list_for_assign[u][slot_name] = i; mapped[i] = u; break
+                    coverage = len(inter) / max(1, len(kw_tokens))
+                    overlap = len(inter)
+                    scored.append((coverage, overlap, pi, 0))
+                if not scored:
+                    continue
+                scored.sort(key=lambda x: (-x[0], -x[1], tie_key(x[2])))
+                chosen_index = scored[0][2]
+
+            if chosen_index is None:
+                continue
+
+            u = page_urls[chosen_index]
+            # enforce per-URL caps (soft; try next candidate if cap full)
+            if slot_name in {"VEO","AIO"}:
+                already = per_url_caps[u][slot_name]
+                if already is None:
+                    per_url_caps[u][slot_name] = i
+                    mapped[i] = u
                 else:
-                    if (len(url_list_for_assign[u]["SEO"]) < caps["SEO"]) and (j == 0 or fit >= 0.22):
-                        url_list_for_assign[u]["SEO"].append(i); mapped[i] = u; break
-
-    assign_slot("VEO"); assign_slot("AIO"); assign_slot("SEO")
-
-    for u, slots in url_list_for_assign.items():
-        if isinstance(slots["SEO"], list) and len(slots["SEO"]) > caps["SEO"]:
-            for drop_idx in slots["SEO"][caps["SEO"]:]: mapped[drop_idx] = ""
-            slots["SEO"] = slots["SEO"][:caps["SEO"]]
+                    # try next best candidate that isn't capped out
+                    # build ordered list again and pick next
+                    ordered_candidates = []
+                    if exact_hits:
+                        ordered_candidates = sorted(exact_hits, key=lambda pi: tie_key(pi))
+                    else:
+                        ordered_candidates = [pi for _,_,pi,_ in sorted(scored, key=lambda x: (-x[0], -x[1], tie_key(x[2])))]
+                    placed = False
+                    for pi in ordered_candidates:
+                        u2 = page_urls[pi]
+                        if per_url_caps[u2][slot_name] is None:
+                            per_url_caps[u2][slot_name] = i
+                            mapped[i] = u2
+                            placed = True
+                            break
+                    if not placed:
+                        # soft overflow: allow replacing only if same URL holds nobody? (No)
+                        # Leave unmapped to respect caps strictly
+                        pass
+            else:
+                # SEO list up to 2
+                current_list = per_url_caps[u]["SEO"]
+                assert isinstance(current_list, list)
+                if len(current_list) < 2:
+                    current_list.append(i)
+                    mapped[i] = u
+                else:
+                    # try next candidate
+                    ordered_candidates = []
+                    if exact_hits:
+                        ordered_candidates = sorted(exact_hits, key=lambda pi: tie_key(pi))
+                    else:
+                        ordered_candidates = [pi for _,_,pi,_ in sorted(scored, key=lambda x: (-x[0], -x[1], tie_key(x[2])))]
+                    placed = False
+                    for pi in ordered_candidates:
+                        u2 = page_urls[pi]
+                        lst = per_url_caps[u2]["SEO"]
+                        assert isinstance(lst, list)
+                        if len(lst) < 2:
+                            lst.append(i)
+                            mapped[i] = u2
+                            placed = True
+                            break
+                    if not placed:
+                        # Strict caps: leave unmapped
+                        pass
 
     return pd.Series([mapped[i] for i in df.index], index=df.index, dtype="string")
 
@@ -1532,7 +1217,7 @@ with st.form("single"):
 st.markdown("---")
 st.subheader("Bulk Scoring (CSV Upload)")
 
-# Mapping controls (Include subdomains removed from UI; dev default = True)
+# Mapping controls
 base_site_url = st.text_input("Base site URL (for URL mapping)", placeholder="https://example.com")
 include_subdomains = True
 use_sitemap_first = True  # always use sitemap first
@@ -1586,9 +1271,9 @@ if uploaded is not None:
         df[vol_col] = pd.to_numeric(df[vol_col], errors="coerce")
         df[kd_col]  = pd.to_numeric(df[kd_col], errors="coerce").clip(lower=0, upper=100)
 
-        # ===== Per-strategy (kept) =====
         scored = add_scoring_columns(df, vol_col, kd_col, kw_col)
 
+        # ---------- Build export_df ----------
         filename_base = f"outrankiq_{scoring_mode.lower().replace(' ', '_')}_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
         base_cols = ([kw_col] if kw_col else []) + [vol_col, kd_col, "Score","Tier","Eligible","Reason","Category"]
         export_df = scored[base_cols].copy()
@@ -1597,20 +1282,23 @@ if uploaded is not None:
         export_df["_EligibleSort"] = export_df["Eligible"].map({"Yes":1,"No":0}).fillna(0)
         export_df = export_df.sort_values(by=["_EligibleSort", kd_col, vol_col], ascending=[False, True, False], kind="mergesort").drop(columns=["_EligibleSort"])
 
+        # ---------- Prepare signature for mapping state ----------
         sig_cols = [c for c in [kw_col, vol_col, kd_col] if c]
         try:
             sig_df = export_df[sig_cols].copy()
         except Exception:
             sig_df = export_df[[col for col in sig_cols if col in export_df.columns]].copy()
         sig_csv = sig_df.fillna("").astype(str).to_csv(index=False)
-        sig_base = f"site-map-v12-synonyms-gated|{_normalize_base(base_site_url.strip()).lower()}|{scoring_mode}|{kw_col}|{vol_col}|{kd_col}|{len(export_df)}|subdomains={include_subdomains}"
+        sig_base = f"site-map-v13-unweighted-phrase-first|{_normalize_base(base_site_url.strip()).lower()}|{scoring_mode}|{kw_col}|{vol_col}|{kd_col}|{len(export_df)}|subdomains={include_subdomains}"
         curr_signature = hashlib.md5((sig_base + "\n" + sig_csv).encode("utf-8")).hexdigest()
 
+        # Invalidate previous map if inputs changed
         if st.session_state.get("map_signature") != curr_signature:
             st.session_state["map_ready"] = False
 
+        # ---------- Manual mapping button ----------
         can_map = bool(base_site_url.strip())
-        map_btn = st.button("Map keywords to site", type="primary", disabled=not can_map, help="Runs a fast crawl & assigns the best page per keyword for this strategy.")
+        map_btn = st.button("Map keywords to site", type="primary", disabled=not can_map, help="Crawls & assigns the best page per keyword for this strategy (unweighted match; exact phrase wins).")
 
         if map_btn and not st.session_state.get("mapping_running", False):
             st.session_state["mapping_running"] = True
@@ -1624,7 +1312,7 @@ if uploaded is not None:
                   <div class="oiq-loader-text">Mapping keywords to your site…</div>
                 </div>
                 """, unsafe_allow_html=True)
-            with st.spinner("Launching fast crawl & scoring fit…"):
+            with st.spinner("Crawling & matching keywords…"):
                 cache = st.session_state["map_cache"]
                 if curr_signature in cache and len(cache[curr_signature]) == len(export_df):
                     map_series = pd.Series(cache[curr_signature], index=export_df.index, dtype="string")
@@ -1640,8 +1328,10 @@ if uploaded is not None:
             loader.empty()
             st.session_state["mapping_running"] = False
 
+        # ---------- Build CSV for download ----------
         if st.session_state.get("map_ready") and st.session_state.get("map_signature") == curr_signature:
             export_df["Map URL"] = st.session_state["map_result"]
+            # Do not show a URL where row is not eligible
             export_df.loc[export_df["Eligible"] != "Yes", "Map URL"] = ""
             can_download = True
         else:
@@ -1653,83 +1343,14 @@ if uploaded is not None:
         export_cols = base_cols + ["Strategy","Map URL"]
         export_df = export_df[export_cols]
 
+        csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")
         st.download_button(
-            label="⬇️ Download scored CSV (current strategy)",
-            data=export_df.to_csv(index=False).encode("utf-8-sig"),
+            label="⬇️ Download scored CSV",
+            data=csv_bytes,
             file_name=f"{filename_base}.csv",
             mime="text/csv",
             help="Sorted by eligibility (Yes first), KD ascending, Volume descending",
             disabled=not can_download
         )
-
-        st.markdown("---")
-        st.subheader("One-Click: Build Combined CSV (LHF + ITG + Competitive)")
-
-        # ===== Combined run (new) =====
-        run_all = st.button("Run Scoring → Mapping → Build Combined CSV")
-
-        def _set_strategy_globals(name: str):
-            global MIN_VALID_VOLUME, KD_BUCKETS, scoring_mode
-            scoring_mode = name
-            if name == "Low Hanging Fruit":
-                MIN_VALID_VOLUME = 10
-                KD_BUCKETS = [(0,15,6),(16,20,5),(21,25,4),(26,50,3),(51,75,2),(76,100,1)]
-            elif name == "In The Game":
-                MIN_VALID_VOLUME = 1500
-                KD_BUCKETS = [(0,30,6),(31,45,5),(46,60,4),(61,70,3),(71,80,2),(81,100,1)]
-            else:
-                MIN_VALID_VOLUME = 3000
-                KD_BUCKETS = [(0,40,6),(41,60,5),(61,75,4),(76,85,3),(86,95,2),(96,100,1)]
-
-        def _build_for_strategy(name: str) -> pd.DataFrame:
-            _set_strategy_globals(name)
-            scored_local = add_scoring_columns(df, vol_col, kd_col, kw_col)
-            out = scored_local[[*( [kw_col] if kw_col else [] ), vol_col, kd_col, "Score","Tier","Eligible","Reason","Category"]].copy()
-            out["Strategy"] = name
-            if base_site_url.strip():
-                m = map_keywords_to_urls(
-                    out, kw_col=kw_col, vol_col=vol_col, kd_col=kd_col,
-                    base_url=base_site_url.strip(), include_subdomains=True, use_sitemap_first=True
-                )
-                out["Map URL"] = m
-                out.loc[out["Eligible"] != "Yes", "Map URL"] = ""
-            else:
-                out["Map URL"] = ""
-            return out
-
-        if run_all:
-            if not base_site_url.strip():
-                st.error("Enter a Base site URL to build the combined CSV with mapped URLs.")
-            else:
-                with st.spinner("Running all strategies and mapping URLs…"):
-                    lhf_df = _build_for_strategy("Low Hanging Fruit")
-                    itg_df = _build_for_strategy("In The Game")
-                    comp_df = _build_for_strategy("Competitive")
-                    combined = pd.concat([lhf_df, itg_df, comp_df], ignore_index=True)
-
-                    # Sort: Strategy, Eligible desc, KD asc, Volume desc
-                    strategy_order = {"Low Hanging Fruit":0, "In The Game":1, "Competitive":2}
-                    combined["_sord"] = combined["Strategy"].map(strategy_order)
-                    combined["_elig"] = combined["Eligible"].map({"Yes":1,"No":0}).fillna(0)
-                    combined = combined.sort_values(["_sord","_elig", kd_col, vol_col], ascending=[True, False, True, False]).drop(columns=["_sord","_elig"])
-
-                    st.dataframe(combined.head(100), use_container_width=True)
-                    combo_name = f"outrankiq_all_strategies_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}.csv"
-                    st.download_button(
-                        "⬇️ Download Combined Results (All Strategies)",
-                        data=combined.to_csv(index=False).encode("utf-8-sig"),
-                        file_name=combo_name,
-                        mime="text/csv",
-                        help="One file with LHF + ITG + Competitive and mapped URLs"
-                    )
-
-        with st.expander("What each strategy means (quick refresher)"):
-            st.markdown(
-                """
-- **Low Hanging Fruit (LHF)** — Lower KD, solid volume. Quick wins to publish or optimize first.  
-- **In The Game (ITG)** — Moderate KD, good volume. Requires strong intent match & internal linking; URL mapping matters most here.  
-- **Competitive** — Higher KD and/or very high volume. Longer-term bets once LHF/ITG are covered (or if you have topical authority).
-                """
-            )
 
 st.markdown("<div class='oiq-footer'>© 2025 OutrankIQ</div>", unsafe_allow_html=True)
