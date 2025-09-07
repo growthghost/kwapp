@@ -254,6 +254,61 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# ---------- ENHANCED GUARDRAIL HELPERS ----------
+def extract_core_tokens(kw: str) -> Set[str]:
+    """Extract meaningful tokens from keyword, excluding stopwords."""
+    stopwords = {
+        "how", "what", "where", "when", "why", "who", "which", "get", "for", "to", "a", "an", "the",
+        "is", "are", "was", "were", "can", "i", "you", "in", "on", "of", "and", "do", "does", "with",
+        "my", "your", "me", "we", "be", "that", "this", "from", "it", "as", "at", "by", "if"
+    }
+    return set(t for t in _ntokens(kw) if t not in stopwords)
+
+def extract_bigrams(kw: str) -> List[Tuple[str, str]]:
+    """Extract word pairs from keyword."""
+    tokens = _ntokens(kw)
+    return list(zip(tokens, tokens[1:]))
+
+def passes_core_concept_guardrail(kw: str, page_tokens: set, page_text: str) -> bool:
+    """Enhanced guardrail check for keyword-page relevance."""
+    kw_lower = kw.strip().lower()
+    
+    # Priority 1: Exact phrase match
+    if kw_lower in page_text:
+        return True
+    
+    # Priority 2: Bigram matches (important word pairs)
+    bigrams = extract_bigrams(kw)
+    if any(f"{a} {b}" in page_text for (a, b) in bigrams):
+        return True
+    
+    # Priority 3: Core token overlap (at least 2 meaningful tokens)
+    core_tokens = extract_core_tokens(kw)
+    if sum(1 for t in core_tokens if t in page_tokens) >= 2:
+        return True
+    
+    return False
+
+def calculate_relevance_score(kw: str, page_tokens: set, page_text: str) -> int:
+    """Calculate relevance score for keyword-page match (0-3)."""
+    kw_lower = kw.strip().lower()
+    
+    # Exact phrase = highest score
+    if kw_lower in page_text:
+        return 3
+    
+    # Bigram matches = medium-high score
+    bigrams = extract_bigrams(kw)
+    if any(f"{a} {b}" in page_text for (a, b) in bigrams):
+        return 2
+    
+    # Core token overlap = medium score
+    core_tokens = extract_core_tokens(kw)
+    if sum(1 for t in core_tokens if t in page_tokens) >= 2:
+        return 1
+    
+    return 0
+
 # ---------- Helpers ----------
 def find_column(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
     cols_lower = {c.lower(): c for c in df.columns}
@@ -275,6 +330,10 @@ strategy_descriptions = {
 
 # ---------- Strategy ----------
 scoring_mode = st.selectbox("Choose Scoring Strategy", ["Low Hanging Fruit","In The Game","Competitive"])
+
+# Add mapping quality control option
+use_enhanced_guardrails = st.checkbox("Use Enhanced Mapping Guardrails", value=True, 
+                                      help="Apply stricter relevance checks when mapping keywords to pages")
 
 # Reset mapping state on strategy switch
 if "last_strategy" not in st.session_state:
@@ -992,9 +1051,10 @@ def cached_discover_and_sources(base_url: str, include_subdomains: bool, use_sit
 def cached_fetch_profiles(urls: Tuple[str, ...]) -> List[Dict]:
     return _fetch_profiles(list(urls))
 
-# ---------- Mapping (UNWEIGHTED overlap with exact-phrase precedence) ----------
+# ---------- ENHANCED Mapping with Guardrails ----------
 def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, kd_col: str,
-                         base_url: str, include_subdomains: bool, use_sitemap_first: bool) -> pd.Series:
+                         base_url: str, include_subdomains: bool, use_sitemap_first: bool,
+                         use_enhanced_guardrails: bool = True) -> pd.Series:
     url_list, srcmap, _smeta = cached_discover_and_sources(base_url, include_subdomains, use_sitemap_first)
     profiles = cached_fetch_profiles(tuple(url_list))
 
@@ -1096,49 +1156,70 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
             if not candidates:
                 continue
 
-            # First: exact-phrase precedence
-            kw_lower = kw_text.strip().lower()
-            exact_hits = []
-            for pi in candidates:
-                if kw_lower and (kw_lower in page_texts[pi]):
-                    exact_hits.append(pi)
-
-            def tie_key(pi: int) -> Tuple:
-                # Deterministic tie-breaks:
-                # 1) shallower depth
-                # 2) page-like over post-like
-                # 3) shorter URL
-                # 4) alphabetical URL
-                stype = srcmap.get(_url_key(page_urls[pi]), "other")
-                is_nav_flag = _is_nav(page_urls[pi])
-                page_like = _is_page_like(stype, page_urls[pi], is_nav_flag)
-                return (
-                    page_depths[pi],                # smaller is better
-                    0 if page_like else 1,          # page-like first
-                    len(page_urls[pi]),             # shorter is better
-                    page_urls[pi]                   # alphabetical
-                )
-
-            chosen_index: Optional[int] = None
-
-            if exact_hits:
-                # exact phrase always wins; break ties deterministically
-                exact_hits.sort(key=lambda pi: tie_key(pi))
-                chosen_index = exact_hits[0]
-            else:
-                # No exact hit — use unweighted coverage, then overlap, then tie-break
-                scored: List[Tuple[float,int,int,int]] = []
+            # Apply enhanced guardrails if enabled
+            if use_enhanced_guardrails:
+                # Filter candidates using guardrail check
+                filtered_candidates = []
                 for pi in candidates:
-                    inter = kw_tokens & page_tokens[pi]
-                    if not inter:
-                        continue
-                    coverage = len(inter) / max(1, len(kw_tokens))
-                    overlap = len(inter)
-                    scored.append((coverage, overlap, pi, 0))
-                if not scored:
+                    if passes_core_concept_guardrail(kw_text, page_tokens[pi], page_texts[pi]):
+                        relevance_score = calculate_relevance_score(kw_text, page_tokens[pi], page_texts[pi])
+                        filtered_candidates.append((pi, relevance_score))
+                
+                if not filtered_candidates:
                     continue
-                scored.sort(key=lambda x: (-x[0], -x[1], tie_key(x[2])))
-                chosen_index = scored[0][2]
+                
+                # Sort by relevance score (higher is better), then by tie-breaking criteria
+                def tie_key(pi: int) -> Tuple:
+                    stype = srcmap.get(_url_key(page_urls[pi]), "other")
+                    is_nav_flag = _is_nav(page_urls[pi])
+                    page_like = _is_page_like(stype, page_urls[pi], is_nav_flag)
+                    return (
+                        page_depths[pi],                # smaller is better
+                        0 if page_like else 1,          # page-like first
+                        len(page_urls[pi]),             # shorter is better
+                        page_urls[pi]                   # alphabetical
+                    )
+                
+                filtered_candidates.sort(key=lambda x: (-x[1], tie_key(x[0])))
+                chosen_index = filtered_candidates[0][0]
+            else:
+                # Original logic: exact-phrase precedence, then unweighted coverage
+                kw_lower = kw_text.strip().lower()
+                exact_hits = []
+                for pi in candidates:
+                    if kw_lower and (kw_lower in page_texts[pi]):
+                        exact_hits.append(pi)
+
+                def tie_key(pi: int) -> Tuple:
+                    stype = srcmap.get(_url_key(page_urls[pi]), "other")
+                    is_nav_flag = _is_nav(page_urls[pi])
+                    page_like = _is_page_like(stype, page_urls[pi], is_nav_flag)
+                    return (
+                        page_depths[pi],                # smaller is better
+                        0 if page_like else 1,          # page-like first
+                        len(page_urls[pi]),             # shorter is better
+                        page_urls[pi]                   # alphabetical
+                    )
+
+                chosen_index: Optional[int] = None
+
+                if exact_hits:
+                    exact_hits.sort(key=lambda pi: tie_key(pi))
+                    chosen_index = exact_hits[0]
+                else:
+                    # No exact hit — use unweighted coverage, then overlap, then tie-break
+                    scored: List[Tuple[float,int,int,int]] = []
+                    for pi in candidates:
+                        inter = kw_tokens & page_tokens[pi]
+                        if not inter:
+                            continue
+                        coverage = len(inter) / max(1, len(kw_tokens))
+                        overlap = len(inter)
+                        scored.append((coverage, overlap, pi, 0))
+                    if not scored:
+                        continue
+                    scored.sort(key=lambda x: (-x[0], -x[1], tie_key(x[2])))
+                    chosen_index = scored[0][2]
 
             if chosen_index is None:
                 continue
@@ -1152,24 +1233,30 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
                     mapped[i] = u
                 else:
                     # try next best candidate that isn't capped out
-                    # build ordered list again and pick next
-                    ordered_candidates = []
-                    if exact_hits:
-                        ordered_candidates = sorted(exact_hits, key=lambda pi: tie_key(pi))
+                    if use_enhanced_guardrails:
+                        placed = False
+                        for pi, _ in filtered_candidates:
+                            u2 = page_urls[pi]
+                            if per_url_caps[u2][slot_name] is None:
+                                per_url_caps[u2][slot_name] = i
+                                mapped[i] = u2
+                                placed = True
+                                break
                     else:
-                        ordered_candidates = [pi for _,_,pi,_ in sorted(scored, key=lambda x: (-x[0], -x[1], tie_key(x[2])))]
-                    placed = False
-                    for pi in ordered_candidates:
-                        u2 = page_urls[pi]
-                        if per_url_caps[u2][slot_name] is None:
-                            per_url_caps[u2][slot_name] = i
-                            mapped[i] = u2
-                            placed = True
-                            break
-                    if not placed:
-                        # soft overflow: allow replacing only if same URL holds nobody? (No)
-                        # Leave unmapped to respect caps strictly
-                        pass
+                        # build ordered list again and pick next
+                        ordered_candidates = []
+                        if exact_hits:
+                            ordered_candidates = sorted(exact_hits, key=lambda pi: tie_key(pi))
+                        else:
+                            ordered_candidates = [pi for _,_,pi,_ in sorted(scored, key=lambda x: (-x[0], -x[1], tie_key(x[2])))]
+                        placed = False
+                        for pi in ordered_candidates:
+                            u2 = page_urls[pi]
+                            if per_url_caps[u2][slot_name] is None:
+                                per_url_caps[u2][slot_name] = i
+                                mapped[i] = u2
+                                placed = True
+                                break
             else:
                 # SEO list up to 2
                 current_list = per_url_caps[u]["SEO"]
@@ -1179,24 +1266,33 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
                     mapped[i] = u
                 else:
                     # try next candidate
-                    ordered_candidates = []
-                    if exact_hits:
-                        ordered_candidates = sorted(exact_hits, key=lambda pi: tie_key(pi))
+                    if use_enhanced_guardrails:
+                        placed = False
+                        for pi, _ in filtered_candidates:
+                            u2 = page_urls[pi]
+                            lst = per_url_caps[u2]["SEO"]
+                            assert isinstance(lst, list)
+                            if len(lst) < 2:
+                                lst.append(i)
+                                mapped[i] = u2
+                                placed = True
+                                break
                     else:
-                        ordered_candidates = [pi for _,_,pi,_ in sorted(scored, key=lambda x: (-x[0], -x[1], tie_key(x[2])))]
-                    placed = False
-                    for pi in ordered_candidates:
-                        u2 = page_urls[pi]
-                        lst = per_url_caps[u2]["SEO"]
-                        assert isinstance(lst, list)
-                        if len(lst) < 2:
-                            lst.append(i)
-                            mapped[i] = u2
-                            placed = True
-                            break
-                    if not placed:
-                        # Strict caps: leave unmapped
-                        pass
+                        ordered_candidates = []
+                        if exact_hits:
+                            ordered_candidates = sorted(exact_hits, key=lambda pi: tie_key(pi))
+                        else:
+                            ordered_candidates = [pi for _,_,pi,_ in sorted(scored, key=lambda x: (-x[0], -x[1], tie_key(x[2])))]
+                        placed = False
+                        for pi in ordered_candidates:
+                            u2 = page_urls[pi]
+                            lst = per_url_caps[u2]["SEO"]
+                            assert isinstance(lst, list)
+                            if len(lst) < 2:
+                                lst.append(i)
+                                mapped[i] = u2
+                                placed = True
+                                break
 
     return pd.Series([mapped[i] for i in df.index], index=df.index, dtype="string")
 
@@ -1289,7 +1385,7 @@ if uploaded is not None:
         except Exception:
             sig_df = export_df[[col for col in sig_cols if col in export_df.columns]].copy()
         sig_csv = sig_df.fillna("").astype(str).to_csv(index=False)
-        sig_base = f"site-map-v13-unweighted-phrase-first|{_normalize_base(base_site_url.strip()).lower()}|{scoring_mode}|{kw_col}|{vol_col}|{kd_col}|{len(export_df)}|subdomains={include_subdomains}"
+        sig_base = f"site-map-v14-enhanced-guardrails|{_normalize_base(base_site_url.strip()).lower()}|{scoring_mode}|{kw_col}|{vol_col}|{kd_col}|{len(export_df)}|subdomains={include_subdomains}|guardrails={use_enhanced_guardrails}"
         curr_signature = hashlib.md5((sig_base + "\n" + sig_csv).encode("utf-8")).hexdigest()
 
         # Invalidate previous map if inputs changed
@@ -1298,7 +1394,9 @@ if uploaded is not None:
 
         # ---------- Manual mapping button ----------
         can_map = bool(base_site_url.strip())
-        map_btn = st.button("Map keywords to site", type="primary", disabled=not can_map, help="Crawls & assigns the best page per keyword for this strategy (unweighted match; exact phrase wins).")
+        guardrail_help = "Enhanced Guardrails: " + ("ON - Stricter relevance filtering" if use_enhanced_guardrails else "OFF - Original mapping logic")
+        map_btn = st.button("Map keywords to site", type="primary", disabled=not can_map, 
+                           help=f"Crawls & assigns the best page per keyword for this strategy. {guardrail_help}")
 
         if map_btn and not st.session_state.get("mapping_running", False):
             st.session_state["mapping_running"] = True
@@ -1319,7 +1417,8 @@ if uploaded is not None:
                 else:
                     map_series = map_keywords_to_urls(
                         export_df, kw_col=kw_col, vol_col=vol_col, kd_col=kd_col,
-                        base_url=base_site_url.strip(), include_subdomains=True, use_sitemap_first=True
+                        base_url=base_site_url.strip(), include_subdomains=True, use_sitemap_first=True,
+                        use_enhanced_guardrails=use_enhanced_guardrails
                     )
                     cache[curr_signature] = map_series.fillna("").astype(str).tolist()
                 st.session_state["map_result"] = map_series
