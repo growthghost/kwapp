@@ -1282,35 +1282,29 @@ if uploaded is not None:
         export_df["_EligibleSort"] = export_df["Eligible"].map({"Yes":1,"No":0}).fillna(0)
         export_df = export_df.sort_values(by=["_EligibleSort", kd_col, vol_col], ascending=[False, True, False], kind="mergesort").drop(columns=["_EligibleSort"])
 
-# ---------- Keyword-to-URL Mapping (per strategy; no synonyms) ----------
-# This block is self-contained and won't crash if kw_col/vol_col/kd_col aren't in scope.
-
+# ---------- Keyword-to-URL Mapping (per strategy; no synonyms, helper-free) ----------
 import re
 
-def _resolve_col(df: pd.DataFrame, preset_name: str, fallback_candidates) -> str:
-    """
-    Try to use an existing variable in globals() (e.g., 'kw_col', 'vol_col', 'kd_col'),
-    fall back to find_column(df, candidates). Raises if nothing found.
-    """
+# 1) Resolve column names safely (don’t assume kw_col/vol_col/kd_col exist in-scope)
+def _safe_get_col(df, preset_name, candidates):
     preset = globals().get(preset_name, None)
     if isinstance(preset, str) and preset in df.columns:
         return preset
-    col = find_column(df, fallback_candidates)
+    col = find_column(df, candidates)
     if col is None:
-        raise ValueError(f"Missing expected column: one of {fallback_candidates}")
+        raise ValueError(f"Missing expected column: one of {candidates}")
     return col
 
-# Resolve column names safely without referencing undefined local vars
-KW_COL = _resolve_col(export_df, "kw_col", ["keyword","query","term"])
-VOL_COL = _resolve_col(export_df, "vol_col", ["volume","search volume","sv"])
-KD_COL  = _resolve_col(export_df, "kd_col",  ["kd","difficulty","keyword difficulty"])
+KW_COL = _safe_get_col(export_df, "kw_col", ["keyword","query","term"])
+VOL_COL = _safe_get_col(export_df, "vol_col", ["volume","search volume","sv"])
+KD_COL  = _safe_get_col(export_df, "kd_col",  ["kd","difficulty","keyword difficulty"])
 
 # Ensure the Mapped URL column exists
 MAPPED_URL_COL = "Mapped URL"
 if MAPPED_URL_COL not in export_df.columns:
     export_df[MAPPED_URL_COL] = ""
 
-# Pull page signals (use whichever you populated earlier in your app)
+# 2) Pull crawl/page signals
 page_signals_by_url = (
     st.session_state.get("url_signals")
     or st.session_state.get("crawl_signals")
@@ -1322,12 +1316,12 @@ if not isinstance(page_signals_by_url, dict) or not page_signals_by_url:
 else:
     # --- lightweight tokenizer (no stemming / no synonyms)
     _WORD_RE = re.compile(r"[A-Za-z0-9]+")
-    def _tokens(text: str):
+    def _tokens(text):
         if not isinstance(text, str):
             return []
         return [t.lower() for t in _WORD_RE.findall(text)]
 
-    def _topic_words(sig: dict) -> set:
+    def _topic_words(sig):
         title = [sig.get("title") or ""]
         heads = []
         for key in ("h1","h2","h3","headings"):
@@ -1344,10 +1338,9 @@ else:
                     body_terms.append(x)
                 elif isinstance(x, (list, tuple)) and len(x) >= 1 and isinstance(x[0], str):
                     body_terms.append(x[0])
-        topic = set(_tokens(" ".join(title + heads + body_terms)))
-        return topic
+        return set(_tokens(" ".join(title + heads + body_terms)))
 
-    def _relevance(kw: str, topic: set) -> int:
+    def _relevance(kw, topic):
         return len(set(_tokens(str(kw))) & topic)
 
     def _tags_list(s):
@@ -1355,30 +1348,29 @@ else:
             return []
         return [t.strip().upper() for t in s.split(",") if t.strip()]
 
-    # Strategy-eligible pool = Eligible == "Yes" for this scoring_mode
+    # 3) Strategy-eligible pool = Eligible == "Yes"
     pool = export_df[export_df["Eligible"].astype(str).str.strip().str.upper() == "YES"].copy()
     if pool.empty:
         st.info("No strategy-eligible keywords found (Eligible != Yes). Skipping mapping.")
     else:
-        # Normalize helpful fields
+        # Normalize fields we sort by
         pool["_CategoryTags"] = pool["Category"].apply(_tags_list)
         for c in (VOL_COL, KD_COL, "Score"):
             if c in pool.columns:
                 pool[c] = pd.to_numeric(pool[c], errors="coerce").fillna(0)
 
-        # Build quick index by keyword for assignment back to export_df rows
+        # Build quick index by keyword (to write back to the right rows in export_df)
         pool_idx_by_kw = {}
         for idx, row in pool.reset_index().iterrows():
             k = str(row[KW_COL]).strip()
             pool_idx_by_kw.setdefault(k, []).append(int(row["index"]))  # original export_df index
 
-        def _rank(df, topic_words: set):
+        def _rank(df, topic_words):
             df = df.copy()
             df["_relevance"] = df[KW_COL].apply(lambda s: _relevance(str(s), topic_words))
             df = df[df["_relevance"] > 0]
             if df.empty:
                 return df
-            # Tie-breakers: Score (desc) → Volume (desc) → KD (asc) → Keyword (asc)
             for c in (VOL_COL, KD_COL, "Score"):
                 if c in df.columns:
                     df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0)
@@ -1390,7 +1382,7 @@ else:
             )
             return df
 
-        def _pick_by_tag(ranked_df, tag: str, n: int):
+        def _pick_by_tag(ranked_df, tag, n):
             if ranked_df.empty:
                 return []
             tag_u = tag.upper()
@@ -1398,7 +1390,7 @@ else:
             return list(sel[KW_COL].head(n).astype(str))
 
         used_keywords = set()
-        updates = []  # (index_in_export_df, url)
+        updates = []  # (export_df_index, url)
 
         for url, sig in page_signals_by_url.items():
             topic = _topic_words(sig)
@@ -1431,7 +1423,7 @@ else:
                     updates.append((chosen_idx, url))
                     used_keywords.add(kw)
 
-        # Apply updates to export_df
+        # 4) Apply updates to export_df
         for i, u in updates:
             export_df.at[i, MAPPED_URL_COL] = u
 
