@@ -1282,6 +1282,151 @@ if uploaded is not None:
         export_df["_EligibleSort"] = export_df["Eligible"].map({"Yes":1,"No":0}).fillna(0)
         export_df = export_df.sort_values(by=["_EligibleSort", kd_col, vol_col], ascending=[False, True, False], kind="mergesort").drop(columns=["_EligibleSort"])
 
+# ---------- Keyword-to-URL Mapping (per strategy; no synonyms) ----------
+import re
+
+# 0) Locate expected columns from your export_df build
+kw_col = kw_col or find_column(export_df, ["keyword","query","term"])
+vol_col = vol_col or find_column(export_df, ["volume","search volume","sv"])
+kd_col  = kd_col  or find_column(export_df, ["kd","difficulty","keyword difficulty"])
+
+# Ensure the Mapped URL column exists
+MAPPED_URL_COL = "Mapped URL"
+if MAPPED_URL_COL not in export_df.columns:
+    export_df[MAPPED_URL_COL] = ""
+
+# 1) Pull page signals (use whichever you populated earlier in your app)
+page_signals_by_url = (
+    st.session_state.get("url_signals")
+    or st.session_state.get("crawl_signals")
+    or {}
+)
+
+if not isinstance(page_signals_by_url, dict) or not page_signals_by_url:
+    st.info("No crawl/page signals found to map keywords. Skipping mapping step.")
+else:
+    # --- lightweight tokenizer (no stemming / no synonyms)
+    _WORD_RE = re.compile(r"[A-Za-z0-9]+")
+    def _tokens(text: str):
+        if not isinstance(text, str):
+            return []
+        return [t.lower() for t in _WORD_RE.findall(text)]
+
+    def _topic_words(sig: dict) -> set:
+        title = [sig.get("title") or ""]
+        heads = []
+        for key in ("h1","h2","h3","headings"):
+            v = sig.get(key)
+            if isinstance(v, str) and v.strip():
+                heads.append(v)
+            elif isinstance(v, list):
+                heads.extend([x for x in v if isinstance(x, str)])
+        body_words = sig.get("body_words") or []
+        body_terms = []
+        if isinstance(body_words, list):
+            for x in body_words:
+                if isinstance(x, str):
+                    body_terms.append(x)
+                elif isinstance(x, (list, tuple)) and len(x) >= 1 and isinstance(x[0], str):
+                    body_terms.append(x[0])
+        topic = set(_tokens(" ".join(title + heads + body_terms)))
+        return topic
+
+    def _relevance(kw: str, topic: set) -> int:
+        return len(set(_tokens(str(kw))) & topic)
+
+    def _tags_list(s):
+        if not isinstance(s, str):
+            return []
+        return [t.strip().upper() for t in s.split(",") if t.strip()]
+
+    # 2) Strategy-eligible pool = Eligible == "Yes" for this scoring_mode
+    pool = export_df[export_df["Eligible"].astype(str).str.strip().str.upper() == "YES"].copy()
+    if pool.empty:
+        st.info("No strategy-eligible keywords found (Eligible != Yes). Skipping mapping.")
+    else:
+        # Normalize helpful fields
+        pool["_CategoryTags"] = pool["Category"].apply(_tags_list)
+        for c in (vol_col, kd_col, "Score"):
+            if c in pool.columns:
+                pool[c] = pd.to_numeric(pool[c], errors="coerce").fillna(0)
+
+        # 3) For each page URL: rank by relevance then tie-breakers → pick 2×SEO, 1×AIO, 1×VEO
+        used_keywords = set()  # prevent assigning the same keyword to multiple URLs
+        updates = []           # (index_in_export_df, url) pairs to set Mapped URL
+
+        # Build quick index by keyword for assignment back
+        # If duplicates of the same keyword exist, we’ll assign to the first unassigned row by stable order
+        pool_idx_by_kw = {}
+        for idx, row in pool.reset_index().iterrows():
+            k = str(row[kw_col]).strip()
+            pool_idx_by_kw.setdefault(k, []).append(int(row["index"]))  # original export_df index
+
+        def _rank(df, topic_words: set):
+            df = df.copy()
+            df["_relevance"] = df[kw_col].apply(lambda s: _relevance(str(s), topic_words))
+            df = df[df["_relevance"] > 0]
+            if df.empty:
+                return df
+            # Tie-breakers: Score (desc) → Volume (desc) → KD (asc) → Keyword (asc)
+            for c in (vol_col, kd_col, "Score"):
+                if c in df.columns:
+                    df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0)
+            df.sort_values(
+                by=["_relevance", "Score", vol_col, kd_col, kw_col],
+                ascending=[False, False, False, True, True],
+                kind="mergesort",
+                inplace=True,
+            )
+            return df
+
+        def _pick_by_tag(ranked_df, tag: str, n: int):
+            if ranked_df.empty:
+                return []
+            tag_u = tag.upper()
+            sel = ranked_df[ranked_df["_CategoryTags"].apply(lambda tl: tag_u in tl)]
+            return list(sel[kw_col].head(n).astype(str))
+
+        for url, sig in page_signals_by_url.items():
+            topic = _topic_words(sig)
+            if not topic:
+                continue
+
+            # Compute ranked candidates for this page
+            ranked = _rank(pool, topic)
+            if ranked.empty:
+                continue
+
+            # Pick slots
+            seo_picks = _pick_by_tag(ranked, "SEO", 2)
+            aio_picks = _pick_by_tag(ranked, "AIO", 1)
+            veo_picks = _pick_by_tag(ranked, "VEO", 1)
+            page_picks = seo_picks + aio_picks + veo_picks
+
+            # Assign picked keywords to this URL (first occurrence not yet used)
+            for kw in page_picks:
+                if kw in used_keywords:
+                    continue
+                idx_list = pool_idx_by_kw.get(kw, [])
+                # choose the first row of this keyword that is not already mapped
+                chosen_idx = None
+                for i in idx_list:
+                    if export_df.at[i, MAPPED_URL_COL] == "":
+                        chosen_idx = i
+                        break
+                if chosen_idx is None and idx_list:
+                    chosen_idx = idx_list[0]  # fallback to first occurrence
+                if chosen_idx is not None:
+                    updates.append((chosen_idx, url))
+                    used_keywords.add(kw)
+
+        # 4) Apply updates to export_df
+        for i, u in updates:
+            export_df.at[i, MAPPED_URL_COL] = u
+
+        # Mark mapping ready (keeps your existing signature invalidation logic)
+        st.session_state["map_ready"] = True
+
         # ---------- Prepare signature for mapping state ----------
         sig_cols = [c for c in [kw_col, vol_col, kd_col] if c]
         try:
