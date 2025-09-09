@@ -1374,103 +1374,103 @@ if uploaded is not None:
 
                     # Iterate each page/url
                     for url, sig in page_signals_by_url.items():
-           			 # 1) Collect text from crawl signals
-            		title = sig.get("title") or ""
-            		h1s, h2s, heads = [], [], []
-            		for key in ("h1", "h2", "h3", "headings"):
-                v = sig.get(key)
-                if isinstance(v, str) and v.strip():
-                    heads.append(v)
-                    if key == "h1":
-                        h1s.append(v)
-                    if key == "h2":
-                        h2s.append(v)
-                elif isinstance(v, list):
-                    heads.extend([x for x in v if isinstance(x, str)])
-                    if key == "h1":
-                        h1s.extend([x for x in v if isinstance(x, str)])
-                    if key == "h2":
-                        h2s.extend([x for x in v if isinstance(x, str)])
+                        # 1) Collect text from crawl signals
+                        title = sig.get("title") or ""
+                        h1s, h2s, heads = [], [], []
+                        for key in ("h1", "h2", "h3", "headings"):
+                            v = sig.get(key)
+                            if isinstance(v, str) and v.strip():
+                                heads.append(v)
+                                if key == "h1":
+                                    h1s.append(v)
+                                if key == "h2":
+                                    h2s.append(v)
+                            elif isinstance(v, list):
+                                heads.extend([x for x in v if isinstance(x, str)])
+                                if key == "h1":
+                                    h1s.extend([x for x in v if isinstance(x, str)])
+                                if key == "h2":
+                                    h2s.extend([x for x in v if isinstance(x, str)])
 
-            body_words = sig.get("body_words") or []
-            body_terms = []
-            if isinstance(body_words, list):
-                for x in body_words:
-                    if isinstance(x, str):
-                        body_terms.append(x)
-                    elif isinstance(x, (list, tuple)) and len(x) >= 1 and isinstance(x[0], str):
-                        body_terms.append(x[0])
+                        body_words = sig.get("body_words") or []
+                        body_terms = []
+                        if isinstance(body_words, list):
+                            for x in body_words:
+                                if isinstance(x, str):
+                                    body_terms.append(x)
+                                elif isinstance(x, (list, tuple)) and len(x) >= 1 and isinstance(x[0], str):
+                                    body_terms.append(x[0])
 
-            # 2) Build token sets
-            core_tokens_raw = set(tok2(" ".join([title] + h1s + h2s)))          # Title + H1 + H2
-            topic_tokens_raw = set(tok2(" ".join([title] + heads + body_terms)))  # Title + H1–H3 + body
-            parsed = urlparse(url)
-            path_tokens_raw = set(tok2(parsed.path.replace("-", " ").replace("_", " ")))
+                        # 2) Build token sets
+                        core_tokens_raw = set(tok2(" ".join([title] + h1s + h2s)))          # Title + H1 + H2
+                        topic_tokens_raw = set(tok2(" ".join([title] + heads + body_terms)))  # Title + H1–H3 + body
+                        parsed = urlparse(url)
+                        path_tokens_raw = set(tok2(parsed.path.replace("-", " ").replace("_", " ")))
 
-            # Remove stopwords
-            core_tokens = {t for t in core_tokens_raw if t not in _STOP}
-            topic_tokens = {t for t in topic_tokens_raw if t not in _STOP}
-            path_tokens = {t for t in path_tokens_raw if t not in _STOP}
+                        # Remove stopwords
+                        core_tokens = {t for t in core_tokens_raw if t not in _STOP}
+                        topic_tokens = {t for t in topic_tokens_raw if t not in _STOP}
+                        path_tokens = {t for t in path_tokens_raw if t not in _STOP}
 
-            if not topic_tokens and not core_tokens and not path_tokens:
-                continue
+                        if not topic_tokens and not core_tokens and not path_tokens:
+                            continue
 
-            # 3) Relevance function (stricter)
-            def rel(kw_str: str) -> int:
-                kt = set(tok2(kw_str))
-                # Must share ≥1 with core (Title/H1/H2) OR URL path tokens
-                if not (kt & core_tokens) and not (kt & path_tokens):
-                    return 0
-                # Must share ≥2 with overall page tokens
-                if len(kt & topic_tokens) < 2:
-                    return 0
-                # Score = overlap with topic tokens
-                return len(kt & topic_tokens)
+                        # 3) Relevance function (stricter)
+                        def rel(kw_str: str) -> int:
+                            kt = set(tok2(kw_str))
+                            # Must share ≥1 with core (Title/H1/H2) OR URL path tokens
+                            if not (kt & core_tokens) and not (kt & path_tokens):
+                                return 0
+                            # Must share ≥2 with overall page tokens
+                            if len(kt & topic_tokens) < 2:
+                                return 0
+                            # Score = overlap with topic tokens
+                            return len(kt & topic_tokens)
 
-            ranked = pool.copy()
-            ranked["_relevance"] = ranked[KW_COL].astype(str).apply(rel)
-            ranked = ranked[ranked["_relevance"] > 0]
-            if ranked.empty:
-                continue
+                        ranked = pool.copy()
+                        ranked["_relevance"] = ranked[KW_COL].astype(str).apply(rel)
+                        ranked = ranked[ranked["_relevance"] > 0]
+                        if ranked.empty:
+                            continue
 
-            # Tie-breakers: relevance ↓, score ↓, volume ↓, KD ↑, keyword ↑
-            for c in (VOL_COL, KD_COL, score_col):
-                if c in ranked.columns:
-                    ranked[c] = pd.to_numeric(ranked[c], errors="coerce").fillna(0)
+                        # Tie-breakers: relevance ↓, score ↓, volume ↓, KD ↑, keyword ↑
+                        for c in (VOL_COL, KD_COL, score_col):
+                            if c in ranked.columns:
+                                ranked[c] = pd.to_numeric(ranked[c], errors="coerce").fillna(0)
 
-            ranked = ranked.sort_values(
-                by=["_relevance", score_col, VOL_COL, KD_COL, KW_COL],
-                ascending=[False, False, False, True, True],
-                kind="mergesort",
-            )
+                        ranked = ranked.sort_values(
+                            by=["_relevance", score_col, VOL_COL, KD_COL, KW_COL],
+                            ascending=[False, False, False, True, True],
+                            kind="mergesort",
+                        )
 
-            # 4) Pick per page: 2×SEO, 1×AIO, 1×VEO (fallback: top 4 overall if no tags)
-            if ranked["_CategoryTags"].map(len).sum() > 0:
-                def pick(tag, n):
-                    T = tag.upper()
-                    return list(
-                        ranked[ranked["_CategoryTags"].apply(lambda tl: T in tl)][KW_COL]
-                        .head(n).astype(str)
-                    )
-                page_picks = pick("SEO", 2) + pick("AIO", 1) + pick("VEO", 1)
-            else:
-                page_picks = list(ranked[KW_COL].head(4).astype(str))
+                        # 4) Pick per page: 2×SEO, 1×AIO, 1×VEO (fallback: top 4 overall if no tags)
+                        if ranked["_CategoryTags"].map(len).sum() > 0:
+                            def pick(tag, n):
+                                T = tag.upper()
+                                return list(
+                                    ranked[ranked["_CategoryTags"].apply(lambda tl: T in tl)][KW_COL]
+                                    .head(n).astype(str)
+                                )
+                            page_picks = pick("SEO", 2) + pick("AIO", 1) + pick("VEO", 1)
+                        else:
+                            page_picks = list(ranked[KW_COL].head(4).astype(str))
 
-            # 5) Assign picked keywords to this URL
-            for kw in page_picks:
-                if kw in used_keywords:
-                    continue
-                idx_list = pool_idx_by_kw.get(kw, [])
-                chosen_idx = None
-                for i in idx_list:
-                    if str(export_df.at[i, MAPPED_URL_COL]).strip() == "":
-                        chosen_idx = i
-                        break
-                if chosen_idx is None and idx_list:
-                    chosen_idx = idx_list[0]
-                if chosen_idx is not None:
-                    updates.append((chosen_idx, url))
-                    used_keywords.add(kw)
+                        # 5) Assign picked keywords to this URL
+                        for kw in page_picks:
+                            if kw in used_keywords:
+                                continue
+                            idx_list = pool_idx_by_kw.get(kw, [])
+                            chosen_idx = None
+                            for i in idx_list:
+                                if str(export_df.at[i, MAPPED_URL_COL]).strip() == "":
+                                    chosen_idx = i
+                                    break
+                            if chosen_idx is None and idx_list:
+                                chosen_idx = idx_list[0]
+                            if chosen_idx is not None:
+                                updates.append((chosen_idx, url))
+                                used_keywords.add(kw)
 
                     # Apply updates
                     for i, u in updates:
