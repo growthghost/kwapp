@@ -1374,7 +1374,7 @@ if uploaded is not None:
 
                     # Iterate each page/url
                     for url, sig in page_signals_by_url.items():
-	        from urllib.parse import urlparse
+                    from urllib.parse import urlparse
         import re
 
         # Lightweight stopwords to prevent loose matches
@@ -1449,13 +1449,10 @@ if uploaded is not None:
             # 3) Compute stricter relevance
             def rel(kw_str: str) -> int:
                 kt = set(tok2(kw_str))
-                # must share ≥1 with core (Title/H1/H2) OR URL path tokens
                 if not (kt & core_tokens) and not (kt & path_tokens):
                     return 0
-                # must share ≥2 with overall page tokens
                 if len(kt & topic_tokens) < 2:
                     return 0
-                # score = overlap count with topic tokens
                 return len(kt & topic_tokens)
 
             ranked = pool.copy()
@@ -1464,7 +1461,6 @@ if uploaded is not None:
             if ranked.empty:
                 continue
 
-            # Tie-breakers: relevance ↓, score ↓, volume ↓, KD ↑, keyword ↑
             for c in (VOL_COL, KD_COL, score_col):
                 if c in ranked.columns:
                     ranked[c] = pd.to_numeric(ranked[c], errors="coerce").fillna(0)
@@ -1487,7 +1483,7 @@ if uploaded is not None:
             else:
                 page_picks = list(ranked[KW_COL].head(4).astype(str))
 
-            # 5) Assign to this URL (use existing 'used_keywords', 'updates', 'pool_idx_by_kw')
+            # 5) Assign to this URL
             for kw in page_picks:
                 if kw in used_keywords:
                     continue
