@@ -1282,183 +1282,6 @@ if uploaded is not None:
         export_df["_EligibleSort"] = export_df["Eligible"].map({"Yes":1,"No":0}).fillna(0)
         export_df = export_df.sort_values(by=["_EligibleSort", kd_col, vol_col], ascending=[False, True, False], kind="mergesort").drop(columns=["_EligibleSort"])
 
-# ---------- Keyword-to-URL Mapping (strategy-eligible; no synonyms) ----------
-# Self-contained, no external helpers required.
-
-import re
-import pandas as pd
-
-# 1) Resolve column names from export_df (case-insensitive; no external find_column needed)
-def _resolve_col_from_candidates(df: pd.DataFrame, candidates, allow_missing=False, default=None):
-    if not isinstance(df, pd.DataFrame) or df.empty:
-        raise ValueError("export_df is empty or invalid; cannot map keywords.")
-    lower_map = {c.lower(): c for c in df.columns}
-    for cand in candidates:
-        if cand in df.columns:
-            return cand
-        cand_l = str(cand).lower()
-        if cand_l in lower_map:
-            return lower_map[cand_l]
-    if allow_missing:
-        return default
-    raise ValueError(f"Missing expected column: one of {candidates}")
-
-KW_COL       = _resolve_col_from_candidates(export_df, ["Keyword","keyword","query","term"])
-VOL_COL      = _resolve_col_from_candidates(export_df, ["Search Volume","volume","search volume","sv"])
-KD_COL       = _resolve_col_from_candidates(export_df, ["Keyword Difficulty","kd","difficulty","keyword difficulty"])
-ELIGIBLE_COL = _resolve_col_from_candidates(export_df, ["Eligible","eligible"])
-# Optional columns
-SCORE_COL    = _resolve_col_from_candidates(export_df, ["Score","score"], allow_missing=True, default=None)
-CATEGORY_COL = _resolve_col_from_candidates(export_df, ["Category","Tags","categories","tag"], allow_missing=True, default=None)
-
-# Ensure Mapped URL column exists
-MAPPED_URL_COL = "Mapped URL"
-if MAPPED_URL_COL not in export_df.columns:
-    export_df[MAPPED_URL_COL] = ""
-
-# 2) Pull crawl/page signals (expect a dict: {url: {title, h1/h2/h3/headings, body_words}})
-page_signals_by_url = (
-    st.session_state.get("url_signals")
-    or st.session_state.get("crawl_signals")
-    or {}
-)
-
-if not isinstance(page_signals_by_url, dict) or not page_signals_by_url:
-    st.info("No crawl/page signals found to map keywords. Skipping mapping step.")
-else:
-    # --- lightweight tokenizer (no stemming/synonyms)
-    _WORD_RE = re.compile(r"[A-Za-z0-9]+")
-    def _tokens(text):
-        if not isinstance(text, str):
-            return []
-        return [t.lower() for t in _WORD_RE.findall(text)]
-
-    def _topic_words(sig: dict) -> set:
-        title = [sig.get("title") or ""]
-        heads = []
-        for key in ("h1","h2","h3","headings"):
-            v = sig.get(key)
-            if isinstance(v, str) and v.strip():
-                heads.append(v)
-            elif isinstance(v, list):
-                heads.extend([x for x in v if isinstance(x, str)])
-        body_words = sig.get("body_words") or []
-        body_terms = []
-        if isinstance(body_words, list):
-            for x in body_words:
-                if isinstance(x, str):
-                    body_terms.append(x)
-                elif isinstance(x, (list, tuple)) and len(x) >= 1 and isinstance(x[0], str):
-                    body_terms.append(x[0])
-        return set(_tokens(" ".join(title + heads + body_terms)))
-
-    def _relevance(kw, topic: set) -> int:
-        return len(set(_tokens(str(kw))) & topic)
-
-    def _tags_list(s):
-        if not isinstance(s, str):
-            return []
-        return [t.strip().upper() for t in s.split(",") if t.strip()]
-
-    # 3) Strategy-eligible pool = Eligible == "Yes"
-    elig_mask = export_df[ELIGIBLE_COL].astype(str).str.strip().str.upper() == "YES"
-    pool = export_df.loc[elig_mask].copy()
-
-    if pool.empty:
-        st.info("No strategy-eligible keywords found (Eligible != Yes). Skipping mapping.")
-    else:
-        # Prepare fields used for sorting
-        if SCORE_COL is None:
-            SCORE_COL = "_ScoreMissingFallback"
-            pool[SCORE_COL] = 0
-        if CATEGORY_COL is None:
-            # If no Category/Tags column, we’ll still map top 4 overall per page.
-            CATEGORY_COL = "_TagsMissingFallback"
-            pool[CATEGORY_COL] = ""
-
-        # Normalize numeric
-        for c in (VOL_COL, KD_COL, SCORE_COL):
-            if c in pool.columns:
-                pool[c] = pd.to_numeric(pool[c], errors="coerce").fillna(0)
-
-        # Precompute tag lists for selection
-        pool["_CategoryTags"] = pool[CATEGORY_COL].apply(_tags_list)
-
-        # Build index to write Mapped URL back to the correct export_df rows
-        pool_idx_by_kw = {}
-        for idx, row in pool.reset_index().iterrows():
-            k = str(row[KW_COL]).strip()
-            pool_idx_by_kw.setdefault(k, []).append(int(row["index"]))  # original export_df index
-
-        def _rank(df: pd.DataFrame, topic_words: set) -> pd.DataFrame:
-            df = df.copy()
-            df["_relevance"] = df[KW_COL].apply(lambda s: _relevance(str(s), topic_words))
-            df = df[df["_relevance"] > 0]
-            if df.empty:
-                return df
-            # Tie-breakers: relevance desc → Score desc → Volume desc → KD asc → Keyword asc
-            for c in (VOL_COL, KD_COL, SCORE_COL):
-                if c in df.columns:
-                    df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0)
-            df.sort_values(
-                by=["_relevance", SCORE_COL, VOL_COL, KD_COL, KW_COL],
-                ascending=[False, False, False, True, True],
-                kind="mergesort",
-                inplace=True,
-            )
-            return df
-
-        def _pick_by_tag(ranked_df: pd.DataFrame, tag: str, n: int):
-            if ranked_df.empty:
-                return []
-            tag_u = tag.upper()
-            subset = ranked_df[ranked_df["_CategoryTags"].apply(lambda tl: tag_u in tl)]
-            return list(subset[KW_COL].head(n).astype(str))
-
-        used_keywords = set()
-        updates = []  # (export_df_index, url)
-
-        for url, sig in page_signals_by_url.items():
-            topic = _topic_words(sig)
-            if not topic:
-                continue
-
-            ranked = _rank(pool, topic)
-            if ranked.empty:
-                continue
-
-            # Primary path: pick 2×SEO, 1×AIO, 1×VEO if Category/Tags exist
-            if CATEGORY_COL != "_TagsMissingFallback":
-                seo_picks = _pick_by_tag(ranked, "SEO", 2)
-                aio_picks = _pick_by_tag(ranked, "AIO", 1)
-                veo_picks = _pick_by_tag(ranked, "VEO", 1)
-                page_picks = seo_picks + aio_picks + veo_picks
-            else:
-                # Fallback when tags are missing: just take top 4 by rank
-                page_picks = list(ranked[KW_COL].head(4).astype(str))
-
-            # Assign picked keywords to this URL (each keyword to at most one URL)
-            for kw in page_picks:
-                if kw in used_keywords:
-                    continue
-                idx_list = pool_idx_by_kw.get(kw, [])
-                chosen_idx = None
-                for i in idx_list:
-                    if str(export_df.at[i, MAPPED_URL_COL]).strip() == "":
-                        chosen_idx = i
-                        break
-                if chosen_idx is None and idx_list:
-                    chosen_idx = idx_list[0]  # fallback to first occurrence
-                if chosen_idx is not None:
-                    updates.append((chosen_idx, url))
-                    used_keywords.add(kw)
-
-        # Apply updates to export_df
-        for i, u in updates:
-            export_df.at[i, MAPPED_URL_COL] = u
-
-        st.session_state["map_ready"] = True
-
         # ---------- Prepare signature for mapping state ----------
         sig_cols = [c for c in [kw_col, vol_col, kd_col] if c]
         try:
@@ -1472,6 +1295,180 @@ else:
         # Invalidate previous map if inputs changed
         if st.session_state.get("map_signature") != curr_signature:
             st.session_state["map_ready"] = False
+
+# ======================= BEGIN MAPPING BLOCK (final, helper-free) =======================
+# Assumptions:
+# - export_df already exists (built from your scored CSV)
+# - Columns include: Keyword, Search Volume, Keyword Difficulty, Score (optional), Category (or Tags), Eligible
+# - We will populate/overwrite a "Mapped URL" column in export_df
+# - Page signals are in st.session_state["url_signals"] or ["crawl_signals"]
+
+import re
+import pandas as pd
+
+# -- 0) Resolve columns (case-insensitive; no external helpers) --
+cols_lower_to_orig = {c.lower(): c for c in export_df.columns}
+
+def _resolve(cands, allow_missing=False, default_val=None):
+    for c in cands:
+        if c in export_df.columns:
+            return c
+        cl = str(c).lower()
+        if cl in cols_lower_to_orig:
+            return cols_lower_to_orig[cl]
+    if allow_missing:
+        return default_val
+    raise ValueError(f"Missing expected column: one of {cands}")
+
+KW_COL       = _resolve(["Keyword","keyword","query","term"])
+VOL_COL      = _resolve(["Search Volume","volume","search volume","sv"])
+KD_COL       = _resolve(["Keyword Difficulty","kd","difficulty","keyword difficulty"])
+ELIGIBLE_COL = _resolve(["Eligible","eligible"])
+SCORE_COL    = _resolve(["Score","score"], allow_missing=True, default_val=None)
+CATEGORY_COL = _resolve(["Category","Tags","categories","tag"], allow_missing=True, default_val=None)
+
+# -- 1) Ensure "Mapped URL" column exists --
+MAPPED_URL_COL = "Mapped URL"
+if MAPPED_URL_COL not in export_df.columns:
+    export_df[MAPPED_URL_COL] = ""
+
+# -- 2) Pull crawl/page signals --
+page_signals_by_url = (
+    st.session_state.get("url_signals")
+    or st.session_state.get("crawl_signals")
+    or {}
+)
+
+if not isinstance(page_signals_by_url, dict) or not page_signals_by_url:
+    st.info("No crawl/page signals found to map keywords. Skipping mapping step.")
+else:
+    # -- 3) Build the eligible pool (strategy-selected = Eligible == 'Yes') --
+    elig_mask = export_df[ELIGIBLE_COL].astype(str).str.strip().str.upper() == "YES"
+    pool = export_df.loc[elig_mask].copy()
+
+    if pool.empty:
+        st.info("No strategy-eligible keywords found (Eligible != Yes). Skipping mapping.")
+    else:
+        # Normalize numeric sort keys (safe even if absent)
+        if SCORE_COL is None:
+            SCORE_COL = "_ScoreFallback"
+            pool[SCORE_COL] = 0
+
+        if CATEGORY_COL is None:
+            CATEGORY_COL = "_TagsFallback"
+            pool[CATEGORY_COL] = ""
+
+        # Convert numerics safely
+        for c in (VOL_COL, KD_COL, SCORE_COL):
+            if c in pool.columns:
+                pool[c] = pd.to_numeric(pool[c], errors="coerce").fillna(0)
+
+        # Tag list for selection (SEO/AIO/VEO)
+        pool["_CategoryTags"] = pool[CATEGORY_COL].astype(str).apply(
+            lambda s: [t.strip().upper() for t in s.split(",") if t.strip()]
+        )
+
+        # Build index to assign back to exact rows in export_df
+        # (handles duplicate keywords)
+        pool_reset = pool.reset_index()  # keeps original export_df index in 'index'
+        pool_idx_by_kw = {}
+        for _, r in pool_reset.iterrows():
+            k = str(r[KW_COL]).strip()
+            pool_idx_by_kw.setdefault(k, []).append(int(r["index"]))
+
+        # Tokenizer
+        WORD_RE = re.compile(r"[A-Za-z0-9]+")
+        def tok(s):
+            return [t.lower() for t in WORD_RE.findall(s)] if isinstance(s, str) else []
+
+        # Track used keywords so a keyword maps to at most one URL
+        used_keywords = set()
+        updates = []  # (export_df_index, url)
+
+        # Iterate each page/url
+        for url, sig in page_signals_by_url.items():
+            # Build topic words for this page
+            title = sig.get("title") or ""
+            heads = []
+            for key in ("h1","h2","h3","headings"):
+                v = sig.get(key)
+                if isinstance(v, str) and v.strip():
+                    heads.append(v)
+                elif isinstance(v, list):
+                    heads.extend([x for x in v if isinstance(x, str)])
+            body_words = sig.get("body_words") or []
+            body_terms = []
+            if isinstance(body_words, list):
+                for x in body_words:
+                    if isinstance(x, str):
+                        body_terms.append(x)
+                    elif isinstance(x, (list, tuple)) and len(x) >= 1 and isinstance(x[0], str):
+                        body_terms.append(x[0])
+
+            topic_tokens = set(tok(" ".join([title] + heads + body_terms)))
+            if not topic_tokens:
+                continue
+
+            # Rank pool by relevance to this page
+            ranked = pool.copy()
+            ranked["_relevance"] = ranked[KW_COL].astype(str).apply(
+                lambda w: len(set(tok(w)) & topic_tokens)
+            )
+            ranked = ranked[ranked["_relevance"] > 0]
+            if ranked.empty:
+                continue
+
+            # Sort: relevance desc → Score desc → Volume desc → KD asc → Keyword asc
+            # Make sure numeric types are numeric
+            for c in (VOL_COL, KD_COL, SCORE_COL):
+                if c in ranked.columns:
+                    ranked[c] = pd.to_numeric(ranked[c], errors="coerce").fillna(0)
+
+            ranked = ranked.sort_values(
+                by=["_relevance", SCORE_COL, VOL_COL, KD_COL, KW_COL],
+                ascending=[False, False, False, True, True],
+                kind="mergesort",
+            )
+
+            # Pick 2×SEO, 1×AIO, 1×VEO when tags present; else top 4 overall
+            if CATEGORY_COL != "_TagsFallback":
+                # helper lambda only used here; not referenced earlier
+                pick = lambda tag, n: list(
+                    ranked[ranked["_CategoryTags"].apply(lambda tl: tag in tl)][KW_COL]
+                    .head(n).astype(str)
+                )
+                page_picks = (
+                    pick("SEO", 2) +
+                    pick("AIO", 1) +
+                    pick("VEO", 1)
+                )
+            else:
+                page_picks = list(ranked[KW_COL].head(4).astype(str))
+
+            # Assign each picked keyword to this URL (don’t reuse a keyword across URLs)
+            for kw in page_picks:
+                if kw in used_keywords:
+                    continue
+                idx_list = pool_idx_by_kw.get(kw, [])
+                chosen_idx = None
+                # choose first occurrence where Mapped URL is empty
+                for i in idx_list:
+                    if str(export_df.at[i, MAPPED_URL_COL]).strip() == "":
+                        chosen_idx = i
+                        break
+                if chosen_idx is None and idx_list:
+                    chosen_idx = idx_list[0]  # fallback
+                if chosen_idx is not None:
+                    updates.append((chosen_idx, url))
+                    used_keywords.add(kw)
+
+        # Apply updates to export_df
+        for i, u in updates:
+            export_df.at[i, MAPPED_URL_COL] = u
+
+        # Flag ready (works with your signature logic)
+        st.session_state["map_ready"] = True
+# ======================== END MAPPING BLOCK (final, helper-free) ========================
 
         # ---------- Manual mapping button ----------
         can_map = bool(base_site_url.strip())
