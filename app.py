@@ -1374,8 +1374,6 @@ if uploaded is not None:
 
                     # Iterate each page/url
                     for url, sig in page_signals_by_url.items():
-            # --------------- Rank + pick for each URL ---------------
-        for url, sig in page_signals_by_url.items():
             # 1) Collect text from crawl signals
             title = sig.get("title") or ""
             h1s, h2s, heads = [], [], []
