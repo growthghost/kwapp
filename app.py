@@ -1282,6 +1282,215 @@ if uploaded is not None:
         export_df["_EligibleSort"] = export_df["Eligible"].map({"Yes":1,"No":0}).fillna(0)
         export_df = export_df.sort_values(by=["_EligibleSort", kd_col, vol_col], ascending=[False, True, False], kind="mergesort").drop(columns=["_EligibleSort"])
 
+        # ============== BEGIN STITCHED: signature/reset + keyword-to-URL mapping ==============
+
+        # ---------- Prepare signature for mapping state ----------
+        sig_cols = [c for c in [kw_col, vol_col, kd_col] if c]
+        try:
+            sig_df = export_df[sig_cols].copy()
+        except Exception:
+            sig_df = export_df[[col for col in sig_cols if col in export_df.columns]].copy()
+        sig_csv = sig_df.fillna("").astype(str).to_csv(index=False)
+        sig_base = f"site-map-v13-unweighted-phrase-first|{_normalize_base(base_site_url.strip()).lower()}|{scoring_mode}|{kw_col}|{vol_col}|{kd_col}|{len(export_df)}|subdomains={include_subdomains}"
+        curr_signature = hashlib.md5((sig_base + "\n" + sig_csv).encode("utf-8")).hexdigest()
+
+        # Invalidate previous map if inputs changed
+        if st.session_state.get("map_signature") != curr_signature:
+            st.session_state["map_ready"] = False
+
+        # ---------- Keyword-to-URL Mapping (strategy-eligible; stricter relevance; no synonyms) ----------
+
+        # Guard: only run if export_df exists and we have page signals
+        page_signals_by_url = (
+            st.session_state.get("url_signals")
+            or st.session_state.get("crawl_signals")
+            or {}
+        )
+
+        if isinstance(export_df, pd.DataFrame) and not export_df.empty and isinstance(page_signals_by_url, dict) and page_signals_by_url:
+
+            # Case-insensitive column resolver (no external helpers)
+            cols_lower_to_orig = {c.lower(): c for c in export_df.columns}
+            def _resolve(cands, allow_missing=False, default_val=None):
+                for c in cands:
+                    if c in export_df.columns:
+                        return c
+                    cl = str(c).lower()
+                    if cl in cols_lower_to_orig:
+                        return cols_lower_to_orig[cl]
+                if allow_missing:
+                    return default_val
+                raise ValueError(f"Missing expected column: one of {cands}")
+
+            KW_COL       = _resolve(["Keyword","keyword","query","term"])
+            VOL_COL      = _resolve(["Search Volume","search volume","volume","sv"])
+            KD_COL       = _resolve(["Keyword Difficulty","keyword difficulty","kd","difficulty"])
+            ELIGIBLE_COL = _resolve(["Eligible","eligible"])
+            SCORE_COL    = _resolve(["Score","score"], allow_missing=True, default_val=None)
+            CATEGORY_COL = _resolve(["Category","Tags","categories","tag"], allow_missing=True, default_val=None)
+
+            # Ensure Mapped URL column exists
+            MAPPED_URL_COL = "Mapped URL"
+            if MAPPED_URL_COL not in export_df.columns:
+                export_df[MAPPED_URL_COL] = ""
+
+            # Strategy-eligible pool = Eligible == "Yes"
+            elig_mask = export_df[ELIGIBLE_COL].astype(str).str.strip().str.upper() == "YES"
+            pool = export_df.loc[elig_mask].copy()
+
+            if not pool.empty:
+                # Fallbacks for sorting/selecting
+                score_col = SCORE_COL if isinstance(SCORE_COL, str) else "_ScoreTmp"
+                if score_col not in pool.columns:
+                    pool[score_col] = 0
+
+                if CATEGORY_COL is None or CATEGORY_COL not in pool.columns:
+                    CATEGORY_COL = "_TagsFallback"
+                    pool[CATEGORY_COL] = ""
+
+                # Normalize numeric sort keys
+                for c in (VOL_COL, KD_COL, score_col):
+                    if c in pool.columns:
+                        pool[c] = pd.to_numeric(pool[c], errors="coerce").fillna(0)
+
+                # Tag list for (SEO/AIO/VEO) selection
+                pool["_CategoryTags"] = pool[CATEGORY_COL].astype(str).apply(
+                    lambda s: [t.strip().upper() for t in s.split(",") if t.strip()]
+                )
+
+                # Index to assign back to exact export_df rows (handles duplicate keywords)
+                pool_reset = pool.reset_index()  # preserves original export_df index in 'index'
+                pool_idx_by_kw = {}
+                for _, r in pool_reset.iterrows():
+                    k = str(r[KW_COL]).strip()
+                    pool_idx_by_kw.setdefault(k, []).append(int(r["index"]))
+
+                # Tokenizer + stopwords (prevent loose matches like "family/fund/donate")
+                WORD_RE2 = re.compile(r"[A-Za-z0-9]+")
+                def tok2(s):
+                    return [t.lower() for t in WORD_RE2.findall(s)] if isinstance(s, str) else []
+
+                _STOP = {
+                    "the","and","of","to","for","in","on","with","a","an","at","by","from","is","are","be",
+                    "home","menu","search","login","privacy","policy","terms","about","contact","apply",
+                    "program","programs","service","services","support","resources","resource","info","learn",
+                    "give","donate","donation","fund","funds","family","families","news","blog","events",
+                    "volunteer","care","help","page","site","org","www","inc","llc"
+                }
+
+                used_keywords = set()
+                updates = []  # (export_df_index, url)
+
+                # --------------- Rank + pick for each URL ---------------
+                for url, sig in page_signals_by_url.items():
+
+                    # 1) Collect text from crawl signals
+                    title = sig.get("title") or ""
+                    h1s, h2s, heads = [], [], []
+                    for key in ("h1","h2","h3","headings"):
+                        v = sig.get(key)
+                        if isinstance(v, str) and v.strip():
+                            heads.append(v)
+                            if key == "h1":
+                                h1s.append(v)
+                            if key == "h2":
+                                h2s.append(v)
+                        elif isinstance(v, list):
+                            heads.extend([x for x in v if isinstance(x, str)])
+                            if key == "h1":
+                                h1s.extend([x for x in v if isinstance(x, str)])
+                            if key == "h2":
+                                h2s.extend([x for x in v if isinstance(x, str)])
+
+                    body_words = sig.get("body_words") or []
+                    body_terms = []
+                    if isinstance(body_words, list):
+                        for x in body_words:
+                            if isinstance(x, str):
+                                body_terms.append(x)
+                            elif isinstance(x, (list, tuple)) and len(x) >= 1 and isinstance(x[0], str):
+                                body_terms.append(x[0])
+
+                    # 2) Build token sets
+                    core_tokens_raw  = set(tok2(" ".join([title] + h1s + h2s)))          # Title + H1 + H2
+                    topic_tokens_raw = set(tok2(" ".join([title] + heads + body_terms)))  # Title + H1–H3 + body
+                    parsed = urlparse(url)
+                    path_tokens_raw = set(tok2(parsed.path.replace("-", " ").replace("_", " ")))
+
+                    # Remove stopwords
+                    core_tokens  = {t for t in core_tokens_raw  if t not in _STOP}
+                    topic_tokens = {t for t in topic_tokens_raw if t not in _STOP}
+                    path_tokens  = {t for t in path_tokens_raw  if t not in _STOP}
+
+                    if not topic_tokens and not core_tokens and not path_tokens:
+                        continue
+
+                    # 3) Relevance function (stricter)
+                    def rel(kw_str: str) -> int:
+                        kt = set(tok2(kw_str))
+                        # Must share ≥1 with core (Title/H1/H2) OR URL path tokens
+                        if not (kt & core_tokens) and not (kt & path_tokens):
+                            return 0
+                        # Must share ≥2 with overall page tokens
+                        if len(kt & topic_tokens) < 2:
+                            return 0
+                        # Score = overlap with topic tokens
+                        return len(kt & topic_tokens)
+
+                    ranked = pool.copy()
+                    ranked["_relevance"] = ranked[KW_COL].astype(str).apply(rel)
+                    ranked = ranked[ranked["_relevance"] > 0]
+                    if ranked.empty:
+                        continue
+
+                    # Tie-breakers: relevance ↓, score ↓, volume ↓, KD ↑, keyword ↑
+                    for c in (VOL_COL, KD_COL, score_col):
+                        if c in ranked.columns:
+                            ranked[c] = pd.to_numeric(ranked[c], errors="coerce").fillna(0)
+
+                    ranked = ranked.sort_values(
+                        by=["_relevance", score_col, VOL_COL, KD_COL, KW_COL],
+                        ascending=[False, False, False, True, True],
+                        kind="mergesort",
+                    )
+
+                    # 4) Pick per page: 2×SEO, 1×AIO, 1×VEO (fallback: top 4 overall if no tags)
+                    if ranked["_CategoryTags"].map(len).sum() > 0:
+                        def pick(tag, n):
+                            T = tag.upper()
+                            return list(
+                                ranked[ranked["_CategoryTags"].apply(lambda tl: T in tl)][KW_COL]
+                                .head(n).astype(str)
+                            )
+                        page_picks = pick("SEO", 2) + pick("AIO", 1) + pick("VEO", 1)
+                    else:
+                        page_picks = list(ranked[KW_COL].head(4).astype(str))
+
+                    # 5) Assign picked keywords to this URL (each keyword at most one URL)
+                    for kw in page_picks:
+                        if kw in used_keywords:
+                            continue
+                        idx_list = pool_idx_by_kw.get(kw, [])
+                        chosen_idx = None
+                        for i in idx_list:
+                            if str(export_df.at[i, MAPPED_URL_COL]).strip() == "":
+                                chosen_idx = i
+                                break
+                        if chosen_idx is None and idx_list:
+                            chosen_idx = idx_list[0]
+                        if chosen_idx is not None:
+                            updates.append((chosen_idx, url))
+                            used_keywords.add(kw)
+
+                # Apply updates to export_df
+                for i, u in updates:
+                    export_df.at[i, MAPPED_URL_COL] = u
+
+                # Mark mapping ready
+                st.session_state["map_ready"] = True
+
+        # =============== END STITCHED: signature/reset + keyword-to-URL mapping ===============
+
         # ---------- Prepare signature for mapping state ----------
         sig_cols = [c for c in [kw_col, vol_col, kd_col] if c]
         try:
