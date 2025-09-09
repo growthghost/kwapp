@@ -1374,7 +1374,7 @@ if uploaded is not None:
 
                     # Iterate each page/url
                     for url, sig in page_signals_by_url.items():
-                    from urllib.parse import urlparse
+from urllib.parse import urlparse
         import re
 
         # Lightweight stopwords to prevent loose matches
