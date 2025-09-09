@@ -1374,74 +1374,134 @@ if uploaded is not None:
 
                     # Iterate each page/url
                     for url, sig in page_signals_by_url.items():
-                        # Build topic words
-                        title = sig.get("title") or ""
-                        heads = []
-                        for key in ("h1","h2","h3","headings"):
-                            v = sig.get(key)
-                            if isinstance(v, str) and v.strip():
-                                heads.append(v)
-                            elif isinstance(v, list):
-                                heads.extend([x for x in v if isinstance(x, str)])
-                        body_words = sig.get("body_words") or []
-                        body_terms = []
-                        if isinstance(body_words, list):
-                            for x in body_words:
-                                if isinstance(x, str):
-                                    body_terms.append(x)
-                                elif isinstance(x, (list, tuple)) and len(x) >= 1 and isinstance(x[0], str):
-                                    body_terms.append(x[0])
+	        from urllib.parse import urlparse
+        import re
 
-                        topic_tokens = set(tok(" ".join([title] + heads + body_terms)))
-                        if not topic_tokens:
-                            continue
+        # Lightweight stopwords to prevent loose matches
+        _STOP = {
+            "the","and","of","to","for","in","on","with","a","an","at","by","from","is","are","be",
+            "home","menu","search","login","privacy","policy","terms","about","contact","apply",
+            "program","programs","service","services","support","resources","resource","info","learn",
+            "give","donate","donation","fund","funds","family","families","news","blog","events",
+            "volunteer","care","help","page","site","org","www","inc","llc"
+        }
 
-                        # Rank pool for this page
-                        ranked = pool.copy()
-                        ranked["_relevance"] = ranked[KW_COL].astype(str).apply(
-                            lambda w: len(set(tok(w)) & topic_tokens)
-                        )
-                        ranked = ranked[ranked["_relevance"] > 0]
-                        if ranked.empty:
-                            continue
+        # Small tokenizer (local, won’t conflict)
+        WORD_RE2 = re.compile(r"[A-Za-z0-9]+")
+        def tok2(s):
+            return [t.lower() for t in WORD_RE2.findall(s)] if isinstance(s, str) else []
 
-                        for c in (VOL_COL, KD_COL, SCORE_COL):
-                            if c in ranked.columns:
-                                ranked[c] = pd.to_numeric(ranked[c], errors="coerce").fillna(0)
+        # SAFETY: make sure a score column exists for sorting
+        score_col = SCORE_COL if isinstance(SCORE_COL, str) else "_ScoreTmp"
+        if score_col not in pool.columns:
+            pool[score_col] = 0
 
-                        ranked = ranked.sort_values(
-                            by=["_relevance", SCORE_COL, VOL_COL, KD_COL, KW_COL],
-                            ascending=[False, False, False, True, True],
-                            kind="mergesort",
-                        )
+        # SAFETY: ensure tag list field exists for SEO/AIO/VEO picks
+        if "_CategoryTags" not in pool.columns:
+            if isinstance(CATEGORY_COL, str) and CATEGORY_COL in pool.columns:
+                pool["_CategoryTags"] = pool[CATEGORY_COL].astype(str).apply(
+                    lambda s: [t.strip().upper() for t in s.split(",") if t.strip()]
+                )
+            else:
+                pool["_CategoryTags"] = [[] for _ in range(len(pool))]
 
-                        # Pick 2×SEO, 1×AIO, 1×VEO if tags exist; else top 4
-                        if CATEGORY_COL != "_TagsFallback":
-                            def pick(tag, n):
-                                t = tag.upper()
-                                return list(
-                                    ranked[ranked["_CategoryTags"].apply(lambda tl: t in tl)][KW_COL]
-                                    .head(n).astype(str)
-                                )
-                            page_picks = pick("SEO", 2) + pick("AIO", 1) + pick("VEO", 1)
-                        else:
-                            page_picks = list(ranked[KW_COL].head(4).astype(str))
+        # Rank + pick for each URL
+        for url, sig in page_signals_by_url.items():
+            # 1) Collect text pieces from crawl signals
+            title = sig.get("title") or ""
+            h1s, h2s, heads = [], [], []
+            for key in ("h1","h2","h3","headings"):
+                v = sig.get(key)
+                if isinstance(v, str) and v.strip():
+                    heads.append(v)
+                    if key == "h1": h1s.append(v)
+                    if key == "h2": h2s.append(v)
+                elif isinstance(v, list):
+                    heads.extend([x for x in v if isinstance(x, str)])
+                    if key == "h1": h1s.extend([x for x in v if isinstance(x, str)])
+                    if key == "h2": h2s.extend([x for x in v if isinstance(x, str)])
 
-                        # Assign picked keywords to this URL
-                        for kw in page_picks:
-                            if kw in used_keywords:
-                                continue
-                            idx_list = pool_idx_by_kw.get(kw, [])
-                            chosen_idx = None
-                            for i in idx_list:
-                                if str(export_df.at[i, MAPPED_URL_COL]).strip() == "":
-                                    chosen_idx = i
-                                    break
-                            if chosen_idx is None and idx_list:
-                                chosen_idx = idx_list[0]
-                            if chosen_idx is not None:
-                                updates.append((chosen_idx, url))
-                                used_keywords.add(kw)
+            body_words = sig.get("body_words") or []
+            body_terms = []
+            if isinstance(body_words, list):
+                for x in body_words:
+                    if isinstance(x, str):
+                        body_terms.append(x)
+                    elif isinstance(x, (list, tuple)) and len(x) >= 1 and isinstance(x[0], str):
+                        body_terms.append(x[0])
+
+            # 2) Build token sets
+            core_tokens_raw  = set(tok2(" ".join([title] + h1s + h2s)))
+            topic_tokens_raw = set(tok2(" ".join([title] + heads + body_terms)))
+
+            # Also use URL path as a hint (/careers/, /admissions/, etc.)
+            parsed = urlparse(url)
+            path_tokens_raw = set(tok2(parsed.path.replace("-", " ").replace("_", " ")))
+
+            # Remove stopwords
+            core_tokens  = {t for t in core_tokens_raw  if t not in _STOP}
+            topic_tokens = {t for t in topic_tokens_raw if t not in _STOP}
+            path_tokens  = {t for t in path_tokens_raw  if t not in _STOP}
+
+            if not topic_tokens and not core_tokens and not path_tokens:
+                continue
+
+            # 3) Compute stricter relevance
+            def rel(kw_str: str) -> int:
+                kt = set(tok2(kw_str))
+                # must share ≥1 with core (Title/H1/H2) OR URL path tokens
+                if not (kt & core_tokens) and not (kt & path_tokens):
+                    return 0
+                # must share ≥2 with overall page tokens
+                if len(kt & topic_tokens) < 2:
+                    return 0
+                # score = overlap count with topic tokens
+                return len(kt & topic_tokens)
+
+            ranked = pool.copy()
+            ranked["_relevance"] = ranked[KW_COL].astype(str).apply(rel)
+            ranked = ranked[ranked["_relevance"] > 0]
+            if ranked.empty:
+                continue
+
+            # Tie-breakers: relevance ↓, score ↓, volume ↓, KD ↑, keyword ↑
+            for c in (VOL_COL, KD_COL, score_col):
+                if c in ranked.columns:
+                    ranked[c] = pd.to_numeric(ranked[c], errors="coerce").fillna(0)
+
+            ranked = ranked.sort_values(
+                by=["_relevance", score_col, VOL_COL, KD_COL, KW_COL],
+                ascending=[False, False, False, True, True],
+                kind="mergesort",
+            )
+
+            # 4) Choose picks (2×SEO, 1×AIO, 1×VEO if tags present; else top 4 overall)
+            if ranked["_CategoryTags"].map(len).sum() > 0:
+                def pick(tag, n):
+                    T = tag.upper()
+                    return list(
+                        ranked[ranked["_CategoryTags"].apply(lambda tl: T in tl)][KW_COL]
+                        .head(n).astype(str)
+                    )
+                page_picks = pick("SEO", 2) + pick("AIO", 1) + pick("VEO", 1)
+            else:
+                page_picks = list(ranked[KW_COL].head(4).astype(str))
+
+            # 5) Assign to this URL (use existing 'used_keywords', 'updates', 'pool_idx_by_kw')
+            for kw in page_picks:
+                if kw in used_keywords:
+                    continue
+                idx_list = pool_idx_by_kw.get(kw, [])
+                chosen_idx = None
+                for i in idx_list:
+                    if str(export_df.at[i, MAPPED_URL_COL]).strip() == "":
+                        chosen_idx = i
+                        break
+                if chosen_idx is None and idx_list:
+                    chosen_idx = idx_list[0]
+                if chosen_idx is not None:
+                    updates.append((chosen_idx, url))
+                    used_keywords.add(kw)
 
                     # Apply updates
                     for i, u in updates:
