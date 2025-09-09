@@ -1374,51 +1374,25 @@ if uploaded is not None:
 
                     # Iterate each page/url
                     for url, sig in page_signals_by_url.items():
-
-
-        # Lightweight stopwords to prevent loose matches
-    _STOP = {
-            "the","and","of","to","for","in","on","with","a","an","at","by","from","is","are","be",
-            "home","menu","search","login","privacy","policy","terms","about","contact","apply",
-            "program","programs","service","services","support","resources","resource","info","learn",
-            "give","donate","donation","fund","funds","family","families","news","blog","events",
-            "volunteer","care","help","page","site","org","www","inc","llc"
-        }
-
-        # Small tokenizer (local, won’t conflict)
-        WORD_RE2 = re.compile(r"[A-Za-z0-9]+")
-        def tok2(s):
-            return [t.lower() for t in WORD_RE2.findall(s)] if isinstance(s, str) else []
-
-        # SAFETY: make sure a score column exists for sorting
-        score_col = SCORE_COL if isinstance(SCORE_COL, str) else "_ScoreTmp"
-        if score_col not in pool.columns:
-            pool[score_col] = 0
-
-        # SAFETY: ensure tag list field exists for SEO/AIO/VEO picks
-        if "_CategoryTags" not in pool.columns:
-            if isinstance(CATEGORY_COL, str) and CATEGORY_COL in pool.columns:
-                pool["_CategoryTags"] = pool[CATEGORY_COL].astype(str).apply(
-                    lambda s: [t.strip().upper() for t in s.split(",") if t.strip()]
-                )
-            else:
-                pool["_CategoryTags"] = [[] for _ in range(len(pool))]
-
-        # Rank + pick for each URL
+            # --------------- Rank + pick for each URL ---------------
         for url, sig in page_signals_by_url.items():
-            # 1) Collect text pieces from crawl signals
+            # 1) Collect text from crawl signals
             title = sig.get("title") or ""
             h1s, h2s, heads = [], [], []
-            for key in ("h1","h2","h3","headings"):
+            for key in ("h1", "h2", "h3", "headings"):
                 v = sig.get(key)
                 if isinstance(v, str) and v.strip():
                     heads.append(v)
-                    if key == "h1": h1s.append(v)
-                    if key == "h2": h2s.append(v)
+                    if key == "h1":
+                        h1s.append(v)
+                    if key == "h2":
+                        h2s.append(v)
                 elif isinstance(v, list):
                     heads.extend([x for x in v if isinstance(x, str)])
-                    if key == "h1": h1s.extend([x for x in v if isinstance(x, str)])
-                    if key == "h2": h2s.extend([x for x in v if isinstance(x, str)])
+                    if key == "h1":
+                        h1s.extend([x for x in v if isinstance(x, str)])
+                    if key == "h2":
+                        h2s.extend([x for x in v if isinstance(x, str)])
 
             body_words = sig.get("body_words") or []
             body_terms = []
@@ -1430,28 +1404,29 @@ if uploaded is not None:
                         body_terms.append(x[0])
 
             # 2) Build token sets
-            core_tokens_raw  = set(tok2(" ".join([title] + h1s + h2s)))
-            topic_tokens_raw = set(tok2(" ".join([title] + heads + body_terms)))
-
-            # Also use URL path as a hint (/careers/, /admissions/, etc.)
+            core_tokens_raw = set(tok2(" ".join([title] + h1s + h2s)))          # Title + H1 + H2
+            topic_tokens_raw = set(tok2(" ".join([title] + heads + body_terms)))  # Title + H1–H3 + body
             parsed = urlparse(url)
             path_tokens_raw = set(tok2(parsed.path.replace("-", " ").replace("_", " ")))
 
             # Remove stopwords
-            core_tokens  = {t for t in core_tokens_raw  if t not in _STOP}
+            core_tokens = {t for t in core_tokens_raw if t not in _STOP}
             topic_tokens = {t for t in topic_tokens_raw if t not in _STOP}
-            path_tokens  = {t for t in path_tokens_raw  if t not in _STOP}
+            path_tokens = {t for t in path_tokens_raw if t not in _STOP}
 
             if not topic_tokens and not core_tokens and not path_tokens:
                 continue
 
-            # 3) Compute stricter relevance
+            # 3) Relevance function (stricter)
             def rel(kw_str: str) -> int:
                 kt = set(tok2(kw_str))
+                # Must share ≥1 with core (Title/H1/H2) OR URL path tokens
                 if not (kt & core_tokens) and not (kt & path_tokens):
                     return 0
+                # Must share ≥2 with overall page tokens
                 if len(kt & topic_tokens) < 2:
                     return 0
+                # Score = overlap with topic tokens
                 return len(kt & topic_tokens)
 
             ranked = pool.copy()
@@ -1460,6 +1435,7 @@ if uploaded is not None:
             if ranked.empty:
                 continue
 
+            # Tie-breakers: relevance ↓, score ↓, volume ↓, KD ↑, keyword ↑
             for c in (VOL_COL, KD_COL, score_col):
                 if c in ranked.columns:
                     ranked[c] = pd.to_numeric(ranked[c], errors="coerce").fillna(0)
@@ -1470,7 +1446,7 @@ if uploaded is not None:
                 kind="mergesort",
             )
 
-            # 4) Choose picks (2×SEO, 1×AIO, 1×VEO if tags present; else top 4 overall)
+            # 4) Pick per page: 2×SEO, 1×AIO, 1×VEO (fallback: top 4 overall if no tags)
             if ranked["_CategoryTags"].map(len).sum() > 0:
                 def pick(tag, n):
                     T = tag.upper()
@@ -1482,7 +1458,7 @@ if uploaded is not None:
             else:
                 page_picks = list(ranked[KW_COL].head(4).astype(str))
 
-            # 5) Assign to this URL
+            # 5) Assign picked keywords to this URL
             for kw in page_picks:
                 if kw in used_keywords:
                     continue
