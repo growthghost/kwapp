@@ -1583,9 +1583,7 @@ if uploaded is not None:
 
                     # Iterate each page/url
                     for url, sig in page_signals_by_url.items():
-
-        # Lightweight stopwords to prevent loose matches
-        	_STOP = {
+		    _STOP = {
             "the","and","of","to","for","in","on","with","a","an","at","by","from","is","are","be",
             "home","menu","search","login","privacy","policy","terms","about","contact","apply",
             "program","programs","service","services","support","resources","resource","info","learn",
