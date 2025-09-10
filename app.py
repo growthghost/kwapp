@@ -1317,39 +1317,6 @@ if uploaded is not None:
             disabled=not can_map,
             help="Crawls & assigns the best page per keyword for this strategy (BM25 relevance with 400-word fallback)."
         )
-
-        # ---------- Manual mapping button ----------
-        can_map = bool(base_site_url.strip())
-        map_btn = st.button("Map keywords to site", type="primary", disabled=not can_map, help="Crawls & assigns the best page per keyword for this strategy (unweighted match; exact phrase wins).")
-
-        if map_btn and not st.session_state.get("mapping_running", False):
-            st.session_state["mapping_running"] = True
-            if "map_cache" not in st.session_state:
-                st.session_state["map_cache"] = {}
-            loader = st.empty()
-            loader.markdown(
-                """
-                <div class="oiq-loader">
-                  <div class="oiq-spinner"></div>
-                  <div class="oiq-loader-text">Mapping keywords to your site…</div>
-                </div>
-                """, unsafe_allow_html=True)
-            with st.spinner("Crawling & matching keywords…"):
-                cache = st.session_state["map_cache"]
-                if curr_signature in cache and len(cache[curr_signature]) == len(export_df):
-                    map_series = pd.Series(cache[curr_signature], index=export_df.index, dtype="string")
-                else:
-                    map_series = map_keywords_to_urls(
-                        export_df, kw_col=kw_col, vol_col=vol_col, kd_col=kd_col,
-                        base_url=base_site_url.strip(), include_subdomains=True, use_sitemap_first=True
-                    )
-                    cache[curr_signature] = map_series.fillna("").astype(str).tolist()
-                st.session_state["map_result"] = map_series
-                st.session_state["map_signature"] = curr_signature
-                st.session_state["map_ready"] = True
-            loader.empty()
-            st.session_state["mapping_running"] = False
-
         # ---------- Build CSV for download ----------
         if st.session_state.get("map_ready") and st.session_state.get("map_signature") == curr_signature:
             export_df["Map URL"] = st.session_state["map_result"]
