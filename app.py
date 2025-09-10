@@ -1087,214 +1087,13 @@ if uploaded is not None:
         # Invalidate previous map if inputs changed
         if st.session_state.get("map_signature") != curr_signature:
             st.session_state["map_ready"] = False
-                # ======================= BEGIN MAPPING BLOCK (BM25 page-first) =======================
-        import math
-        import re
-        from urllib.parse import urlparse
-
-        if isinstance(globals().get("export_df", None), pd.DataFrame) and not export_df.empty:
-
-            # Case-insensitive column resolver
-            cols_lower_to_orig = {c.lower(): c for c in export_df.columns}
-            def _resolve(cands, allow_missing=False, default_val=None):
-                for c in cands:
-                    if c in export_df.columns:
-                        return c
-                    cl = str(c).lower()
-                    if cl in cols_lower_to_orig:
-                        return cols_lower_to_orig[cl]
-                if allow_missing:
-                    return default_val
-                raise ValueError(f"Missing expected column: one of {cands}")
-
-            KW_COL       = _resolve(["Keyword","keyword","query","term"])
-            VOL_COL      = _resolve(["Search Volume","search volume","volume","sv"])
-            KD_COL       = _resolve(["Keyword Difficulty","keyword difficulty","kd","difficulty"])
-            ELIGIBLE_COL = _resolve(["Eligible","eligible"])
-            SCORE_COL    = _resolve(["Score","score"], allow_missing=True, default_val=None)
-            CATEGORY_COL = _resolve(["Category","Tags","categories","tag"], allow_missing=True, default_val=None)
-
-            # Ensure Mapped URL column exists
-            MAPPED_URL_COL = "Mapped URL"
-            if MAPPED_URL_COL not in export_df.columns:
-                export_df[MAPPED_URL_COL] = ""
-
-            # Strategy-eligible pool = Eligible == "Yes"
-            elig_mask = export_df[ELIGIBLE_COL].astype(str).str.strip().str.upper() == "YES"
-            pool = export_df.loc[elig_mask].copy()
-
-            if not pool.empty:
-                # Fallbacks
-                score_col = SCORE_COL if isinstance(SCORE_COL, str) else "_ScoreTmp"
-                if score_col not in pool.columns:
-                    pool[score_col] = 0
-                if CATEGORY_COL is None or CATEGORY_COL not in pool.columns:
-                    CATEGORY_COL = "_TagsFallback"
-                    pool[CATEGORY_COL] = ""
-
-                for c in (VOL_COL, KD_COL, score_col):
-                    if c in pool.columns:
-                        pool[c] = pd.to_numeric(pool[c], errors="coerce").fillna(0)
-
-                pool["_CategoryTags"] = pool[CATEGORY_COL].astype(str).apply(
-                    lambda s: [t.strip().upper() for t in s.split(",") if t.strip()]
-                )
-
-                pool_reset = pool.reset_index()
-                pool_idx_by_kw = {}
-                for _, r in pool_reset.iterrows():
-                    k = str(r[KW_COL]).strip()
-                    pool_idx_by_kw.setdefault(k, []).append(int(r["index"]))
-
-                WORD_RE = re.compile(r"[A-Za-z0-9]+")
-                def tok(s):
-                    return [t.lower() for t in WORD_RE.findall(s)] if isinstance(s, str) else []
-
-                _STOP = {
-                    "the","and","of","to","for","in","on","with","a","an","at","by","from","is","are","be",
-                    "home","menu","search","login","privacy","policy","terms","about","contact","apply",
-                    "program","programs","service","services","support","resources","resource","info","learn",
-                    "give","donate","donation","fund","funds","family","families","news","blog","events",
-                    "volunteer","care","help","page","site","org","www","inc","llc"
-                }
-
-                used_keywords = set()
-                updates = []
-
-                # -------- Build per-page token sets --------
-                df_counts = {}
-                pages = []
-                for url, sig in (st.session_state.get("url_signals") or st.session_state.get("crawl_signals") or {}).items():
-                    title = sig.get("title") or ""
-                    heads, h1s, h2s = [], [], []
-                    for key in ("h1","h2","h3","headings"):
-                        v = sig.get(key)
-                        if isinstance(v, str) and v.strip():
-                            heads.append(v)
-                            if key == "h1": h1s.append(v)
-                            if key == "h2": h2s.append(v)
-                        elif isinstance(v, list):
-                            heads.extend([x for x in v if isinstance(x, str)])
-                            if key == "h1": h1s.extend([x for x in v if isinstance(x, str)])
-                            if key == "h2": h2s.extend([x for x in v if isinstance(x, str)])
-
-                    body_words = sig.get("body_words") or []
-                    body_terms = []
-                    if isinstance(body_words, list):
-                        for x in body_words:
-                            if isinstance(x, str):
-                                body_terms.append(x)
-                            elif isinstance(x, (list, tuple)) and len(x) >= 1 and isinstance(x[0], str):
-                                body_terms.append(x[0])
-
-                    core_tokens_raw  = set(tok(" ".join([title] + h1s + h2s)))
-                    topic_tokens_raw = set(tok(" ".join([title] + heads + body_terms)))
-                    parsed = urlparse(url)
-                    path_tokens_raw  = set(tok(parsed.path.replace("-", " ").replace("_", " ")))
-
-                    core_tokens  = {t for t in core_tokens_raw if t not in _STOP}
-                    topic_tokens = {t for t in topic_tokens_raw if t not in _STOP}
-                    path_tokens  = {t for t in path_tokens_raw if t not in _STOP}
-
-                    copy_text_tokens = tok(" ".join(body_terms)) if isinstance(body_terms, list) else []
-                    if len(copy_text_tokens) > 400:
-                        copy_text_tokens = copy_text_tokens[:400]
-                    copy_anchor_400 = {t for t in copy_text_tokens if t not in _STOP}
-
-                    for t in topic_tokens:
-                        df_counts[t] = df_counts.get(t, 0) + 1
-
-                    pages.append({
-                        "url": url,
-                        "core": core_tokens,
-                        "topic": topic_tokens,
-                        "path": path_tokens,
-                        "copy400": copy_anchor_400,
-                    })
-
-                N_docs = max(1, len(pages))
-                def idf(t):
-                    df_t = df_counts.get(t, 0)
-                    return math.log((N_docs - df_t + 0.5) / (df_t + 0.5) + 1.0)
-
-                # -------- Rank + pick for each page --------
-                for page in pages:
-                    url, core, topic, path, copy4 = page["url"], page["core"], page["topic"], page["path"], page["copy400"]
-
-                    ranked = pool.copy()
-                    def bm25_rel(kw_str: str) -> float:
-                        kt = set(tok(kw_str))
-                        if not kt:
-                            return 0.0
-                        anchored = bool(kt & core) or bool(kt & path)
-                        primary_anchor = core
-                        if not anchored:
-                            if not (kt & copy4):
-                                return 0.0
-                            primary_anchor = copy4
-                        overlap = kt & topic
-                        if len(overlap) < 2:
-                            return 0.0
-                        score = 0.0
-                        for t in overlap:
-                            w = 1.0
-                            if t in primary_anchor: w = 2.0
-                            elif t in core: w = 1.6
-                            elif t in path: w = 1.3
-                            score += idf(t) * w
-                        return score
-
-                    ranked["_bm25"] = ranked[KW_COL].astype(str).apply(bm25_rel)
-                    ranked = ranked[ranked["_bm25"] > 0.0]
-                    if ranked.empty:
-                        continue
-
-                    ranked = ranked.sort_values(
-                        by=["_bm25", score_col, VOL_COL, KD_COL, KW_COL],
-                        ascending=[False, False, False, True, True],
-                        kind="mergesort",
-                    )
-
-                    if ranked["_CategoryTags"].map(len).sum() > 0:
-                        def pick(tag, n):
-                            T = tag.upper()
-                            return list(
-                                ranked[ranked["_CategoryTags"].apply(lambda tl: T in tl)][KW_COL]
-                                .head(n).astype(str)
-                            )
-                        page_picks = pick("SEO", 2) + pick("AIO", 1) + pick("VEO", 1)
-                    else:
-                        page_picks = list(ranked[KW_COL].head(4).astype(str))
-
-                    for kw in page_picks:
-                        if kw in used_keywords:
-                            continue
-                        idx_list = pool_idx_by_kw.get(kw, [])
-                        chosen_idx = None
-                        for i in idx_list:
-                            if str(export_df.at[i, MAPPED_URL_COL]).strip() == "":
-                                chosen_idx = i
-                                break
-                        if chosen_idx is None and idx_list:
-                            chosen_idx = idx_list[0]
-                        if chosen_idx is not None:
-                            updates.append((chosen_idx, url))
-                            used_keywords.add(kw)
-
-                for i, u in updates:
-                    export_df.at[i, MAPPED_URL_COL] = u
-
-                st.session_state["map_ready"] = True
-
-        # ======================= END MAPPING BLOCK (BM25 page-first) =======================
-
-        # ---------- Manual mapping button ----------
+                        # ---------- Manual mapping button ----------
         can_map = bool(base_site_url.strip())
         map_btn = st.button(
             "Map keywords to site",
             type="primary",
             disabled=not can_map,
-            help="Crawls & assigns the best page per keyword for this strategy (BM25 keyword-first with 400-word fallback)."
+            help="Crawls & assigns the best page per keyword for this strategy (BM25 page-first)."
         )
 
         if map_btn and not st.session_state.get("mapping_running", False):
@@ -1311,11 +1110,204 @@ if uploaded is not None:
                 </div>
                 """, unsafe_allow_html=True)
 
-            with st.spinner("Running BM25 keyword-first mapping…"):
+            with st.spinner("Running BM25 mapping…"):
                 cache = st.session_state["map_cache"]
                 if curr_signature in cache and len(cache[curr_signature]) == len(export_df):
+                    # Use cached result
                     map_series = pd.Series(cache[curr_signature], index=export_df.index, dtype="string")
                 else:
+                    # ======================= BEGIN BM25 page-first mapping =======================
+                    import math, re
+                    from urllib.parse import urlparse
+
+                    # Case-insensitive column resolver
+                    cols_lower_to_orig = {c.lower(): c for c in export_df.columns}
+                    def _resolve(cands, allow_missing=False, default_val=None):
+                        for c in cands:
+                            if c in export_df.columns:
+                                return c
+                            cl = str(c).lower()
+                            if cl in cols_lower_to_orig:
+                                return cols_lower_to_orig[cl]
+                        if allow_missing:
+                            return default_val
+                        raise ValueError(f"Missing expected column: one of {cands}")
+
+                    KW_COL       = _resolve(["Keyword","keyword","query","term"])
+                    VOL_COL      = _resolve(["Search Volume","search volume","volume","sv"])
+                    KD_COL       = _resolve(["Keyword Difficulty","keyword difficulty","kd","difficulty"])
+                    ELIGIBLE_COL = _resolve(["Eligible","eligible"])
+                    SCORE_COL    = _resolve(["Score","score"], allow_missing=True, default_val=None)
+                    CATEGORY_COL = _resolve(["Category","Tags","categories","tag"], allow_missing=True, default_val=None)
+
+                    # Ensure Mapped URL column exists
+                    MAPPED_URL_COL = "Mapped URL"
+                    if MAPPED_URL_COL not in export_df.columns:
+                        export_df[MAPPED_URL_COL] = ""
+
+                    elig_mask = export_df[ELIGIBLE_COL].astype(str).str.strip().str.upper() == "YES"
+                    pool = export_df.loc[elig_mask].copy()
+
+                    if not pool.empty:
+                        score_col = SCORE_COL if isinstance(SCORE_COL, str) else "_ScoreTmp"
+                        if score_col not in pool.columns:
+                            pool[score_col] = 0
+                        if CATEGORY_COL is None or CATEGORY_COL not in pool.columns:
+                            CATEGORY_COL = "_TagsFallback"
+                            pool[CATEGORY_COL] = ""
+
+                        for c in (VOL_COL, KD_COL, score_col):
+                            if c in pool.columns:
+                                pool[c] = pd.to_numeric(pool[c], errors="coerce").fillna(0)
+
+                        pool["_CategoryTags"] = pool[CATEGORY_COL].astype(str).apply(
+                            lambda s: [t.strip().upper() for t in s.split(",") if t.strip()]
+                        )
+
+                        pool_reset = pool.reset_index()
+                        pool_idx_by_kw = {}
+                        for _, r in pool_reset.iterrows():
+                            k = str(r[KW_COL]).strip()
+                            pool_idx_by_kw.setdefault(k, []).append(int(r["index"]))
+
+                        WORD_RE = re.compile(r"[A-Za-z0-9]+")
+                        def tok(s):
+                            return [t.lower() for t in WORD_RE.findall(s)] if isinstance(s, str) else []
+
+                        _STOP = {
+                            "the","and","of","to","for","in","on","with","a","an","at","by","from","is","are","be",
+                            "home","menu","search","login","privacy","policy","terms","about","contact","apply",
+                            "program","programs","service","services","support","resources","resource","info","learn",
+                            "give","donate","donation","fund","funds","family","families","news","blog","events",
+                            "volunteer","care","help","page","site","org","www","inc","llc"
+                        }
+
+                        used_keywords = set()
+                        updates = []
+
+                        df_counts = {}
+                        pages = []
+                        for url, sig in (st.session_state.get("url_signals") or st.session_state.get("crawl_signals") or {}).items():
+                            title = sig.get("title") or ""
+                            heads, h1s, h2s = [], [], []
+                            for key in ("h1","h2","h3","headings"):
+                                v = sig.get(key)
+                                if isinstance(v, str) and v.strip():
+                                    heads.append(v)
+                                    if key == "h1": h1s.append(v)
+                                    if key == "h2": h2s.append(v)
+                                elif isinstance(v, list):
+                                    heads.extend([x for x in v if isinstance(x, str)])
+                                    if key == "h1": h1s.extend([x for x in v if isinstance(x, str)])
+                                    if key == "h2": h2s.extend([x for x in v if isinstance(x, str)])
+
+                            body_words = sig.get("body_words") or []
+                            body_terms = []
+                            if isinstance(body_words, list):
+                                for x in body_words:
+                                    if isinstance(x, str):
+                                        body_terms.append(x)
+                                    elif isinstance(x, (list, tuple)) and len(x) >= 1 and isinstance(x[0], str):
+                                        body_terms.append(x[0])
+
+                            core_tokens_raw  = set(tok(" ".join([title] + h1s + h2s)))
+                            topic_tokens_raw = set(tok(" ".join([title] + heads + body_terms)))
+                            parsed = urlparse(url)
+                            path_tokens_raw  = set(tok(parsed.path.replace("-", " ").replace("_", " ")))
+
+                            core_tokens  = {t for t in core_tokens_raw if t not in _STOP}
+                            topic_tokens = {t for t in topic_tokens_raw if t not in _STOP}
+                            path_tokens  = {t for t in path_tokens_raw if t not in _STOP}
+
+                            copy_text_tokens = tok(" ".join(body_terms)) if isinstance(body_terms, list) else []
+                            if len(copy_text_tokens) > 400:
+                                copy_text_tokens = copy_text_tokens[:400]
+                            copy_anchor_400 = {t for t in copy_text_tokens if t not in _STOP}
+
+                            for t in topic_tokens:
+                                df_counts[t] = df_counts.get(t, 0) + 1
+
+                            pages.append({
+                                "url": url,
+                                "core": core_tokens,
+                                "topic": topic_tokens,
+                                "path": path_tokens,
+                                "copy400": copy_anchor_400,
+                            })
+
+                        N_docs = max(1, len(pages))
+                        def idf(t):
+                            df_t = df_counts.get(t, 0)
+                            return math.log((N_docs - df_t + 0.5) / (df_t + 0.5) + 1.0)
+
+                        for page in pages:
+                            url, core, topic, path, copy4 = page["url"], page["core"], page["topic"], page["path"], page["copy400"]
+
+                            ranked = pool.copy()
+                            def bm25_rel(kw_str: str) -> float:
+                                kt = set(tok(kw_str))
+                                if not kt:
+                                    return 0.0
+                                anchored = bool(kt & core) or bool(kt & path)
+                                primary_anchor = core
+                                if not anchored:
+                                    if not (kt & copy4):
+                                        return 0.0
+                                    primary_anchor = copy4
+                                overlap = kt & topic
+                                if len(overlap) < 2:
+                                    return 0.0
+                                score = 0.0
+                                for t in overlap:
+                                    w = 1.0
+                                    if t in primary_anchor: w = 2.0
+                                    elif t in core: w = 1.6
+                                    elif t in path: w = 1.3
+                                    score += idf(t) * w
+                                return score
+
+                            ranked["_bm25"] = ranked[KW_COL].astype(str).apply(bm25_rel)
+                            ranked = ranked[ranked["_bm25"] > 0.0]
+                            if ranked.empty:
+                                continue
+
+                            ranked = ranked.sort_values(
+                                by=["_bm25", score_col, VOL_COL, KD_COL, KW_COL],
+                                ascending=[False, False, False, True, True],
+                                kind="mergesort",
+                            )
+
+                            if ranked["_CategoryTags"].map(len).sum() > 0:
+                                def pick(tag, n):
+                                    T = tag.upper()
+                                    return list(
+                                        ranked[ranked["_CategoryTags"].apply(lambda tl: T in tl)][KW_COL]
+                                        .head(n).astype(str)
+                                    )
+                                page_picks = pick("SEO", 2) + pick("AIO", 1) + pick("VEO", 1)
+                            else:
+                                page_picks = list(ranked[KW_COL].head(4).astype(str))
+
+                            for kw in page_picks:
+                                if kw in used_keywords:
+                                    continue
+                                idx_list = pool_idx_by_kw.get(kw, [])
+                                chosen_idx = None
+                                for i in idx_list:
+                                    if str(export_df.at[i, MAPPED_URL_COL]).strip() == "":
+                                        chosen_idx = i
+                                        break
+                                if chosen_idx is None and idx_list:
+                                    chosen_idx = idx_list[0]
+                                if chosen_idx is not None:
+                                    updates.append((chosen_idx, url))
+                                    used_keywords.add(kw)
+
+                        for i, u in updates:
+                            export_df.at[i, MAPPED_URL_COL] = u
+
+                    # ======================= END BM25 page-first mapping =======================
+
                     map_series = export_df[MAPPED_URL_COL].fillna("").astype(str)
                     cache[curr_signature] = map_series.tolist()
 
@@ -1325,6 +1317,7 @@ if uploaded is not None:
 
             loader.empty()
             st.session_state["mapping_running"] = False
+
         # ---------- Build CSV for download ----------
         if st.session_state.get("map_ready") and st.session_state.get("map_signature") == curr_signature:
             export_df["Map URL"] = st.session_state["map_result"]
