@@ -1311,9 +1311,9 @@ if uploaded is not None:
                     map_series = export_df[MAPPED_URL_COL].fillna("").astype(str)
                     cache[curr_signature] = map_series.tolist()
 
-                st.session_state["map_result"] = map_series
-                st.session_state["map_signature"] = curr_signature
-                st.session_state["map_ready"] = True
+                    st.session_state["map_result"] = map_series
+                    st.session_state["map_signature"] = curr_signature
+                    st.session_state["map_ready"] = True
 
             loader.empty()
             st.session_state["mapping_running"] = False
