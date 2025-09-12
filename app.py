@@ -307,7 +307,21 @@ st.markdown(
 AIO_PAT = re.compile(r"\b(what is|what's|define|definition|how to|step[- ]?by[- ]?step|tutorial|guide|is)\b", re.I)
 AEO_PAT = re.compile(r"^\s*(who|what|when|where|why|how|which|can|should)\b", re.I)
 VEO_PAT = re.compile(r"\b(near me|open now|closest|call now|directions|ok google|alexa|siri|hey google)\b", re.I)
-GEO_PAT = re.compile(r"\b(how to|best way to|steps? to|examples? of|checklist|framework|template)\b", re.I)
+
+# ✅ GEO looks for local modifiers OR [city/state + service/occupation] structures
+# 👉 Expand the service/occupation list below as needed for better coverage
+GEO_PAT = re.compile(
+    r"\b("
+    r"near me|local|nearby|"                        # local intent
+    r"in\s+[a-z]+|"                                # 'in dallas', 'in texas'
+    r"[a-z]+\s+(city|county|state|province|region)|" # geo terms
+    r"[a-z]+\s+(plumber|lawyer|attorney|dentist|doctor|clinic|hospital|"
+    r"electrician|contractor|builder|roofing|repair|mechanic|auto|car|dealer|"
+    r"restaurant|bar|cafe|coffee|shop|store|school|college|university|hotel|motel|inn)"
+    r")\b",
+    re.I
+)
+
 SXO_PAT = re.compile(r"\b(best|top|compare|comparison|vs\.?|review|pricing|cost|cheap|free download|template|examples?)\b", re.I)
 LLM_PAT = re.compile(r"\b(prompt|prompting|prompt[- ]?engineering|chatgpt|gpt[- ]?\d|llm|rag|embedding|vector|few[- ]?shot|zero[- ]?shot)\b", re.I)
 AIO_PAGE_SIG = re.compile(r"\b(what is|how to|guide|tutorial|step[- ]?by[- ]?step|checklist|framework|template|examples?)\b", re.I)
@@ -328,7 +342,6 @@ def categorize_keyword(kw: str) -> List[str]:
     else:
         if "LLM" not in cats: cats.add("SEO")
     return [c for c in CATEGORY_ORDER if c in cats]
-
 # ---------- Score ----------
 def calculate_score(volume: float, kd: float) -> int:
     if pd.isna(volume) or pd.isna(kd): return 0
