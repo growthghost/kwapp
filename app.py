@@ -333,13 +333,14 @@ VEO_PAT = re.compile(r"\b(near me|open now|closest|call now|directions|ok google
 
 # ✅ GEO looks for local modifiers OR [city/state + service/occupation] structures
 # 👉 Expand the service/occupation list below as needed for better coverage
-# ✅ GEO looks for explicit local intent OR service terms paired with a city/state
+# ✅ GEO: explicit local intent, OR service terms only if tied to a city/state/region
 GEO_PAT = re.compile(
     r"\b("
-    r"near me|local|nearby|"                          # explicit local intent
-    r"in\s+[a-z]+|"                                  # 'in dallas', 'in texas'
-    r"[a-z]+\s+(city|county|state|province|region)|" # geo descriptors
-    r"(?:[a-z]+\s+){1,3}(plumber|lawyer|attorney|dentist|doctor|clinic|hospital|"
+    r"near me|local|nearby|"                            # explicit local intent
+    r"in\s+[a-z]+|"                                    # 'in dallas', 'in texas'
+    r"[a-z]+\s+(city|county|state|province|region)|"   # geo descriptors
+    r"(?:[a-z]+\s+(city|county|state|province|region)\s+[a-z]+?\s+)?"
+    r"(plumber|lawyer|attorney|dentist|doctor|clinic|hospital|"
     r"electrician|contractor|builder|roofing|repair|mechanic|auto|car|dealer|"
     r"restaurant|bar|cafe|coffee|shop|store|school|college|university|hotel|motel|inn)"
     r")\b",
