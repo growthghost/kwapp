@@ -38,6 +38,29 @@ BRAND_LIGHT = "#FFFFFF"  # white
 
 st.set_page_config(page_title="OutrankIQ", page_icon="🔎", layout="centered")
 
+# ----- One-time cache reset per user session -----
+# Clears Streamlit caches when a new browser session starts,
+# so users always load the freshest logic (regex, mapping rules, etc.).
+if "cache_cleared" not in st.session_state or not st.session_state["cache_cleared"]:
+    # Newer Streamlit APIs
+    try:
+        st.cache_data.clear()
+    except Exception:
+        pass
+    try:
+        st.cache_resource.clear()
+    except Exception:
+        pass
+
+    # Back-compat for older apps (safe to keep even if unused)
+    try:
+        st.experimental_memo.clear()        # deprecated alias
+        st.experimental_singleton.clear()   # deprecated alias
+    except Exception:
+        pass
+
+    st.session_state["cache_cleared"] = True
+
 # ---------- Global CSS ----------
 st.markdown(
     f"""
