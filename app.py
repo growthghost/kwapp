@@ -330,15 +330,16 @@ st.markdown(
 AIO_PAT = re.compile(r"\b(what is|what's|define|definition|how to|step[- ]?by[- ]?step|tutorial|guide|is)\b", re.I)
 AEO_PAT = re.compile(r"^\s*(who|what|when|where|why|how|which|can|should)\b", re.I)
 VEO_PAT = re.compile(r"\b(near me|open now|closest|call now|directions|ok google|alexa|siri|hey google)\b", re.I)
-
-# ✅ GEO looks for local modifiers OR [city/state + service/occupation] structures
-# 👉 Expand the service/occupation list below as needed for better coverage
-# ✅ GEO: only triggers on explicit local intent (no occupation-only matches)
+# ✅ GEO: explicit local intent, geo descriptors, states, and major U.S. cities
 GEO_PAT = re.compile(
     r"\b("
-    r"near me|local|nearby|"                          # explicit local intent
-    r"in\s+[a-z]+|"                                  # 'in dallas', 'in texas'
-    r"[a-z]+\s+(city|county|state|province|region)"  # geo descriptors
+    r"near me|local|nearby|"                            # explicit local intent
+    r"in\s+[a-z]+|"                                    # 'in dallas', 'in texas'
+    r"[a-z]+\s+(city|county|state|province|region)|"   # geo descriptors
+    # U.S. states
+    r"(alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware|florida|georgia|hawaii|idaho|illinois|indiana|iowa|kansas|kentucky|louisiana|maine|maryland|massachusetts|michigan|minnesota|mississippi|missouri|montana|nebraska|nevada|new hampshire|new jersey|new mexico|new york|north carolina|north dakota|ohio|oklahoma|oregon|pennsylvania|rhode island|south carolina|south dakota|tennessee|texas|utah|vermont|virginia|washington|west virginia|wisconsin|wyoming)|"
+    # Major U.S. cities
+    r"(new york|los angeles|chicago|houston|phoenix|philadelphia|san antonio|san diego|dallas|san jose|austin|jacksonville|fort worth|columbus|charlotte|san francisco|indianapolis|seattle|denver|washington|boston|el paso|nashville|detroit|oklahoma city|portland|las vegas|memphis|louisville|baltimore|milwaukee|albuquerque|tucson|fresno|sacramento|kansas city|mesa|atlanta|omaha|colorado springs|raleigh|miami|long beach|virginia beach|minneapolis|oakland|tampa|tulsa|wichita|new orleans|arlington)"
     r")\b",
     re.I
 )
