@@ -12,6 +12,7 @@ import pandas as pd
 import streamlit as st
 from datetime import datetime
 import mapping
+import crawler
 
 # ---------- Optional deps ----------
 try:
