@@ -1,4 +1,3 @@
-This file crawls the site and extracts page signals (title, H1, meta, body, slug).
 # crawler.py
 # This file handles crawling a site and extracting signals (slug, title, H1, meta, body).
 
