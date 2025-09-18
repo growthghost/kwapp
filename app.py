@@ -11,9 +11,7 @@ from urllib.parse import urlparse, urljoin
 import pandas as pd
 import streamlit as st
 from datetime import datetime
-from mapping import weighted_map_keywords
-from crawler import fetch_profiles
-
+import mapping
 
 # ---------- Optional deps ----------
 try:
@@ -1338,7 +1336,8 @@ if uploaded is not None:
             )
 
             # Use new weighted mapping function from mapping.py
-            results = weighted_map_keywords(export_df, page_signals_by_url)
+            results = mapping.weighted_map_keywords(export_df, page_signals_by_url)
+
 
             # Apply results back into export_df
             for res in results:
