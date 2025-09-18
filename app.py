@@ -11,8 +11,9 @@ from urllib.parse import urlparse, urljoin
 import pandas as pd
 import streamlit as st
 from datetime import datetime
-import mapping
-import crawler
+from mapping import weighted_map_keywords
+from crawler import fetch_profiles
+
 
 # ---------- Optional deps ----------
 try:
