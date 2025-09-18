@@ -1,4 +1,3 @@
-This file maps keywords to URLs using weighted signals and per-page caps.”
 # mapping.py
 # This file contains the weighted keyword-to-URL mapping logic.
 
