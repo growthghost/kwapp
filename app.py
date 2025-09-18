@@ -1338,7 +1338,7 @@ if uploaded is not None:
             )
 
             # Use new weighted mapping function from mapping.py
-            results = mapping.weighted_map_keywords(export_df, page_signals_by_url)
+            results = weighted_map_keywords(export_df, page_signals_by_url)
 
 
             # Apply results back into export_df
