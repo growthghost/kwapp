@@ -11,6 +11,9 @@ from urllib.parse import urlparse, urljoin
 import pandas as pd
 import streamlit as st
 from datetime import datetime
+from mapping import weighted_map_keywords
+from crawler import fetch_profiles
+
 
 # ---------- Optional deps ----------
 try:
@@ -37,29 +40,6 @@ BRAND_ACCENT = "#329662" # green
 BRAND_LIGHT = "#FFFFFF"  # white
 
 st.set_page_config(page_title="OutrankIQ", page_icon="🔎", layout="centered")
-
-# ----- One-time cache reset per user session -----
-# Clears Streamlit caches when a new browser session starts,
-# so users always load the freshest logic (regex, mapping rules, etc.).
-if "cache_cleared" not in st.session_state or not st.session_state["cache_cleared"]:
-    # Newer Streamlit APIs
-    try:
-        st.cache_data.clear()
-    except Exception:
-        pass
-    try:
-        st.cache_resource.clear()
-    except Exception:
-        pass
-
-    # Back-compat for older apps (safe to keep even if unused)
-    try:
-        st.experimental_memo.clear()        # deprecated alias
-        st.experimental_singleton.clear()   # deprecated alias
-    except Exception:
-        pass
-
-    st.session_state["cache_cleared"] = True
 
 # ---------- Global CSS ----------
 st.markdown(
@@ -330,19 +310,7 @@ st.markdown(
 AIO_PAT = re.compile(r"\b(what is|what's|define|definition|how to|step[- ]?by[- ]?step|tutorial|guide|is)\b", re.I)
 AEO_PAT = re.compile(r"^\s*(who|what|when|where|why|how|which|can|should)\b", re.I)
 VEO_PAT = re.compile(r"\b(near me|open now|closest|call now|directions|ok google|alexa|siri|hey google)\b", re.I)
-# ✅ GEO: explicit local intent, geo descriptors, states, and major U.S. cities
-GEO_PAT = re.compile(
-    r"\b("
-    r"near me|local|nearby|"                            # explicit local intent
-    r"in\s+[a-z]+|"                                    # 'in dallas', 'in texas'
-    r"[a-z]+\s+(city|county|state|province|region)|"   # geo descriptors
-    # U.S. states
-    r"(alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware|florida|georgia|hawaii|idaho|illinois|indiana|iowa|kansas|kentucky|louisiana|maine|maryland|massachusetts|michigan|minnesota|mississippi|missouri|montana|nebraska|nevada|new hampshire|new jersey|new mexico|new york|north carolina|north dakota|ohio|oklahoma|oregon|pennsylvania|rhode island|south carolina|south dakota|tennessee|texas|utah|vermont|virginia|washington|west virginia|wisconsin|wyoming)|"
-    # Major U.S. cities
-    r"(new york|los angeles|chicago|houston|phoenix|philadelphia|san antonio|san diego|dallas|san jose|austin|jacksonville|fort worth|columbus|charlotte|san francisco|indianapolis|seattle|denver|washington|boston|el paso|nashville|detroit|oklahoma city|portland|las vegas|memphis|louisville|baltimore|milwaukee|albuquerque|tucson|fresno|sacramento|kansas city|mesa|atlanta|omaha|colorado springs|raleigh|miami|long beach|virginia beach|minneapolis|oakland|tampa|tulsa|wichita|new orleans|arlington)"
-    r")\b",
-    re.I
-)
+GEO_PAT = re.compile(r"\b(how to|best way to|steps? to|examples? of|checklist|framework|template)\b", re.I)
 SXO_PAT = re.compile(r"\b(best|top|compare|comparison|vs\.?|review|pricing|cost|cheap|free download|template|examples?)\b", re.I)
 LLM_PAT = re.compile(r"\b(prompt|prompting|prompt[- ]?engineering|chatgpt|gpt[- ]?\d|llm|rag|embedding|vector|few[- ]?shot|zero[- ]?shot)\b", re.I)
 AIO_PAGE_SIG = re.compile(r"\b(what is|how to|guide|tutorial|step[- ]?by[- ]?step|checklist|framework|template|examples?)\b", re.I)
@@ -363,6 +331,7 @@ def categorize_keyword(kw: str) -> List[str]:
     else:
         if "LLM" not in cats: cats.add("SEO")
     return [c for c in CATEGORY_ORDER if c in cats]
+
 # ---------- Score ----------
 def calculate_score(volume: float, kd: float) -> int:
     if pd.isna(volume) or pd.isna(kd): return 0
@@ -1368,152 +1337,25 @@ if uploaded is not None:
                 or {}
             )
 
-            if isinstance(page_signals_by_url, dict) and page_signals_by_url:
-                # Eligible pool (strategy = Eligible == Yes)
-                elig_mask = export_df[ELIGIBLE_COL].astype(str).str.strip().str.upper() == "YES"
-                pool = export_df.loc[elig_mask].copy()
+            # Use new weighted mapping function from mapping.py
+            results = weighted_map_keywords(export_df, page_signals_by_url)
 
-                if not pool.empty:
-                    # Fallbacks
-                    if SCORE_COL is None:
-                        SCORE_COL = "_ScoreFallback"
-                        pool[SCORE_COL] = 0
-                    if CATEGORY_COL is None:
-                        CATEGORY_COL = "_TagsFallback"
-                        pool[CATEGORY_COL] = ""
+            # Apply results back into export_df
+            for res in results:
+                kw = res["keyword"]
+                url = res["chosen_url"] or ""
+                score = res.get("weighted_score", 0)
+                reasons = res.get("reasons", "")
 
-                    # Normalize numeric
-                    for c in (VOL_COL, KD_COL, SCORE_COL):
-                        if c in pool.columns:
-                            pool[c] = pd.to_numeric(pool[c], errors="coerce").fillna(0)
+                if url:
+                    # Find rows that match this keyword
+                    matches = export_df.index[export_df["Keyword"] == kw].tolist()
+                    for i in matches:
+                        export_df.at[i, MAPPED_URL_COL] = url
+                        export_df.at[i, "Weighted Score"] = score
+                        export_df.at[i, "Mapping Reasons"] = reasons
 
-                    # Tag list (SEO/AIO/VEO)
-                    pool["_CategoryTags"] = pool[CATEGORY_COL].astype(str).apply(
-                        lambda s: [t.strip().upper() for t in s.split(",") if t.strip()]
-                    )
-
-                    # Index to assign back to the correct export_df rows
-                    pool_reset = pool.reset_index()  # 'index' = original export_df index
-                    pool_idx_by_kw = {}
-                    for _, r in pool_reset.iterrows():
-                        k = str(r[KW_COL]).strip()
-                        pool_idx_by_kw.setdefault(k, []).append(int(r["index"]))
-
-                    WORD_RE = re.compile(r"[A-Za-z0-9]+")
-                    def tok(s):
-                        return [t.lower() for t in WORD_RE.findall(s)] if isinstance(s, str) else []
-
-                    used_keywords = set()
-                    updates = []  # (export_df_index, url)
-
-                    # Iterate each page/url
-                    for url, sig in page_signals_by_url.items():
-                        # 1) Collect text from crawl signals
-                        title = sig.get("title") or ""
-                        h1s, h2s, heads = [], [], []
-                        for key in ("h1", "h2", "h3", "headings"):
-                            v = sig.get(key)
-                            if isinstance(v, str) and v.strip():
-                                heads.append(v)
-                                if key == "h1":
-                                    h1s.append(v)
-                                if key == "h2":
-                                    h2s.append(v)
-                            elif isinstance(v, list):
-                                heads.extend([x for x in v if isinstance(x, str)])
-                                if key == "h1":
-                                    h1s.extend([x for x in v if isinstance(x, str)])
-                                if key == "h2":
-                                    h2s.extend([x for x in v if isinstance(x, str)])
-
-                        body_words = sig.get("body_words") or []
-                        body_terms = []
-                        if isinstance(body_words, list):
-                            for x in body_words:
-                                if isinstance(x, str):
-                                    body_terms.append(x)
-                                elif isinstance(x, (list, tuple)) and len(x) >= 1 and isinstance(x[0], str):
-                                    body_terms.append(x[0])
-
-                        # 2) Build token sets
-                        core_tokens_raw = set(tok2(" ".join([title] + h1s + h2s)))          # Title + H1 + H2
-                        topic_tokens_raw = set(tok2(" ".join([title] + heads + body_terms)))  # Title + H1–H3 + body
-                        parsed = urlparse(url)
-                        path_tokens_raw = set(tok2(parsed.path.replace("-", " ").replace("_", " ")))
-
-                        # Remove stopwords
-                        core_tokens = {t for t in core_tokens_raw if t not in _STOP}
-                        topic_tokens = {t for t in topic_tokens_raw if t not in _STOP}
-                        path_tokens = {t for t in path_tokens_raw if t not in _STOP}
-
-                        if not topic_tokens and not core_tokens and not path_tokens:
-                            continue
-
-                        # 3) Relevance function (stricter)
-                        def rel(kw_str: str) -> int:
-                            kt = set(tok2(kw_str))
-                            # Must share ≥1 with core (Title/H1/H2) OR URL path tokens
-                            if not (kt & core_tokens) and not (kt & path_tokens):
-                                return 0
-                            # Must share ≥2 with overall page tokens
-                            if len(kt & topic_tokens) < 2:
-                                return 0
-                            # Score = overlap with topic tokens
-                            return len(kt & topic_tokens)
-
-                        ranked = pool.copy()
-                        ranked["_relevance"] = ranked[KW_COL].astype(str).apply(rel)
-                        ranked = ranked[ranked["_relevance"] > 0]
-                        if ranked.empty:
-                            continue
-
-                        # Tie-breakers: relevance ↓, score ↓, volume ↓, KD ↑, keyword ↑
-                        for c in (VOL_COL, KD_COL, score_col):
-                            if c in ranked.columns:
-                                ranked[c] = pd.to_numeric(ranked[c], errors="coerce").fillna(0)
-
-                        ranked = ranked.sort_values(
-                            by=["_relevance", score_col, VOL_COL, KD_COL, KW_COL],
-                            ascending=[False, False, False, True, True],
-                            kind="mergesort",
-                        )
-
-                        # 4) Pick per page: 2×SEO, 1×AIO, 1×VEO (fallback: top 4 overall if no tags)
-                        if ranked["_CategoryTags"].map(len).sum() > 0:
-                            def pick(tag, n):
-                                T = tag.upper()
-                                return list(
-                                    ranked[ranked["_CategoryTags"].apply(lambda tl: T in tl)][KW_COL]
-                                    .head(n).astype(str)
-                                )
-                            page_picks = pick("SEO", 2) + pick("AIO", 1) + pick("VEO", 1)
-                        else:
-                            page_picks = list(ranked[KW_COL].head(4).astype(str))
-
-                        # 5) Assign picked keywords to this URL
-                        for kw in page_picks:
-                            if kw in used_keywords:
-                                continue
-                            idx_list = pool_idx_by_kw.get(kw, [])
-                            chosen_idx = None
-                            for i in idx_list:
-                                if str(export_df.at[i, MAPPED_URL_COL]).strip() == "":
-                                    chosen_idx = i
-                                    break
-                            if chosen_idx is None and idx_list:
-                                chosen_idx = idx_list[0]
-                            if chosen_idx is not None:
-                                updates.append((chosen_idx, url))
-                                used_keywords.add(kw)
-
-                    # Apply updates
-                    for i, u in updates:
-                        export_df.at[i, MAPPED_URL_COL] = u
-
-                    st.session_state["map_ready"] = True
-            else:
-                st.info("No crawl/page signals found to map keywords. Skipping mapping step.")
-        # ======================== END MAPPING BLOCK (guarded) ========================
+            st.session_state["map_ready"] = True
 
         # ---------- Manual mapping button ----------
         can_map = bool(base_site_url.strip())
