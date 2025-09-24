@@ -4,7 +4,6 @@
 import pandas as pd
 from typing import Dict, List
 
-
 # ---------- Weights ----------
 WEIGHTS = {
     "slug": 5,
@@ -21,6 +20,9 @@ PAGE_CAPS = {
     "VEO": 1
 }
 
+# ---------- Thresholds ----------
+MIN_SCORE = 5  # must reach this weighted score to be mapped
+REQUIRE_STRONG_FIELD = True  # must match slug OR title OR h1
 
 def overlap_count(keyword: str, text: str) -> int:
     """
@@ -32,7 +34,6 @@ def overlap_count(keyword: str, text: str) -> int:
     txt_tokens = set(text.lower().split())
     return len(kw_tokens & txt_tokens)
 
-
 def url_depth(url: str) -> int:
     """
     Calculate the depth of a URL (number of path segments).
@@ -40,7 +41,6 @@ def url_depth(url: str) -> int:
     """
     parts = url.strip("/").split("/")
     return len(parts) - 1 if parts[0].startswith("http") else len(parts)
-
 
 def weighted_map_keywords(df: pd.DataFrame, page_signals_by_url: Dict) -> List[Dict]:
     """
@@ -57,7 +57,6 @@ def weighted_map_keywords(df: pd.DataFrame, page_signals_by_url: Dict) -> List[D
 
     # Track assigned counts per page/category
     assigned_counts = {url: {"SEO": 0, "AIO": 0, "VEO": 0} for url in page_signals_by_url}
-
     results = []
 
     for _, row in df.iterrows():
@@ -68,14 +67,19 @@ def weighted_map_keywords(df: pd.DataFrame, page_signals_by_url: Dict) -> List[D
         for url, signals in page_signals_by_url.items():
             score = 0
             reasons = []
+            strong_field_match = False  # track slug/title/h1 matches
 
             for field, text in signals.items():
                 matches = overlap_count(kw, text)
                 if matches > 0:
-                    score += matches * WEIGHTS.get(field, 0)
-                    reasons.append(f"{field} match x{matches}")
+                    weight = WEIGHTS.get(field, 0)
+                    score += matches * weight
+                    reasons.append(f"{field} match x{matches} (weight {weight})")
+                    if field in ["slug", "title", "h1"]:
+                        strong_field_match = True
 
-            if score > 0:
+            # Apply stricter rules
+            if score >= MIN_SCORE and (not REQUIRE_STRONG_FIELD or strong_field_match):
                 candidate_scores.append((url, score, reasons))
 
         if candidate_scores:
@@ -103,8 +107,7 @@ def weighted_map_keywords(df: pd.DataFrame, page_signals_by_url: Dict) -> List[D
                 "category": category,
                 "chosen_url": None,
                 "weighted_score": 0,
-                "reasons": "No signal matches"
+                "reasons": "No strong matches (failed thresholds)"
             })
 
     return results
-
