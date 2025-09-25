@@ -1341,7 +1341,7 @@ if uploaded is not None:
             results = weighted_map_keywords(export_df, page_signals_by_url)
 
 
-            # Apply results back into export_df
+                        # Apply results back into export_df
             for res in results:
                 kw = res["keyword"]
                 url = res["chosen_url"] or ""
@@ -1362,21 +1362,9 @@ if uploaded is not None:
                         export_df.at[i, "H1"] = res.get("h1_text", "")
                         export_df.at[i, "Meta"] = res.get("meta_text", "")
                         export_df.at[i, "Body Preview"] = res.get("body_preview", "")
-            for res in results:
-                kw = res["keyword"]
-                url = res["chosen_url"] or ""
-                score = res.get("weighted_score", 0)
-                reasons = res.get("reasons", "")
-
-                if url:
-                    # Find rows that match this keyword
-                    matches = export_df.index[export_df["Keyword"] == kw].tolist()
-                    for i in matches:
-                        export_df.at[i, MAPPED_URL_COL] = url
-                        export_df.at[i, "Weighted Score"] = score
-                        export_df.at[i, "Mapping Reasons"] = reasons
 
             st.session_state["map_ready"] = True
+
 
         # ---------- Manual mapping button ----------
         can_map = bool(base_site_url.strip())
