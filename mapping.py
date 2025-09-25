@@ -22,7 +22,7 @@ PAGE_CAPS = {
 
 # ---------- Thresholds ----------
 MIN_SCORE = 5  # must reach this weighted score to be mapped
-REQUIRE_STRONG_FIELD = True  # must match slug OR title OR h1
+REQUIRE_STRONG_FIELD = False  # allow body/meta to contribute, not just slug/title/h1
 
 def overlap_count(keyword: str, text: str) -> int:
     """
@@ -52,7 +52,8 @@ def weighted_map_keywords(df: pd.DataFrame, page_signals_by_url: Dict) -> List[D
 
     Output:
         mapping_results: list of dicts with:
-            keyword, category, chosen_url, weighted_score, reasons
+            keyword, category, chosen_url, weighted_score, reasons,
+            plus debug fields (slug_text, title_text, h1_text, meta_text, body_preview)
     """
 
     # Track assigned counts per page/category
@@ -67,7 +68,7 @@ def weighted_map_keywords(df: pd.DataFrame, page_signals_by_url: Dict) -> List[D
         for url, signals in page_signals_by_url.items():
             score = 0
             reasons = []
-            strong_field_match = False  # track slug/title/h1 matches
+            strong_field_match = False
 
             for field, text in signals.items():
                 matches = overlap_count(kw, text)
@@ -78,9 +79,9 @@ def weighted_map_keywords(df: pd.DataFrame, page_signals_by_url: Dict) -> List[D
                     if field in ["slug", "title", "h1"]:
                         strong_field_match = True
 
-            # Apply stricter rules
+            # Apply rules: body/meta allowed, but must meet threshold
             if score >= MIN_SCORE and (not REQUIRE_STRONG_FIELD or strong_field_match):
-                candidate_scores.append((url, score, reasons))
+                candidate_scores.append((url, score, reasons, signals))
 
         if candidate_scores:
             # Sort by score (desc), then depth (shallowest wins), then URL length (shorter wins)
@@ -88,7 +89,7 @@ def weighted_map_keywords(df: pd.DataFrame, page_signals_by_url: Dict) -> List[D
                 key=lambda x: (x[1], -url_depth(x[0]), -len(x[0])),
                 reverse=True
             )
-            for url, score, reasons in candidate_scores:
+            for url, score, reasons, signals in candidate_scores:
                 # Enforce per-page caps
                 if assigned_counts[url][category] < PAGE_CAPS.get(category, 99):
                     assigned_counts[url][category] += 1
@@ -97,7 +98,13 @@ def weighted_map_keywords(df: pd.DataFrame, page_signals_by_url: Dict) -> List[D
                         "category": category,
                         "chosen_url": url,
                         "weighted_score": score,
-                        "reasons": "; ".join(reasons)
+                        "reasons": "; ".join(reasons),
+                        # Debug fields
+                        "slug_text": signals.get("slug", ""),
+                        "title_text": signals.get("title", ""),
+                        "h1_text": signals.get("h1", ""),
+                        "meta_text": signals.get("meta", ""),
+                        "body_preview": (signals.get("body", "")[:200] + "...") if signals.get("body") else ""
                     })
                     break
         else:
@@ -107,7 +114,13 @@ def weighted_map_keywords(df: pd.DataFrame, page_signals_by_url: Dict) -> List[D
                 "category": category,
                 "chosen_url": None,
                 "weighted_score": 0,
-                "reasons": "No strong matches (failed thresholds)"
+                "reasons": "No strong matches (failed thresholds)",
+                # Debug fields empty
+                "slug_text": "",
+                "title_text": "",
+                "h1_text": "",
+                "meta_text": "",
+                "body_preview": ""
             })
 
     return results
