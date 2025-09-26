@@ -1298,72 +1298,74 @@ if uploaded is not None:
         # Invalidate previous map if inputs changed
         if st.session_state.get("map_signature") != curr_signature:
             st.session_state["map_ready"] = False
-	        # ======================= BEGIN MAPPING BLOCK (guarded) =======================
-        import re
-        import pandas as pd
+	            # ======================= BEGIN MAPPING BLOCK (guarded) =======================
+    import re
+    import pandas as pd
 
-        # Only run if export_df exists and is a DataFrame
-        if isinstance(globals().get("export_df", None), pd.DataFrame) and not export_df.empty:
+    # Only run if export_df exists and is a DataFrame
+    if isinstance(globals().get("export_df", None), pd.DataFrame) and not export_df.empty:
 
-            # Build case-insensitive column resolver
-            cols_lower_to_orig = {c.lower(): c for c in export_df.columns}
-            def _resolve(cands, allow_missing=False, default_val=None):
-                for c in cands:
-                    if c in export_df.columns:
-                        return c
-                    cl = str(c).lower()
-                    if cl in cols_lower_to_orig:
-                        return cols_lower_to_orig[cl]
-                if allow_missing:
-                    return default_val
-                raise ValueError(f"Missing expected column: one of {cands}")
+        # Build case-insensitive column resolver
+        cols_lower_to_orig = {c.lower(): c for c in export_df.columns}
+        def _resolve(cands, allow_missing=False, default_val=None):
+            for c in cands:
+                if c in export_df.columns:
+                    return c
+                cl = str(c).lower()
+                if cl in cols_lower_to_orig:
+                    return cols_lower_to_orig[cl]
+            if allow_missing:
+                return default_val
+            raise ValueError(f"Missing expected column: one of {cands}")
 
-            KW_COL       = _resolve(["Keyword","keyword","query","term"])
-            VOL_COL      = _resolve(["Search Volume","search volume","volume","sv"])
-            KD_COL       = _resolve(["Keyword Difficulty","keyword difficulty","kd","difficulty"])
-            ELIGIBLE_COL = _resolve(["Eligible","eligible"])
-            SCORE_COL    = _resolve(["Score","score"], allow_missing=True, default_val=None)
-            CATEGORY_COL = _resolve(["Category","Tags","categories","tag"], allow_missing=True, default_val=None)
+        KW_COL       = _resolve(["Keyword","keyword","query","term"])
+        VOL_COL      = _resolve(["Search Volume","search volume","volume","sv"])
+        KD_COL       = _resolve(["Keyword Difficulty","keyword difficulty","kd","difficulty"])
+        ELIGIBLE_COL = _resolve(["Eligible","eligible"])
+        SCORE_COL    = _resolve(["Score","score"], allow_missing=True, default_val=None)
+        CATEGORY_COL = _resolve(["Category","Tags","categories","tag"], allow_missing=True, default_val=None)
 
-            # Ensure Mapped URL column exists
-            MAPPED_URL_COL = "Mapped URL"
-            if MAPPED_URL_COL not in export_df.columns:
-                export_df[MAPPED_URL_COL] = ""
+        # Ensure Mapped URL column exists
+        MAPPED_URL_COL = "Mapped URL"
+        if MAPPED_URL_COL not in export_df.columns:
+            export_df[MAPPED_URL_COL] = ""
 
-            # Pull crawl/page signals
-            page_signals_by_url = (
-                st.session_state.get("url_signals")
-                or st.session_state.get("crawl_signals")
-                or {}
-            )
+        # Ensure debug columns exist
+        for col in ["Weighted Score", "Mapping Reasons", "Slug", "Title", "H1", "Meta", "Body Preview"]:
+            if col not in export_df.columns:
+                export_df[col] = ""
 
-            # Use new weighted mapping function from mapping.py
-            results = weighted_map_keywords(export_df, page_signals_by_url)
+        # Pull crawl/page signals
+        page_signals_by_url = (
+            st.session_state.get("url_signals")
+            or st.session_state.get("crawl_signals")
+            or {}
+        )
 
+        # Use new weighted mapping function from mapping.py
+        results = weighted_map_keywords(export_df, page_signals_by_url)
 
-                        # Apply results back into export_df
-            for res in results:
-                kw = res["keyword"]
-                url = res["chosen_url"] or ""
-                score = res.get("weighted_score", 0)
-                reasons = res.get("reasons", "")
+        # Apply results back into export_df
+        for res in results:
+            kw = res["keyword"]
+            url = res["chosen_url"] or ""
+            score = res.get("weighted_score", 0)
+            reasons = res.get("reasons", "")
 
-                if url:
-                    # Find rows that match this keyword
-                    matches = export_df.index[export_df["Keyword"] == kw].tolist()
-                    for i in matches:
-                        export_df.at[i, MAPPED_URL_COL] = url
-                        export_df.at[i, "Weighted Score"] = score
-                        export_df.at[i, "Mapping Reasons"] = reasons
+            # Find rows that match this keyword
+            matches = export_df.index[export_df["Keyword"] == kw].tolist()
+            for i in matches:
+                export_df.at[i, MAPPED_URL_COL] = url
+                export_df.at[i, "Weighted Score"] = score
+                export_df.at[i, "Mapping Reasons"] = reasons
+                export_df.at[i, "Slug"] = res.get("slug_text", "")
+                export_df.at[i, "Title"] = res.get("title_text", "")
+                export_df.at[i, "H1"] = res.get("h1_text", "")
+                export_df.at[i, "Meta"] = res.get("meta_text", "")
+                export_df.at[i, "Body Preview"] = res.get("body_preview", "")
 
-                        # Debug fields: raw signals that influenced mapping
-                        export_df.at[i, "Slug"] = res.get("slug_text", "")
-                        export_df.at[i, "Title"] = res.get("title_text", "")
-                        export_df.at[i, "H1"] = res.get("h1_text", "")
-                        export_df.at[i, "Meta"] = res.get("meta_text", "")
-                        export_df.at[i, "Body Preview"] = res.get("body_preview", "")
+        st.session_state["map_ready"] = True
 
-            st.session_state["map_ready"] = True
 
 
         # ---------- Manual mapping button ----------
@@ -1398,7 +1400,7 @@ if uploaded is not None:
             loader.empty()
             st.session_state["mapping_running"] = False
 
-                # ---------- Build CSV for download ----------
+                       # ---------- Build CSV for download ----------
         if st.session_state.get("map_ready") and st.session_state.get("map_signature") == curr_signature:
             export_df["Map URL"] = st.session_state["map_result"]
             # Do not show a URL where row is not eligible
