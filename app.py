@@ -1398,22 +1398,32 @@ if uploaded is not None:
             loader.empty()
             st.session_state["mapping_running"] = False
 
-        # ---------- Build CSV for download ----------
+                # ---------- Build CSV for download ----------
         if st.session_state.get("map_ready") and st.session_state.get("map_signature") == curr_signature:
             export_df["Map URL"] = st.session_state["map_result"]
             # Do not show a URL where row is not eligible
             export_df.loc[export_df["Eligible"] != "Yes", "Map URL"] = ""
             can_download = True
         else:
-            export_df["Map URL"] = pd.Series([""]*len(export_df), index=export_df.index, dtype="string")
+            export_df["Map URL"] = pd.Series([""] * len(export_df), index=export_df.index, dtype="string")
             can_download = False
             if base_site_url.strip():
                 st.info("Click **Map keywords to site** to generate Map URLs for this strategy and dataset.")
 
-        export_cols = base_cols + ["Strategy","Map URL"]
-        export_df = export_df[export_cols]
+        # Base columns in your original CSV
+        export_cols = base_cols + ["Strategy", "Map URL"]
+
+        # Debug columns we want to include
+        debug_cols = ["Weighted Score", "Mapping Reasons", "Slug", "Title", "H1", "Meta", "Body Preview"]
+
+        # Combine, but only keep the columns that exist in export_df
+        all_cols = [c for c in (export_cols + debug_cols) if c in export_df.columns]
+
+        # Reorder DataFrame with base first, then debug columns
+        export_df = export_df.loc[:, all_cols]
 
         csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")
+
         st.download_button(
             label="⬇️ Download scored CSV",
             data=csv_bytes,
