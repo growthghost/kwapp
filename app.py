@@ -1389,9 +1389,14 @@ if uploaded is not None:
                 if curr_signature in cache and len(cache[curr_signature]) == len(export_df):
                     map_series = pd.Series(cache[curr_signature], index=export_df.index, dtype="string")
                 else:
-                    map_series = map_keywords_to_urls(
-                        export_df, kw_col=kw_col, vol_col=vol_col, kd_col=kd_col,
-                        base_url=base_site_url.strip(), include_subdomains=True, use_sitemap_first=True
+                    # Use weighted mapping instead of the old unweighted version
+                    results = weighted_map_keywords(export_df, page_signals_by_url)
+
+                    # Build a Series of chosen URLs to match the shape of export_df
+                    map_series = pd.Series(
+                        [res["chosen_url"] or "" for res in results],
+                        index=export_df.index,
+                        dtype="string"
                     )
                     cache[curr_signature] = map_series.fillna("").astype(str).tolist()
                 st.session_state["map_result"] = map_series
