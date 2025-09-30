@@ -1348,13 +1348,12 @@ if uploaded is not None:
                 score = res.get("weighted_score", 0)
                 reasons = res.get("reasons", "")
 
-                if url:
-                    # Find rows that match this keyword
-                    matches = export_df.index[export_df["Keyword"] == kw].tolist()
-                    for i in matches:
-                        export_df.at[i, MAPPED_URL_COL] = url
-                        export_df.at[i, "Weighted Score"] = score
-                        export_df.at[i, "Mapping Reasons"] = reasons
+                # Always apply mapping results (whether URL is found or not)
+                matches = export_df.index[export_df["Keyword"] == kw].tolist()
+                for i in matches:
+                    export_df.at[i, MAPPED_URL_COL] = url
+                    export_df.at[i, "Weighted Score"] = score
+                    export_df.at[i, "Mapping Reasons"] = reasons
 
             st.session_state["map_ready"] = True
 
