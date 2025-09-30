@@ -1,9 +1,7 @@
 # mapping.py
-# Weighted keyword-to-URL mapping logic (cleaned + hybrid rule)
+# This file contains the weighted keyword-to-URL mapping logic.
 
 import pandas as pd
-import re
-from urllib.parse import urlparse
 from typing import Dict, List
 
 # ---------- Weights ----------
@@ -12,38 +10,40 @@ WEIGHTS = {
     "title": 4,
     "h1": 3,
     "meta": 2,
-    "body": 1,
+    "body": 1
 }
 
 # ---------- Per-page caps ----------
 PAGE_CAPS = {
     "SEO": 2,
     "AIO": 1,
-    "VEO": 1,
+    "VEO": 1
 }
 
-# ---------- Tokenizer ----------
-WORD_RE = re.compile(r"[A-Za-z0-9]+")
-
-
-def tokenize(text: str) -> List[str]:
-    """Split text into lowercase alphanumeric tokens."""
-    if not text:
-        return []
-    return [t.lower() for t in WORD_RE.findall(text)]
+# ---------- Thresholds ----------
+MIN_SCORE = 5  # must reach this weighted score to be mapped
+REQUIRE_STRONG_FIELD = True  # normally require slug/title/h1, unless fallback kicks in
+FALLBACK_MIN_TOKENS = 2      # if no strong fields exist, require >=2 overlaps in meta/body
 
 
 def overlap_count(keyword: str, text: str) -> int:
-    """Count overlapping tokens between keyword and text."""
-    return len(set(tokenize(keyword)) & set(tokenize(text)))
+    """
+    Count the number of overlapping tokens between a keyword and some text.
+    """
+    if not text:
+        return 0
+    kw_tokens = set(keyword.lower().split())
+    txt_tokens = set(text.lower().split())
+    return len(kw_tokens & txt_tokens)
 
 
 def url_depth(url: str) -> int:
-    """Calculate depth of a URL based on path segments."""
-    path = urlparse(url).path.strip("/")
-    if not path:
-        return 0
-    return len(path.split("/"))
+    """
+    Calculate the depth of a URL (number of path segments).
+    Example: https://site.com/a/b/c -> depth = 3
+    """
+    parts = url.strip("/").split("/")
+    return len(parts) - 1 if parts[0].startswith("http") else len(parts)
 
 
 def weighted_map_keywords(df: pd.DataFrame, page_signals_by_url: Dict) -> List[Dict]:
@@ -51,29 +51,32 @@ def weighted_map_keywords(df: pd.DataFrame, page_signals_by_url: Dict) -> List[D
     Maps each keyword in df to the best URL using weighted signals.
 
     Inputs:
-        df: pandas DataFrame with keywords and categories
+        df: pandas DataFrame with keywords, category, etc.
         page_signals_by_url: dict {url: {slug, title, h1, meta, body}}
 
     Output:
-        mapping_results: list of dicts with keyword, category, chosen_url, score, reasons
+        mapping_results: list of dicts with:
+            keyword, category, chosen_url, weighted_score, reasons
     """
-    # Track how many keywords have been assigned per page/category
+
+    # Track assigned counts per page/category
     assigned_counts = {url: {"SEO": 0, "AIO": 0, "VEO": 0} for url in page_signals_by_url}
     results = []
 
     for _, row in df.iterrows():
-        kw = str(row.get("Keyword", "")).strip()
-        category = str(row.get("Category", "SEO")).strip() or "SEO"
+        kw = row.get("Keyword", "")
+        category = row.get("Category", "SEO")
 
         candidate_scores = []
         for url, signals in page_signals_by_url.items():
             score = 0
             reasons = []
             strong_field_match = False
+            total_overlaps = 0
 
-            # Score overlaps for each field
             for field, text in signals.items():
                 matches = overlap_count(kw, text)
+                total_overlaps += matches
                 if matches > 0:
                     weight = WEIGHTS.get(field, 0)
                     score += matches * weight
@@ -81,45 +84,41 @@ def weighted_map_keywords(df: pd.DataFrame, page_signals_by_url: Dict) -> List[D
                     if field in ["slug", "title", "h1"]:
                         strong_field_match = True
 
-            # Hybrid rule:
-            # Require 1 strong-field match AND (≥2 tokens or score ≥ 6)
-            kw_tokens = set(tokenize(kw))
-            page_tokens = set(tokenize(" ".join(signals.values())))
-            token_overlap = len(kw_tokens & page_tokens)
-
-            if strong_field_match and (token_overlap >= 2 or score >= 6):
-                candidate_scores.append((url, score, reasons))
+            # Decide eligibility
+            if score >= MIN_SCORE:
+                if strong_field_match:
+                    candidate_scores.append((url, score, reasons, signals))
+                elif not any(signals.get(f, "") for f in ["slug", "title", "h1"]):
+                    # Fallback: no strong fields exist, allow meta/body if >=2 overlaps
+                    if total_overlaps >= FALLBACK_MIN_TOKENS:
+                        candidate_scores.append((url, score, reasons, signals))
 
         if candidate_scores:
-            # Sort by score desc, then URL depth asc, then URL length asc
+            # Sort by score (desc), then depth (shallowest wins), then URL length (shorter wins)
             candidate_scores.sort(
                 key=lambda x: (x[1], -url_depth(x[0]), -len(x[0])),
-                reverse=True,
+                reverse=True
             )
-            for url, score, reasons in candidate_scores:
+            for url, score, reasons, signals in candidate_scores:
                 # Enforce per-page caps
                 if assigned_counts[url][category] < PAGE_CAPS.get(category, 99):
                     assigned_counts[url][category] += 1
-                    results.append(
-                        {
-                            "keyword": kw,
-                            "category": category,
-                            "chosen_url": url,
-                            "weighted_score": score,
-                            "reasons": "; ".join(reasons),
-                        }
-                    )
+                    results.append({
+                        "keyword": kw,
+                        "category": category,
+                        "chosen_url": url,
+                        "weighted_score": score,
+                        "reasons": "; ".join(reasons),
+                    })
                     break
         else:
-            # No strong matches
-            results.append(
-                {
-                    "keyword": kw,
-                    "category": category,
-                    "chosen_url": None,
-                    "weighted_score": 0,
-                    "reasons": "No strong matches (failed thresholds)",
-                }
-            )
+            # No matches → unmapped
+            results.append({
+                "keyword": kw,
+                "category": category,
+                "chosen_url": None,
+                "weighted_score": 0,
+                "reasons": "No strong matches (failed thresholds)"
+            })
 
     return results
