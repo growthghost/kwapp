@@ -1,5 +1,5 @@
 # mapping.py
-# This file contains the weighted keyword-to-URL mapping logic.
+# Weighted keyword-to-URL mapping logic with soft restriction + 2-token fallback
 
 import pandas as pd
 from typing import Dict, List
@@ -22,19 +22,17 @@ PAGE_CAPS = {
 
 # ---------- Thresholds ----------
 MIN_SCORE = 5  # must reach this weighted score to be mapped
-REQUIRE_STRONG_FIELD = True  # normally require slug/title/h1, unless fallback kicks in
-FALLBACK_MIN_TOKENS = 2      # if no strong fields exist, require >=2 overlaps in meta/body
 
 
-def overlap_count(keyword: str, text: str) -> int:
+def overlap_tokens(keyword: str, text: str) -> set:
     """
-    Count the number of overlapping tokens between a keyword and some text.
+    Return the set of overlapping tokens between a keyword and some text.
     """
     if not text:
-        return 0
+        return set()
     kw_tokens = set(keyword.lower().split())
     txt_tokens = set(text.lower().split())
-    return len(kw_tokens & txt_tokens)
+    return kw_tokens & txt_tokens
 
 
 def url_depth(url: str) -> int:
@@ -72,26 +70,23 @@ def weighted_map_keywords(df: pd.DataFrame, page_signals_by_url: Dict) -> List[D
             score = 0
             reasons = []
             strong_field_match = False
-            total_overlaps = 0
+            all_overlaps = set()
 
             for field, text in signals.items():
-                matches = overlap_count(kw, text)
-                total_overlaps += matches
-                if matches > 0:
+                overlaps = overlap_tokens(kw, text)
+                if overlaps:
                     weight = WEIGHTS.get(field, 0)
-                    score += matches * weight
-                    reasons.append(f"{field} match x{matches} (weight {weight})")
+                    score += len(overlaps) * weight
+                    reasons.append(f"{field} match: {', '.join(overlaps)} (x{len(overlaps)} • w{weight})")
+                    all_overlaps |= overlaps
                     if field in ["slug", "title", "h1"]:
                         strong_field_match = True
 
-            # Decide eligibility
-            if score >= MIN_SCORE:
-                if strong_field_match:
-                    candidate_scores.append((url, score, reasons, signals))
-                elif not any(signals.get(f, "") for f in ["slug", "title", "h1"]):
-                    # Fallback: no strong fields exist, allow meta/body if >=2 overlaps
-                    if total_overlaps >= FALLBACK_MIN_TOKENS:
-                        candidate_scores.append((url, score, reasons, signals))
+            # Rule 1: must hit threshold
+            # Rule 2: if slug/title/h1 exist, require a match in at least one of them
+            # Rule 3: if no strong field match, require >=2 overlaps anywhere
+            if score >= MIN_SCORE and (strong_field_match or len(all_overlaps) >= 2):
+                candidate_scores.append((url, score, reasons))
 
         if candidate_scores:
             # Sort by score (desc), then depth (shallowest wins), then URL length (shorter wins)
@@ -99,7 +94,7 @@ def weighted_map_keywords(df: pd.DataFrame, page_signals_by_url: Dict) -> List[D
                 key=lambda x: (x[1], -url_depth(x[0]), -len(x[0])),
                 reverse=True
             )
-            for url, score, reasons, signals in candidate_scores:
+            for url, score, reasons in candidate_scores:
                 # Enforce per-page caps
                 if assigned_counts[url][category] < PAGE_CAPS.get(category, 99):
                     assigned_counts[url][category] += 1
@@ -108,7 +103,7 @@ def weighted_map_keywords(df: pd.DataFrame, page_signals_by_url: Dict) -> List[D
                         "category": category,
                         "chosen_url": url,
                         "weighted_score": score,
-                        "reasons": "; ".join(reasons),
+                        "reasons": "; ".join(reasons)
                     })
                     break
         else:
