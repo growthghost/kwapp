@@ -1,8 +1,10 @@
 # mapping.py
-# Weighted keyword-to-URL mapping logic with soft restriction + 2-token fallback
+# Hybrid Option D: Weighted keyword-to-URL mapping with density, stopword learning, and phrase/multi-token checks
 
 import pandas as pd
-from typing import Dict, List
+import re
+from collections import Counter
+from typing import Dict, List, Set
 
 # ---------- Weights ----------
 WEIGHTS = {
@@ -20,19 +22,35 @@ PAGE_CAPS = {
     "VEO": 1
 }
 
-# ---------- Thresholds ----------
-MIN_SCORE = 5  # must reach this weighted score to be mapped
+# ---------- Hybrid thresholds ----------
+MIN_SCORE = 5           # must reach this weighted score
+DENSITY_THRESHOLD = 0.3 # % of keyword tokens required to overlap
+STOPWORD_FREQ = 0.5     # token appears in >50% of pages → boilerplate
+MIN_TOKEN_OVERLAP = 2   # require at least 2 meaningful token overlaps
+
+TOKENIZER = re.compile(r"[a-zA-Z0-9]+")
 
 
-def overlap_tokens(keyword: str, text: str) -> set:
+# ---------- Token utilities ----------
+def tokenize(text: str) -> List[str]:
+    return TOKENIZER.findall(text.lower()) if text else []
+
+
+def build_stopwords(page_signals_by_url: Dict) -> Set[str]:
     """
-    Return the set of overlapping tokens between a keyword and some text.
+    Learn boilerplate tokens that appear on too many pages.
     """
-    if not text:
-        return set()
-    kw_tokens = set(keyword.lower().split())
-    txt_tokens = set(text.lower().split())
-    return kw_tokens & txt_tokens
+    doc_freq = Counter()
+    total_docs = len(page_signals_by_url)
+
+    for signals in page_signals_by_url.values():
+        seen = set()
+        for field in ["slug", "title", "h1", "meta", "body"]:
+            seen.update(tokenize(signals.get(field, "")))
+        for token in seen:
+            doc_freq[token] += 1
+
+    return {tok for tok, freq in doc_freq.items() if freq / total_docs >= STOPWORD_FREQ}
 
 
 def url_depth(url: str) -> int:
@@ -44,9 +62,10 @@ def url_depth(url: str) -> int:
     return len(parts) - 1 if parts[0].startswith("http") else len(parts)
 
 
+# ---------- Core mapping logic (Hybrid D) ----------
 def weighted_map_keywords(df: pd.DataFrame, page_signals_by_url: Dict) -> List[Dict]:
     """
-    Maps each keyword in df to the best URL using weighted signals.
+    Maps each keyword in df to the best URL using Hybrid D rules.
 
     Inputs:
         df: pandas DataFrame with keywords, category, etc.
@@ -56,37 +75,51 @@ def weighted_map_keywords(df: pd.DataFrame, page_signals_by_url: Dict) -> List[D
         mapping_results: list of dicts with:
             keyword, category, chosen_url, weighted_score, reasons
     """
-
-    # Track assigned counts per page/category
+    stopwords = build_stopwords(page_signals_by_url)
     assigned_counts = {url: {"SEO": 0, "AIO": 0, "VEO": 0} for url in page_signals_by_url}
     results = []
 
     for _, row in df.iterrows():
         kw = row.get("Keyword", "")
         category = row.get("Category", "SEO")
+        kw_tokens = tokenize(kw)
+        meaningful_kw_tokens = [t for t in kw_tokens if t not in stopwords]
 
         candidate_scores = []
         for url, signals in page_signals_by_url.items():
             score = 0
             reasons = []
-            strong_field_match = False
             all_overlaps = set()
 
+            # collect signal text
+            combined_fields = []
             for field, text in signals.items():
-                overlaps = overlap_tokens(kw, text)
+                overlaps = set(tokenize(kw)) & set(tokenize(text))
                 if overlaps:
                     weight = WEIGHTS.get(field, 0)
                     score += len(overlaps) * weight
                     reasons.append(f"{field} match: {', '.join(overlaps)} (x{len(overlaps)} • w{weight})")
                     all_overlaps |= overlaps
-                    if field in ["slug", "title", "h1"]:
-                        strong_field_match = True
+                combined_fields.append(text.lower())
+            page_text = " ".join(combined_fields)
 
-            # Rule 1: must hit threshold
-            # Rule 2: if slug/title/h1 exist, require a match in at least one of them
-            # Rule 3: if no strong field match, require >=2 overlaps anywhere
-            if score >= MIN_SCORE and (strong_field_match or len(all_overlaps) >= 2):
-                candidate_scores.append((url, score, reasons))
+            # --- Hybrid Rule 1: must hit weighted threshold ---
+            if score < MIN_SCORE:
+                continue
+
+            # --- Hybrid Rule 2: density check ---
+            overlap_meaningful = [t for t in meaningful_kw_tokens if t in page_text]
+            coverage = len(overlap_meaningful) / len(meaningful_kw_tokens) if meaningful_kw_tokens else 0
+            if coverage < DENSITY_THRESHOLD:
+                continue
+
+            # --- Hybrid Rule 3: phrase or multi-token ---
+            phrase_match = any(" ".join(meaningful_kw_tokens) in f.lower() for f in combined_fields)
+            multi_token_match = len(overlap_meaningful) >= MIN_TOKEN_OVERLAP
+            if not (phrase_match or multi_token_match):
+                continue
+
+            candidate_scores.append((url, score, reasons))
 
         if candidate_scores:
             # Sort by score (desc), then depth (shallowest wins), then URL length (shorter wins)
@@ -95,7 +128,6 @@ def weighted_map_keywords(df: pd.DataFrame, page_signals_by_url: Dict) -> List[D
                 reverse=True
             )
             for url, score, reasons in candidate_scores:
-                # Enforce per-page caps
                 if assigned_counts[url][category] < PAGE_CAPS.get(category, 99):
                     assigned_counts[url][category] += 1
                     results.append({
@@ -107,13 +139,12 @@ def weighted_map_keywords(df: pd.DataFrame, page_signals_by_url: Dict) -> List[D
                     })
                     break
         else:
-            # No matches → unmapped
             results.append({
                 "keyword": kw,
                 "category": category,
                 "chosen_url": None,
                 "weighted_score": 0,
-                "reasons": "No strong matches (failed thresholds)"
+                "reasons": "No match (failed Hybrid D rules)"
             })
 
     return results
