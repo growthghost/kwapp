@@ -1,5 +1,5 @@
 # mapping.py
-# Hybrid Option D: Weighted keyword-to-URL mapping with density, stopword learning, and phrase/multi-token checks
+# Hybrid D+ strict mapping
 
 import pandas as pd
 import re
@@ -22,11 +22,12 @@ PAGE_CAPS = {
     "VEO": 1
 }
 
-# ---------- Hybrid thresholds ----------
-MIN_SCORE = 5           # must reach this weighted score
-DENSITY_THRESHOLD = 0.3 # % of keyword tokens required to overlap
-STOPWORD_FREQ = 0.5     # token appears in >50% of pages → boilerplate
-MIN_TOKEN_OVERLAP = 2   # require at least 2 meaningful token overlaps
+# ---------- Stricter thresholds ----------
+MIN_SCORE = 5             # must reach this weighted score
+DENSITY_THRESHOLD = 0.5   # now require ≥50% token coverage
+STOPWORD_FREQ = 0.5       # token appears in >50% of pages → boilerplate
+MIN_TOKEN_OVERLAP = 2     # must overlap ≥2 meaningful tokens
+GENERIC_SLUGS = {"admissions", "apply", "services", "careers", "disclaimer"}
 
 TOKENIZER = re.compile(r"[a-zA-Z0-9]+")
 
@@ -37,9 +38,6 @@ def tokenize(text: str) -> List[str]:
 
 
 def build_stopwords(page_signals_by_url: Dict) -> Set[str]:
-    """
-    Learn boilerplate tokens that appear on too many pages.
-    """
     doc_freq = Counter()
     total_docs = len(page_signals_by_url)
 
@@ -54,27 +52,12 @@ def build_stopwords(page_signals_by_url: Dict) -> Set[str]:
 
 
 def url_depth(url: str) -> int:
-    """
-    Calculate the depth of a URL (number of path segments).
-    Example: https://site.com/a/b/c -> depth = 3
-    """
     parts = url.strip("/").split("/")
     return len(parts) - 1 if parts[0].startswith("http") else len(parts)
 
 
-# ---------- Core mapping logic (Hybrid D) ----------
+# ---------- Hybrid D+ strict mapping ----------
 def weighted_map_keywords(df: pd.DataFrame, page_signals_by_url: Dict) -> List[Dict]:
-    """
-    Maps each keyword in df to the best URL using Hybrid D rules.
-
-    Inputs:
-        df: pandas DataFrame with keywords, category, etc.
-        page_signals_by_url: dict {url: {slug, title, h1, meta, body}}
-
-    Output:
-        mapping_results: list of dicts with:
-            keyword, category, chosen_url, weighted_score, reasons
-    """
     stopwords = build_stopwords(page_signals_by_url)
     assigned_counts = {url: {"SEO": 0, "AIO": 0, "VEO": 0} for url in page_signals_by_url}
     results = []
@@ -90,39 +73,52 @@ def weighted_map_keywords(df: pd.DataFrame, page_signals_by_url: Dict) -> List[D
             score = 0
             reasons = []
             all_overlaps = set()
+            strong_field_overlap = False
 
-            # collect signal text
             combined_fields = []
             for field, text in signals.items():
-                overlaps = set(tokenize(kw)) & set(tokenize(text))
+                field_tokens = set(tokenize(text))
+                overlaps = set(meaningful_kw_tokens) & field_tokens
                 if overlaps:
                     weight = WEIGHTS.get(field, 0)
                     score += len(overlaps) * weight
                     reasons.append(f"{field} match: {', '.join(overlaps)} (x{len(overlaps)} • w{weight})")
                     all_overlaps |= overlaps
+                    if field in ["slug", "title", "h1"]:
+                        strong_field_overlap = True
                 combined_fields.append(text.lower())
             page_text = " ".join(combined_fields)
 
-            # --- Hybrid Rule 1: must hit weighted threshold ---
+            # --- Rule 1: weighted threshold ---
             if score < MIN_SCORE:
                 continue
 
-            # --- Hybrid Rule 2: density check ---
-            overlap_meaningful = [t for t in meaningful_kw_tokens if t in page_text]
-            coverage = len(overlap_meaningful) / len(meaningful_kw_tokens) if meaningful_kw_tokens else 0
+            # --- Rule 2: density ≥ 50% ---
+            overlap_count = len([t for t in meaningful_kw_tokens if t in page_text])
+            coverage = overlap_count / len(meaningful_kw_tokens) if meaningful_kw_tokens else 0
             if coverage < DENSITY_THRESHOLD:
                 continue
 
-            # --- Hybrid Rule 3: phrase or multi-token ---
+            # --- Rule 3: must have slug/title/h1 overlap ---
+            if not strong_field_overlap:
+                continue
+
+            # --- Rule 4: phrase OR ≥2 meaningful tokens ---
             phrase_match = any(" ".join(meaningful_kw_tokens) in f.lower() for f in combined_fields)
-            multi_token_match = len(overlap_meaningful) >= MIN_TOKEN_OVERLAP
+            multi_token_match = len(all_overlaps) >= MIN_TOKEN_OVERLAP
             if not (phrase_match or multi_token_match):
                 continue
+
+            # --- Rule 5: generic slug penalty ---
+            slug = signals.get("slug", "").lower()
+            if any(g in slug for g in GENERIC_SLUGS):
+                if not (phrase_match and multi_token_match):
+                    continue
+                reasons.append("Generic page penalty applied")
 
             candidate_scores.append((url, score, reasons))
 
         if candidate_scores:
-            # Sort by score (desc), then depth (shallowest wins), then URL length (shorter wins)
             candidate_scores.sort(
                 key=lambda x: (x[1], -url_depth(x[0]), -len(x[0])),
                 reverse=True
@@ -144,7 +140,7 @@ def weighted_map_keywords(df: pd.DataFrame, page_signals_by_url: Dict) -> List[D
                 "category": category,
                 "chosen_url": None,
                 "weighted_score": 0,
-                "reasons": "No match (failed Hybrid D rules)"
+                "reasons": "No match (failed strict Hybrid D+ rules)"
             })
 
     return results
