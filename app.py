@@ -1199,11 +1199,12 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
                 for pi in candidates:
                     profile = profiles[pi]  # profile dict from crawler
                     score_val = keyword_match_score(kw_text, profile)
-                    if score_val >= 8:  # enforce threshold
+                    if score_val > 0:  # only consider pages with a positive match score
                         scored.append((score_val, pi))
                 if not scored:
                     continue
-                scored.sort(key=lambda x: (-x[0], tie_key(x[1])))  # highest score, then tie-break
+                # Sort by highest score first, then fall back to tie_key if scores equal
+                scored.sort(key=lambda x: (-x[0], tie_key(x[1])))
                 chosen_index = scored[0][1]
 
             if chosen_index is None:
