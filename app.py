@@ -14,6 +14,71 @@ from datetime import datetime
 from mapping import weighted_map_keywords
 from crawler import fetch_profiles
 
+# ---------- Mapping Score (Slug, Title, H1, H2, H3) ----------
+
+def tokenize(text: str) -> list:
+    """Lowercase tokenizer for slugs, titles, and headings."""
+    if not text:
+        return []
+    return re.findall(r"[a-z0-9]+", text.lower())
+
+def keyword_match_score(keyword: str, profile: dict) -> int:
+    """
+    Score how well a keyword matches a page profile (slug, title, h1, h2, h3).
+    """
+    score = 0
+    kw_tokens = set(tokenize(keyword))
+
+    slug_tokens = set(tokenize(profile.get("slug", "")))
+    title_tokens = set(tokenize(profile.get("title", "")))
+    h1_tokens = set(tokenize(profile.get("h1", "")))
+    h2_tokens = set(tokenize(profile.get("h2", "")))
+    h3_tokens = set(tokenize(profile.get("h3", "")))
+
+    # Slug
+    for token in kw_tokens:
+        if token in slug_tokens:
+            score += 6
+        if token in {"for", "with", "to", "in"} and token in slug_tokens:
+            score += 2
+    score = min(score, 15)
+
+    # Title
+    for token in kw_tokens:
+        if token in title_tokens:
+            score += 5
+    score = min(score, 27)
+
+    # H1
+    for token in kw_tokens:
+        if token in h1_tokens:
+            score += 5
+    score = min(score, 39)
+
+    # H2
+    for token in kw_tokens:
+        if token in h2_tokens:
+            score += 5
+    score = min(score, 47)
+
+    # H3
+    for token in kw_tokens:
+        if token in h3_tokens:
+            score += 4
+    score = min(score, 53)
+
+    # Bonuses
+    if slug_tokens & title_tokens:
+        score += 5
+    if title_tokens & h1_tokens:
+        score += 10
+    if (h2_tokens & title_tokens) or (h2_tokens & h1_tokens) or (h2_tokens & slug_tokens):
+        score += 15
+    if (h3_tokens & title_tokens) or (h3_tokens & h1_tokens) or (h3_tokens & slug_tokens):
+        score += 15
+
+    return score
+
 
 # ---------- Optional deps ----------
 try:
@@ -1129,19 +1194,17 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
                 exact_hits.sort(key=lambda pi: tie_key(pi))
                 chosen_index = exact_hits[0]
             else:
-                # No exact hit — use unweighted coverage, then overlap, then tie-break
-                scored: List[Tuple[float,int,int,int]] = []
+                # No exact hit — use weighted scoring model (slug, title, h1, h2, h3)
+                scored: List[Tuple[int,int]] = []
                 for pi in candidates:
-                    inter = kw_tokens & page_tokens[pi]
-                    if not inter:
-                        continue
-                    coverage = len(inter) / max(1, len(kw_tokens))
-                    overlap = len(inter)
-                    scored.append((coverage, overlap, pi, 0))
+                    profile = profiles[pi]  # profile dict from crawler
+                    score_val = keyword_match_score(kw_text, profile)
+                    if score_val >= 8:  # enforce threshold
+                        scored.append((score_val, pi))
                 if not scored:
                     continue
-                scored.sort(key=lambda x: (-x[0], -x[1], tie_key(x[2])))
-                chosen_index = scored[0][2]
+                scored.sort(key=lambda x: (-x[0], tie_key(x[1])))  # highest score, then tie-break
+                chosen_index = scored[0][1]
 
             if chosen_index is None:
                 continue
