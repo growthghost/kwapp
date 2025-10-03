@@ -1216,51 +1216,54 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
                 already = per_url_caps[u][slot_name]
                 if already is None:
                     per_url_caps[u][slot_name] = i
+                    mapped[i] = u
+                else:
+                    # try next best candidate that isn't capped out
+                    if exact_hits:
+                        ordered_candidates = sorted(exact_hits, key=lambda pi: tie_key(pi))
                     else:
-                        # try next best candidate that isn't capped out
-                        # build ordered list again and pick next
-                        if exact_hits:
-                            ordered_candidates = sorted(exact_hits, key=lambda pi: tie_key(pi))
-                        else:
-                            ordered_candidates = [pi for _, pi in sorted(scored, key=lambda x: (-x[0], tie_key(x[1])))]
-                        placed = False
-                        for pi in ordered_candidates:
-                            u2 = page_urls[pi]
-                            if per_url_caps[u2][slot_name] is None:
-                                per_url_caps[u2][slot_name] = i
-                                mapped[i] = u2
-                                placed = True
-                                break
-                        if not placed:
-                            # soft overflow: leave unmapped to respect caps strictly
-                            else:
-                                # SEO list up to 2
-                                current_list = per_url_caps[u]["SEO"]
-                                assert isinstance(current_list, list)
-                                if len(current_list) < 2:
-                                    current_list.append(i)
-                                    mapped[i] = u
-                                else:
-                                    # try next candidate
-                                    if exact_hits:
-                                        ordered_candidates = sorted(exact_hits, key=lambda pi: tie_key(pi))
-                                    else:
-                                        ordered_candidates = [pi for _, pi in sorted(scored, key=lambda x: (-x[0], tie_key(x[1])))]
-                                    placed = False
-                                    for pi in ordered_candidates:
-                                        u2 = page_urls[pi]
-                                        lst = per_url_caps[u2]["SEO"]
-                                        assert isinstance(lst, list)
-                                        if len(lst) < 2:
-                                            lst.append(i)
-                                            mapped[i] = u2
-                                            placed = True
-                                            break
-                                    if not placed:
-                                        # Strict caps: leave unmapped
-                                        pass
+                        ordered_candidates = [pi for _, pi in sorted(scored, key=lambda x: (-x[0], tie_key(x[1])))]
+                    placed = False
+                    for pi in ordered_candidates:
+                        u2 = page_urls[pi]
+                        if per_url_caps[u2][slot_name] is None:
+                            per_url_caps[u2][slot_name] = i
+                            mapped[i] = u2
+                            placed = True
+                            break
+                    if not placed:
+                        # soft overflow: leave unmapped to respect caps strictly
+                        pass
 
-                            return pd.Series([mapped[i] for i in df.index], index=df.index, dtype="string")
+            else:
+                # SEO list up to 2
+                current_list = per_url_caps[u]["SEO"]
+                assert isinstance(current_list, list)
+                if len(current_list) < 2:
+                    current_list.append(i)
+                    mapped[i] = u
+                else:
+                    # try next candidate
+                    if exact_hits:
+                        ordered_candidates = sorted(exact_hits, key=lambda pi: tie_key(pi))
+                    else:
+                        ordered_candidates = [pi for _, pi in sorted(scored, key=lambda x: (-x[0], tie_key(x[1])))]
+                    placed = False
+                    for pi in ordered_candidates:
+                        u2 = page_urls[pi]
+                        lst = per_url_caps[u2]["SEO"]
+                        assert isinstance(lst, list)
+                        if len(lst) < 2:
+                            lst.append(i)
+                            mapped[i] = u2
+                            placed = True
+                            break
+                    if not placed:
+                        # Strict caps: leave unmapped
+                        pass
+
+    return pd.Series([mapped[i] for i in df.index], index=df.index, dtype="string")
+
 
 # ---------- Single Keyword ----------
 st.subheader("Single Keyword Score")
