@@ -426,6 +426,82 @@ PHRASE_MAP = [
     (re.compile(r"\bwe'?re\s+hiring\b", re.I), "careers"),
 ]
 
+# ---------- Mapping Score (Slug, Title, H1, H2, H3) ----------
+
+def tokenize(text: str) -> list:
+    """Lowercase tokenizer for slugs, titles, and headings."""
+    if not text:
+        return []
+    return re.findall(r"[a-z0-9]+", text.lower())
+
+def keyword_match_score(keyword: str, profile: dict) -> int:
+    """
+    Score how well a keyword matches a page profile (slug, title, h1, h2, h3).
+    """
+
+    score = 0
+    kw_tokens = set(tokenize(keyword))
+
+    # Extract tokens from page profile
+    slug_tokens = set(tokenize(profile.get("slug", "")))
+    title_tokens = set(tokenize(profile.get("title", "")))
+    h1_tokens = set(tokenize(profile.get("h1", "")))
+    h2_tokens = set(tokenize(profile.get("h2", "")))
+    h3_tokens = set(tokenize(profile.get("h3", "")))
+
+    # --- Slug scoring ---
+    for token in kw_tokens:
+        if token in slug_tokens:
+            score += 6  # noun
+        if token in {"for", "with", "to", "in"} and token in slug_tokens:
+            score += 2  # preposition
+    score = min(score, 15)
+
+    # --- Title scoring ---
+    for token in kw_tokens:
+        if token in title_tokens:
+            score += 5
+    score = min(score, 27)
+
+    # --- H1 scoring ---
+    for token in kw_tokens:
+        if token in h1_tokens:
+            score += 5
+    score = min(score, 39)
+
+    # --- H2 scoring ---
+    for token in kw_tokens:
+        if token in h2_tokens:
+            score += 5
+    score = min(score, 47)
+
+    # --- H3 scoring ---
+    for token in kw_tokens:
+        if token in h3_tokens:
+            score += 4
+    score = min(score, 53)
+
+    # --- Synergy bonuses ---
+    if slug_tokens & title_tokens:
+        score += 5
+    if title_tokens & h1_tokens:
+        score += 10
+    if (h2_tokens & title_tokens) or (h2_tokens & h1_tokens) or (h2_tokens & slug_tokens):
+        score += 15
+    if (h3_tokens & title_tokens) or (h3_tokens & h1_tokens) or (h3_tokens & slug_tokens):
+        score += 15
+
+    return score
+
+def choose_best_url(keyword: str, profiles: dict) -> str:
+    """Pick the best URL for a keyword or return '' if below threshold."""
+    best_url, best_score = "", 0
+    for url, profile in profiles.items():
+        score = keyword_match_score(keyword, profile)
+        if score > best_score:
+            best_url, best_score = url, score
+    return best_url if best_score >= 8 else ""
+
 _SYN_MAP = {
     "connect":"contact","connected":"contact","connecting":"contact","contacts":"contact",
     "support":"contact","helpdesk":"contact","helpline":"contact","help-line":"contact",
@@ -1378,10 +1454,16 @@ if uploaded is not None:
                 if curr_signature in cache and len(cache[curr_signature]) == len(export_df):
                     map_series = pd.Series(cache[curr_signature], index=export_df.index, dtype="string")
                 else:
-                    map_series = map_keywords_to_urls(
-                        export_df, kw_col=kw_col, vol_col=vol_col, kd_col=kd_col,
-                        base_url=base_site_url.strip(), include_subdomains=True, use_sitemap_first=True
-                    )
+                    from crawler import fetch_profiles  # make sure you have this import at the top
+
+                    profiles = fetch_profiles(base_site_url.strip(), include_subdomains=True)
+
+                    map_results = []
+                    for kw in export_df[kw_col]:
+                        best_url = choose_best_url(kw, profiles)
+                        map_results.append(best_url)
+
+                    map_series = pd.Series(map_results, index=export_df.index, dtype="string")
                     cache[curr_signature] = map_series.fillna("").astype(str).tolist()
                 st.session_state["map_result"] = map_series
                 st.session_state["map_signature"] = curr_signature
