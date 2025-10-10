@@ -1,146 +1,145 @@
 # mapping.py
-# Hybrid D+ strict mapping
+# Structural scoring model – slug/title/H1/H2/H3 only (no generic penalty)
 
 import pandas as pd
 import re
-from collections import Counter
-from typing import Dict, List, Set
+from typing import Dict, List, Set, Tuple
 
-# ---------- Weights ----------
+# ---------- Structural Weights ----------
 WEIGHTS = {
-    "slug": 5,
-    "title": 4,
-    "h1": 3,
-    "meta": 2,
-    "body": 1
+    "slug": 6,
+    "title": 5,
+    "h1": 5,
+    "h2h3": 5
 }
 
-# ---------- Per-page caps ----------
-PAGE_CAPS = {
-    "SEO": 2,
-    "AIO": 1,
-    "VEO": 1
-}
-
-# ---------- Stricter thresholds ----------
-MIN_SCORE = 5             # must reach this weighted score
-DENSITY_THRESHOLD = 0.5   # now require ≥50% token coverage
-STOPWORD_FREQ = 0.5       # token appears in >50% of pages → boilerplate
-MIN_TOKEN_OVERLAP = 2     # must overlap ≥2 meaningful tokens
-GENERIC_SLUGS = {"admissions", "apply", "services", "careers", "disclaimer"}
+# ---------- Threshold and Bonuses ----------
+THRESHOLD = 8  # must reach or exceed this to map
+BONUS_URL_TITLE = 5
+BONUS_TITLE_H1 = 10
+BONUS_H2H3_ANY = 15
 
 TOKENIZER = re.compile(r"[a-zA-Z0-9]+")
 
 
-# ---------- Token utilities ----------
+# ---------- Tokenization ----------
 def tokenize(text: str) -> List[str]:
     return TOKENIZER.findall(text.lower()) if text else []
 
 
-def build_stopwords(page_signals_by_url: Dict) -> Set[str]:
-    doc_freq = Counter()
-    total_docs = len(page_signals_by_url)
-
-    for signals in page_signals_by_url.values():
-        seen = set()
-        for field in ["slug", "title", "h1", "meta", "body"]:
-            seen.update(tokenize(signals.get(field, "")))
-        for token in seen:
-            doc_freq[token] += 1
-
-    return {tok for tok, freq in doc_freq.items() if freq / total_docs >= STOPWORD_FREQ}
+def _token_set(text: str) -> Set[str]:
+    return set(tokenize(text))
 
 
+# ---------- URL depth helper ----------
 def url_depth(url: str) -> int:
-    parts = url.strip("/").split("/")
-    return len(parts) - 1 if parts[0].startswith("http") else len(parts)
+    parts = [p for p in url.strip("/").split("/") if p]
+    return len(parts)
 
 
-# ---------- Hybrid D+ strict mapping ----------
+# ---------- Structural Scoring ----------
+def structural_score(keyword: str, signals: Dict[str, str]) -> Tuple[int, List[str]]:
+    kw_tokens = _token_set(keyword)
+    score = 0
+    reasons = []
+    matched_fields = set()
+
+    slug = signals.get("slug", "") or ""
+    title = signals.get("title", "") or ""
+    h1 = signals.get("h1", "") or ""
+    h2 = signals.get("h2", "") or ""
+    h3 = signals.get("h3", "") or ""
+
+    # 1️⃣ URL / Slug
+    slug_tokens = _token_set(slug)
+    slug_overlap = kw_tokens & slug_tokens
+    if slug_overlap:
+        base = WEIGHTS["slug"]
+        score += base * len(slug_overlap)
+        reasons.append(f"Slug match: {', '.join(slug_overlap)} (+{base * len(slug_overlap)})")
+        matched_fields.add("slug")
+
+    # 2️⃣ Title
+    title_tokens = _token_set(title)
+    title_overlap = kw_tokens & title_tokens
+    if title_overlap:
+        base = WEIGHTS["title"]
+        score += base * len(title_overlap)
+        reasons.append(f"Title match: {', '.join(title_overlap)} (+{base * len(title_overlap)})")
+        matched_fields.add("title")
+
+    # 3️⃣ H1
+    h1_tokens = _token_set(h1)
+    h1_overlap = kw_tokens & h1_tokens
+    if h1_overlap:
+        base = WEIGHTS["h1"]
+        score += base * len(h1_overlap)
+        reasons.append(f"H1 match: {', '.join(h1_overlap)} (+{base * len(h1_overlap)})")
+        matched_fields.add("h1")
+
+    # 4️⃣ H2 / H3
+    h2h3_tokens = _token_set(h2) | _token_set(h3)
+    h2h3_overlap = kw_tokens & h2h3_tokens
+    if h2h3_overlap:
+        base = WEIGHTS["h2h3"]
+        score += base * len(h2h3_overlap)
+        reasons.append(f"H2/H3 match: {', '.join(h2h3_overlap)} (+{base * len(h2h3_overlap)})")
+        matched_fields.add("h2h3")
+
+    # 5️⃣ Synergy Bonuses
+    if "slug" in matched_fields and "title" in matched_fields:
+        score += BONUS_URL_TITLE
+        reasons.append(f"Bonus: URL+Title synergy (+{BONUS_URL_TITLE})")
+    if "title" in matched_fields and "h1" in matched_fields:
+        score += BONUS_TITLE_H1
+        reasons.append(f"Bonus: Title+H1 synergy (+{BONUS_TITLE_H1})")
+    if "h2h3" in matched_fields and ({"slug", "title", "h1"} & matched_fields):
+        score += BONUS_H2H3_ANY
+        reasons.append(f"Bonus: H2/H3 alignment (+{BONUS_H2H3_ANY})")
+
+    return int(round(score)), reasons
+
+
+# ---------- Mapping Function ----------
 def weighted_map_keywords(df: pd.DataFrame, page_signals_by_url: Dict) -> List[Dict]:
-    stopwords = build_stopwords(page_signals_by_url)
-    assigned_counts = {url: {"SEO": 0, "AIO": 0, "VEO": 0} for url in page_signals_by_url}
     results = []
-
     for _, row in df.iterrows():
-        kw = row.get("Keyword", "")
-        category = row.get("Category", "SEO")
-        kw_tokens = tokenize(kw)
-        meaningful_kw_tokens = [t for t in kw_tokens if t not in stopwords]
+        kw = str(row.get("Keyword", "")).strip()
+        category = str(row.get("Category", "SEO")).strip()
+        if not kw:
+            results.append({
+                "keyword": kw,
+                "category": category,
+                "chosen_url": None,
+                "weighted_score": 0,
+                "reasons": "Empty keyword"
+            })
+            continue
 
         candidate_scores = []
         for url, signals in page_signals_by_url.items():
-            score = 0
-            reasons = []
-            all_overlaps = set()
-            strong_field_overlap = False
-
-            combined_fields = []
-            for field, text in signals.items():
-                field_tokens = set(tokenize(text))
-                overlaps = set(meaningful_kw_tokens) & field_tokens
-                if overlaps:
-                    weight = WEIGHTS.get(field, 0)
-                    score += len(overlaps) * weight
-                    reasons.append(f"{field} match: {', '.join(overlaps)} (x{len(overlaps)} • w{weight})")
-                    all_overlaps |= overlaps
-                    if field in ["slug", "title", "h1"]:
-                        strong_field_overlap = True
-                combined_fields.append(text.lower())
-            page_text = " ".join(combined_fields)
-
-            # --- Rule 1: weighted threshold ---
-            if score < MIN_SCORE:
-                continue
-
-            # --- Rule 2: density ≥ 50% ---
-            overlap_count = len([t for t in meaningful_kw_tokens if t in page_text])
-            coverage = overlap_count / len(meaningful_kw_tokens) if meaningful_kw_tokens else 0
-            if coverage < DENSITY_THRESHOLD:
-                continue
-
-            # --- Rule 3: must have slug/title/h1 overlap ---
-            if not strong_field_overlap:
-                continue
-
-            # --- Rule 4: phrase OR ≥2 meaningful tokens ---
-            phrase_match = any(" ".join(meaningful_kw_tokens) in f.lower() for f in combined_fields)
-            multi_token_match = len(all_overlaps) >= MIN_TOKEN_OVERLAP
-            if not (phrase_match or multi_token_match):
-                continue
-
-            # --- Rule 5: generic slug penalty ---
-            slug = signals.get("slug", "").lower()
-            if any(g in slug for g in GENERIC_SLUGS):
-                if not (phrase_match and multi_token_match):
-                    continue
-                reasons.append("Generic page penalty applied")
-
-            candidate_scores.append((url, score, reasons))
+            score, reasons = structural_score(kw, signals)
+            if score >= THRESHOLD:
+                candidate_scores.append((url, score, reasons))
 
         if candidate_scores:
-            candidate_scores.sort(
-                key=lambda x: (x[1], -url_depth(x[0]), -len(x[0])),
-                reverse=True
-            )
-            for url, score, reasons in candidate_scores:
-                if assigned_counts[url][category] < PAGE_CAPS.get(category, 99):
-                    assigned_counts[url][category] += 1
-                    results.append({
-                        "keyword": kw,
-                        "category": category,
-                        "chosen_url": url,
-                        "weighted_score": score,
-                        "reasons": "; ".join(reasons)
-                    })
-                    break
+            # Highest score wins, tie-break = shallower URL depth
+            candidate_scores.sort(key=lambda x: (x[1], -url_depth(x[0]), -len(x[0])), reverse=True)
+            best_url, best_score, best_reasons = candidate_scores[0]
+            results.append({
+                "keyword": kw,
+                "category": category,
+                "chosen_url": best_url,
+                "weighted_score": best_score,
+                "reasons": "; ".join(best_reasons)
+            })
         else:
             results.append({
                 "keyword": kw,
                 "category": category,
                 "chosen_url": None,
                 "weighted_score": 0,
-                "reasons": "No match (failed strict Hybrid D+ rules)"
+                "reasons": "No match (below threshold or no structural alignment)"
             })
 
     return results
