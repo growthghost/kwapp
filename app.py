@@ -1001,6 +1001,24 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
     url_list, srcmap, _smeta = cached_discover_and_sources(base_url, include_subdomains, use_sitemap_first)
     profiles = cached_fetch_profiles(tuple(url_list))
 
+    # Place this RIGHT AFTER: profiles = cached_fetch_profiles(tuple(url_list))
+    signals = {}
+    for p in profiles:
+        u = p.get("url") or p.get("final_url") or p.get("requested_url")
+        if not u:
+            continue
+        slug = urlparse(u).path.strip("/").split("/")[-1]
+        signals[u] = {
+            "slug": slug,
+            "title": p.get("title", ""),
+            "h1": p.get("h1", ""),
+            "h2": p.get("h2", ""),
+            "h3": p.get("h3", "")
+        }
+
+    st.session_state["url_signals"] = signals
+
+
     # Build per-profile token sets (unweighted union) + helpers
     nav_anchor_map, _ = cached_nav(base_url)
     nav_keys = set(nav_anchor_map.keys())
