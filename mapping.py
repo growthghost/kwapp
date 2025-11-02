@@ -14,7 +14,7 @@ WEIGHTS = {
 }
 
 # ---------- Threshold and Bonuses ----------
-THRESHOLD = 8  # must reach or exceed this to map
+THRESHOLD = 3  # must reach or exceed this to map
 BONUS_URL_TITLE = 5
 BONUS_TITLE_H1 = 10
 BONUS_H2H3_ANY = 15
