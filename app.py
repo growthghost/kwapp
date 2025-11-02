@@ -1017,7 +1017,19 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
         }
 
     st.session_state["url_signals"] = signals
+    # OVERRIDE: Use external crawler (crawler.py) to feed structural scorer
+    external_profiles = fetch_profiles(base_url.strip())
 
+    st.session_state["url_signals"] = {
+        url: {
+            "slug": prof.get("slug", ""),
+            "title": prof.get("title", ""),
+            "h1": prof.get("h1", ""),
+            "h2": prof.get("h2", ""),
+            "h3": prof.get("h3", "")
+        }
+        for url, prof in external_profiles.items()
+    }
 
     # Build per-profile token sets (unweighted union) + helpers
     nav_anchor_map, _ = cached_nav(base_url)
