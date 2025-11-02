@@ -1420,18 +1420,22 @@ if uploaded is not None:
             st.session_state["mapping_running"] = False
 
         # ---------- Build CSV for download ----------
-        if st.session_state.get("map_ready") and st.session_state.get("map_signature") == curr_signature:
-            export_df["Map URL"] = st.session_state["map_result"]
-            # Do not show a URL where row is not eligible
-            export_df.loc[export_df["Eligible"] != "Yes", "Map URL"] = ""
-            can_download = True
-        else:
-            export_df["Map URL"] = pd.Series([""]*len(export_df), index=export_df.index, dtype="string")
-            can_download = False
-            if base_site_url.strip():
-                st.info("Click **Map keywords to site** to generate Map URLs for this strategy and dataset.")
+        # Use the structural model’s result column populated earlier ("Mapped URL")
+        export_df["Map URL"] = export_df.get("Mapped URL", "").fillna("")
 
-        export_cols = base_cols + ["Strategy","Map URL"]
+        # Respect eligibility: blank out non-eligible rows
+        export_df.loc[export_df["Eligible"] != "Yes", "Map URL"] = ""
+
+        # Always allow download (no dependency on legacy map_result)
+        can_download = True
+
+        # Columns to export
+        export_cols = base_cols + ["Strategy", "Map URL"]
+        # Include diagnostics if present
+        for extra_col in ["Weighted Score", "Mapping Reasons"]:
+            if extra_col in export_df.columns:
+                export_cols.append(extra_col)
+
         export_df = export_df[export_cols]
 
         csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")
@@ -1443,5 +1447,6 @@ if uploaded is not None:
             help="Sorted by eligibility (Yes first), KD ascending, Volume descending",
             disabled=not can_download
         )
+       
 
 st.markdown("<div class='oiq-footer'>© 2025 OutrankIQ</div>", unsafe_allow_html=True)
