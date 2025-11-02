@@ -1383,8 +1383,8 @@ if uploaded is not None:
                     "h3": prof.get("h3", "")
                 }
 
-st.session_state["url_signals"] = signals
-page_signals_by_url = signals
+            st.session_state["url_signals"] = signals
+            page_signals_by_url = signals
 
 
             # Use new weighted mapping function from mapping.py
