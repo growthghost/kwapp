@@ -1001,36 +1001,6 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
     url_list, srcmap, _smeta = cached_discover_and_sources(base_url, include_subdomains, use_sitemap_first)
     profiles = cached_fetch_profiles(tuple(url_list))
 
-    # Place this RIGHT AFTER: profiles = cached_fetch_profiles(tuple(url_list))
-    signals = {}
-    for p in profiles:
-        u = p.get("url") or p.get("final_url") or p.get("requested_url")
-        if not u:
-            continue
-        slug = urlparse(u).path.strip("/").split("/")[-1]
-        signals[u] = {
-            "slug": slug,
-            "title": p.get("title", ""),
-            "h1": p.get("h1", ""),
-            "h2": p.get("h2", ""),
-            "h3": p.get("h3", "")
-        }
-
-    st.session_state["url_signals"] = signals
-    # OVERRIDE: Use external crawler (crawler.py) to feed structural scorer
-    external_profiles = fetch_profiles(base_url.strip())
-
-    st.session_state["url_signals"] = {
-        url: {
-            "slug": prof.get("slug", ""),
-            "title": prof.get("title", ""),
-            "h1": prof.get("h1", ""),
-            "h2": prof.get("h2", ""),
-            "h3": prof.get("h3", "")
-        }
-        for url, prof in external_profiles.items()
-    }
-
     # Build per-profile token sets (unweighted union) + helpers
     nav_anchor_map, _ = cached_nav(base_url)
     nav_keys = set(nav_anchor_map.keys())
@@ -1366,26 +1336,6 @@ if uploaded is not None:
                 or st.session_state.get("crawl_signals")
                 or {}
             )
-            # Refresh structural page signals using crawler.py for all discovered URLs
-            from crawler import extract_profile
-
-            signals = {}
-            for u in page_signals_by_url.keys():
-                try:
-                    prof = extract_profile(u)
-                except Exception:
-                    prof = {"slug": "", "title": "", "h1": "", "h2": "", "h3": ""}
-                signals[u] = {
-                    "slug": prof.get("slug", ""),
-                    "title": prof.get("title", ""),
-                    "h1": prof.get("h1", ""),
-                    "h2": prof.get("h2", ""),
-                    "h3": prof.get("h3", "")
-                }
-
-            st.session_state["url_signals"] = signals
-            page_signals_by_url = signals
-
 
             # Use new weighted mapping function from mapping.py
             results = weighted_map_keywords(export_df, page_signals_by_url)
@@ -1440,22 +1390,18 @@ if uploaded is not None:
             st.session_state["mapping_running"] = False
 
         # ---------- Build CSV for download ----------
-        # Use the structural model’s result column populated earlier ("Mapped URL")
-        export_df["Map URL"] = export_df.get("Mapped URL", "").fillna("")
+        if st.session_state.get("map_ready") and st.session_state.get("map_signature") == curr_signature:
+            export_df["Map URL"] = st.session_state["map_result"]
+            # Do not show a URL where row is not eligible
+            export_df.loc[export_df["Eligible"] != "Yes", "Map URL"] = ""
+            can_download = True
+        else:
+            export_df["Map URL"] = pd.Series([""]*len(export_df), index=export_df.index, dtype="string")
+            can_download = False
+            if base_site_url.strip():
+                st.info("Click **Map keywords to site** to generate Map URLs for this strategy and dataset.")
 
-        # Respect eligibility: blank out non-eligible rows
-        export_df.loc[export_df["Eligible"] != "Yes", "Map URL"] = ""
-
-        # Always allow download (no dependency on legacy map_result)
-        can_download = True
-
-        # Columns to export
-        export_cols = base_cols + ["Strategy", "Map URL"]
-        # Include diagnostics if present
-        for extra_col in ["Weighted Score", "Mapping Reasons"]:
-            if extra_col in export_df.columns:
-                export_cols.append(extra_col)
-
+        export_cols = base_cols + ["Strategy","Map URL"]
         export_df = export_df[export_cols]
 
         csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")
@@ -1467,6 +1413,5 @@ if uploaded is not None:
             help="Sorted by eligibility (Yes first), KD ascending, Volume descending",
             disabled=not can_download
         )
-       
 
 st.markdown("<div class='oiq-footer'>© 2025 OutrankIQ</div>", unsafe_allow_html=True)
