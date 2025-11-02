@@ -1366,6 +1366,26 @@ if uploaded is not None:
                 or st.session_state.get("crawl_signals")
                 or {}
             )
+            # Refresh structural page signals using crawler.py for all discovered URLs
+            from crawler import extract_profile
+
+            signals = {}
+            for u in page_signals_by_url.keys():
+                try:
+                    prof = extract_profile(u)
+                except Exception:
+                    prof = {"slug": "", "title": "", "h1": "", "h2": "", "h3": ""}
+                signals[u] = {
+                    "slug": prof.get("slug", ""),
+                    "title": prof.get("title", ""),
+                    "h1": prof.get("h1", ""),
+                    "h2": prof.get("h2", ""),
+                    "h3": prof.get("h3", "")
+                }
+
+st.session_state["url_signals"] = signals
+page_signals_by_url = signals
+
 
             # Use new weighted mapping function from mapping.py
             results = weighted_map_keywords(export_df, page_signals_by_url)
