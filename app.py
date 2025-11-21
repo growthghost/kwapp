@@ -11,9 +11,10 @@ from urllib.parse import urlparse, urljoin
 import pandas as pd
 import streamlit as st
 from datetime import datetime
+
+# ELITE MAPPING UPGRADE — ONLY THESE TWO IMPORTS ARE NEW
 from mapping import weighted_map_keywords
 from crawler import fetch_profiles
-
 
 # ---------- Optional deps ----------
 try:
@@ -39,7 +40,7 @@ BRAND_INK = "#242F40"    # dark blue text on white
 BRAND_ACCENT = "#329662" # green
 BRAND_LIGHT = "#FFFFFF"  # white
 
-st.set_page_config(page_title="OutrankIQ", page_icon="🔎", layout="centered")
+st.set_page_config(page_title="OutrankIQ", page_icon="Search", layout="centered")
 
 # ---------- Global CSS ----------
 st.markdown(
@@ -123,10 +124,10 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--ink) !important; }}
 
 /* --- FORCE BLUE BASE BORDERS (requested) --- */
 .stSelectbox div[data-baseweb="select"] > div {{
-  border: 2px solid var(--ink) !important;        /* dropdown default border = BLUE */
+  border: 2px solid var(--ink) !important;
 }}
 .stNumberInput input {{
-  border: 2px solid var(--ink) !important;        /* A/B boxes default border = BLUE */
+  border: 2px solid var(--ink) !important;
 }}
 
 /* Number steppers */
@@ -140,7 +141,7 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--ink) !important; }}
 /* Select caret */
 .stSelectbox div[data-baseweb="select"] > div {{ position: relative; }}
 .stSelectbox div[data-baseweb="select"] > div::after {{
-  content:"▾"; position:absolute; right:12px; top:50%; transform:translateY(-50%); color:var(--ink); pointer-events:none; font-size:14px; font-weight:700;
+  content:"Down Arrow"; position:absolute; right:12px; top:50%; transform:translateY(-50%); color:var(--ink); pointer-events:none; font-size:14px; font-weight:700;
 }}
 
 /* BLUE labels */
@@ -643,7 +644,7 @@ def _collect_sitemap_urls(sm_url: str, session, base_host: str, base_root: str,
 
     if is_index:
         children = [u for (u,_,_) in entries if u]
-        children.sort(key=_sm_bucket)  # prefer page sitemaps first
+        children.sort(key=_sm_bucket)
         for child in children:
             if len(out) >= 120: break
             if child.lower().endswith((".xml",".xml.gz")):
@@ -675,7 +676,7 @@ def discover_urls_with_sources(base_url: str, include_subdomains: bool, use_site
             maps = _extract_sitemaps_from_robots(base, sess)
             if not maps:
                 maps = [urljoin(base + "/", "sitemap.xml"), urljoin(base + "/", "sitemap_index.xml")]
-            maps.sort(key=_sm_bucket)  # pages before posts/tax/other
+            maps.sort(key=_sm_bucket)
             seen = set()
             for sm in maps:
                 if len(discovered) >= 120: break
@@ -915,293 +916,12 @@ def _extract_profile(html: str, final_url: str, requested_url: Optional[str] = N
         "title_h1": title_h1.lower(),
         "title_h1_norm": title_h1_norm,
         "lead_norm": lead_norm,
-        "weights": dict(weights),  # we will treat keys as unweighted tokens
+        "weights": dict(weights),
         "final_url": final_url,
         "requested_url": requested_url or final_url,
         "veo_ready": veo_ready,
-        "text_concat": text_concat,  # NEW: phrase checks
+        "text_concat": text_concat,
     }
-
-def _fetch_profiles(urls: List[str]) -> List[Dict]:
-    profiles: List[Dict] = []
-    if not urls: return profiles
-
-    if HAVE_AIOHTTP:
-        async def _run():
-            timeout = aiohttp.ClientTimeout(total=60, sock_connect=5, sock_read=8)
-            conn = aiohttp.TCPConnector(limit=16, ssl=False)
-            async with aiohttp.ClientSession(timeout=timeout, connector=conn, headers={"User-Agent":"OutrankIQMapper/1.2 (voice-engine-optimization)"}) as session:
-                sem = asyncio.Semaphore(16)
-                async def fetch(u: str):
-                    async with sem:
-                        try:
-                            async with session.get(u, allow_redirects=True) as resp:
-                                if resp.status >= 400: return None
-                                ctype = resp.headers.get("Content-Type","").lower()
-                                if "html" not in ctype and "text" not in ctype: return None
-                                b = await resp.content.read(350_000)
-                                html = b.decode(errors="ignore")
-                                return _extract_profile(html, str(resp.url), requested_url=u)
-                        except Exception:
-                            return None
-                results = await asyncio.gather(*[fetch(u) for u in urls], return_exceptions=True)
-                for r in results:
-                    if isinstance(r, dict): profiles.append(r)
-            return profiles
-        try:
-            return asyncio.run(_run())
-        except RuntimeError:
-            if not requests: return profiles
-            sess = requests.Session()
-            try:
-                for u in urls[:120]:
-                    try:
-                        r = sess.get(u, headers={"User-Agent":"OutrankIQMapper/1.2 (voice-engine-optimization)"}, timeout=(5,8), allow_redirects=True)
-                        if r.status_code >= 400: continue
-                        ctype = r.headers.get("Content-Type","").lower()
-                        if "html" not in ctype and "text" not in ctype: continue
-                        html = r.content[:350_000].decode(r.apparent_encoding or "utf-8", errors="ignore")
-                        prof = _extract_profile(html, str(r.url), requested_url=u)
-                        if prof and prof.get("weights"): profiles.append(prof)
-                    except Exception:
-                        continue
-            finally:
-                sess.close()
-            return profiles
-    else:
-        if not requests: return profiles
-        sess = requests.Session()
-        try:
-            for u in urls[:120]:
-                try:
-                    r = sess.get(u, headers={"User-Agent":"OutrankIQMapper/1.2 (voice-engine-optimization)"}, timeout=(5,8), allow_redirects=True)
-                    if r.status_code >= 400: continue
-                    ctype = r.headers.get("Content-Type","").lower()
-                    if "html" not in ctype and "text" not in ctype: continue
-                    html = r.content[:350_000].decode(r.apparent_encoding or "utf-8", errors="ignore")
-                    profiles.append(_extract_profile(html, str(r.url), requested_url=u))
-                except Exception:
-                    continue
-        finally:
-            sess.close()
-        return profiles
-
-# ---------- Caching ----------
-@st.cache_data(show_spinner=False, ttl=3600)
-def cached_discover_and_sources(base_url: str, include_subdomains: bool, use_sitemap_first: bool) -> Tuple[List[str], Dict[str,str], Dict[str, Dict[str, Optional[str]]]]:
-    return discover_urls_with_sources(base_url, include_subdomains, use_sitemap_first)
-
-@st.cache_data(show_spinner=False, ttl=3600)
-def cached_fetch_profiles(urls: Tuple[str, ...]) -> List[Dict]:
-    return _fetch_profiles(list(urls))
-
-# ---------- Mapping (UNWEIGHTED overlap with exact-phrase precedence) ----------
-def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, kd_col: str,
-                         base_url: str, include_subdomains: bool, use_sitemap_first: bool) -> pd.Series:
-    url_list, srcmap, _smeta = cached_discover_and_sources(base_url, include_subdomains, use_sitemap_first)
-    profiles = cached_fetch_profiles(tuple(url_list))
-
-    # Build per-profile token sets (unweighted union) + helpers
-    nav_anchor_map, _ = cached_nav(base_url)
-    nav_keys = set(nav_anchor_map.keys())
-
-    def _is_nav(purl: str) -> bool:
-        k = _url_key(purl)
-        return k in nav_keys
-
-    page_tokens: List[Set[str]] = []
-    page_urls: List[str] = []
-    page_src_types: List[str] = []
-    page_texts: List[str] = []
-    page_depths: List[int] = []
-    for p in profiles:
-        u = p.get("url") or p.get("final_url") or p.get("requested_url")
-        if not u: 
-            continue
-        tokens = set()
-        # union of everything we know (unweighted)
-        tokens |= set((p.get("title_h1_norm") or "").split())
-        tokens |= set((p.get("lead_norm") or "").split())
-        tokens |= set(p.get("weights", {}).keys())
-        tokens |= _slug_tokens(u)
-
-        if not tokens:
-            continue
-
-        page_urls.append(u)
-        page_tokens.append(tokens)
-        page_src_types.append(srcmap.get(_url_key(u), "other"))
-        page_texts.append((p.get("text_concat") or "").lower() + " " + u.lower().replace('-', ' ').replace('_', ' ').replace('/', ' '))
-        page_depths.append(len([seg for seg in urlparse(u).path.split('/') if seg]))
-
-    n_pages = len(page_urls)
-    if n_pages == 0:
-        return pd.Series([""]*len(df), index=df.index, dtype="string")
-
-    # Build inverted index token -> set(page indices)
-    inv: Dict[str, Set[int]] = defaultdict(set)
-    for i, toks in enumerate(page_tokens):
-        for t in toks:
-            inv[t].add(i)
-
-    # slot detection
-    def kw_slot_for(text: str) -> str:
-        cats = set(categorize_keyword(text))
-        if "VEO" in cats: return "VEO"
-        if "AIO" in cats: return "AIO"
-        return "SEO"
-
-    # Opportunity ordering (per strategy; same as before)
-    vols_local = pd.to_numeric(df[vol_col], errors="coerce").fillna(0).clip(lower=0)
-    max_log_local = float((vols_local + 1).apply(lambda x: math.log(1 + x)).max()) or 1.0
-
-    def opportunity(idx: int) -> float:
-        row = df.loc[idx]
-        kd_val = float(pd.to_numeric(row.get(kd_col,0), errors="coerce") or 0)
-        vol_val = float(pd.to_numeric(row.get(vol_col,0), errors="coerce") or 0)
-        kd_norm = max(0.0, 1.0 - kd_val/100.0)
-        vol_norm = math.log(1 + max(0.0, vol_val)) / max_log_local
-        return vol_norm * kd_norm
-
-    # Caps per URL (per current strategy run)
-    caps = {"VEO":1, "AIO":1, "SEO":2}
-    per_url_caps: Dict[str, Dict[str, List[int] or Optional[int]]] = {}
-    for u in page_urls:
-        per_url_caps[u] = {"VEO": None, "AIO": None, "SEO": []}
-
-    mapped = {i:"" for i in df.index}
-
-    # Prepare eligible ids by slot, sorted by opportunity (desc)
-    ids_by_slot: Dict[str, List[int]] = {"VEO": [], "AIO": [], "SEO": []}
-    kw_texts: Dict[int, str] = {}
-    for idx, row in df.iterrows():
-        vol_val = float(pd.to_numeric(row.get(vol_col,0), errors="coerce") or 0)
-        if vol_val < MIN_VALID_VOLUME:
-            continue  # ineligible for mapping under current strategy
-        kw_text = str(row.get(kw_col, "")) if kw_col else str(row.get("Keyword",""))
-        kw_texts[idx] = kw_text
-        ids_by_slot[kw_slot_for(kw_text)].append(idx)
-
-    for slot_name in ["VEO","AIO","SEO"]:
-        ids = ids_by_slot[slot_name]
-        ids.sort(key=lambda i: (-opportunity(i), i))
-
-        for i in ids:
-            kw_text = kw_texts.get(i, "")
-            kw_tokens = set(_ntokens(kw_text))
-            if not kw_tokens:
-                continue
-
-            # candidate pages via inverted index
-            candidates: Set[int] = set()
-            for t in kw_tokens:
-                candidates |= inv.get(t, set())
-            if not candidates:
-                continue
-
-            # First: exact-phrase precedence
-            kw_lower = kw_text.strip().lower()
-            exact_hits = []
-            for pi in candidates:
-                if kw_lower and (kw_lower in page_texts[pi]):
-                    exact_hits.append(pi)
-
-            def tie_key(pi: int) -> Tuple:
-                # Deterministic tie-breaks:
-                # 1) shallower depth
-                # 2) page-like over post-like
-                # 3) shorter URL
-                # 4) alphabetical URL
-                stype = srcmap.get(_url_key(page_urls[pi]), "other")
-                is_nav_flag = _is_nav(page_urls[pi])
-                page_like = _is_page_like(stype, page_urls[pi], is_nav_flag)
-                return (
-                    page_depths[pi],                # smaller is better
-                    0 if page_like else 1,          # page-like first
-                    len(page_urls[pi]),             # shorter is better
-                    page_urls[pi]                   # alphabetical
-                )
-
-            chosen_index: Optional[int] = None
-
-            if exact_hits:
-                # exact phrase always wins; break ties deterministically
-                exact_hits.sort(key=lambda pi: tie_key(pi))
-                chosen_index = exact_hits[0]
-            else:
-                # No exact hit — use unweighted coverage, then overlap, then tie-break
-                scored: List[Tuple[float,int,int,int]] = []
-                for pi in candidates:
-                    inter = kw_tokens & page_tokens[pi]
-                    if not inter:
-                        continue
-                    coverage = len(inter) / max(1, len(kw_tokens))
-                    overlap = len(inter)
-                    scored.append((coverage, overlap, pi, 0))
-                if not scored:
-                    continue
-                scored.sort(key=lambda x: (-x[0], -x[1], tie_key(x[2])))
-                chosen_index = scored[0][2]
-
-            if chosen_index is None:
-                continue
-
-            u = page_urls[chosen_index]
-            # enforce per-URL caps (soft; try next candidate if cap full)
-            if slot_name in {"VEO","AIO"}:
-                already = per_url_caps[u][slot_name]
-                if already is None:
-                    per_url_caps[u][slot_name] = i
-                    mapped[i] = u
-                else:
-                    # try next best candidate that isn't capped out
-                    # build ordered list again and pick next
-                    ordered_candidates = []
-                    if exact_hits:
-                        ordered_candidates = sorted(exact_hits, key=lambda pi: tie_key(pi))
-                    else:
-                        ordered_candidates = [pi for _,_,pi,_ in sorted(scored, key=lambda x: (-x[0], -x[1], tie_key(x[2])))]
-                    placed = False
-                    for pi in ordered_candidates:
-                        u2 = page_urls[pi]
-                        if per_url_caps[u2][slot_name] is None:
-                            per_url_caps[u2][slot_name] = i
-                            mapped[i] = u2
-                            placed = True
-                            break
-                    if not placed:
-                        # soft overflow: allow replacing only if same URL holds nobody? (No)
-                        # Leave unmapped to respect caps strictly
-                        pass
-            else:
-                # SEO list up to 2
-                current_list = per_url_caps[u]["SEO"]
-                assert isinstance(current_list, list)
-                if len(current_list) < 2:
-                    current_list.append(i)
-                    mapped[i] = u
-                else:
-                    # try next candidate
-                    ordered_candidates = []
-                    if exact_hits:
-                        ordered_candidates = sorted(exact_hits, key=lambda pi: tie_key(pi))
-                    else:
-                        ordered_candidates = [pi for _,_,pi,_ in sorted(scored, key=lambda x: (-x[0], -x[1], tie_key(x[2])))]
-                    placed = False
-                    for pi in ordered_candidates:
-                        u2 = page_urls[pi]
-                        lst = per_url_caps[u2]["SEO"]
-                        assert isinstance(lst, list)
-                        if len(lst) < 2:
-                            lst.append(i)
-                            mapped[i] = u2
-                            placed = True
-                            break
-                    if not placed:
-                        # Strict caps: leave unmapped
-                        pass
-
-    return pd.Series([mapped[i] for i in df.index], index=df.index, dtype="string")
 
 # ---------- Single Keyword ----------
 st.subheader("Single Keyword Score")
@@ -1222,9 +942,6 @@ st.subheader("Bulk Scoring (CSV Upload)")
 
 # Mapping controls
 base_site_url = st.text_input("Base site URL (for URL mapping)", placeholder="https://example.com")
-include_subdomains = True
-use_sitemap_first = True  # always use sitemap first
-
 uploaded = st.file_uploader("Upload CSV", type=["csv"])
 example = pd.DataFrame({"Keyword":["best running shoes","seo tools","crm software"], "Volume":[5400,880,12000], "KD":[38,72,18]})
 with st.expander("See example CSV format"):
@@ -1268,7 +985,6 @@ if uploaded is not None:
     if missing:
         st.error("Missing required column(s): " + ", ".join(missing))
     else:
-        # Clean numbers
         df[vol_col] = df[vol_col].astype(str).str.replace(r"[,\s]","",regex=True).str.replace("%","",regex=False)
         df[kd_col]  = df[kd_col].astype(str).str.replace(r"[,\s]","",regex=True).str.replace("%","",regex=False)
         df[vol_col] = pd.to_numeric(df[vol_col], errors="coerce")
@@ -1276,142 +992,56 @@ if uploaded is not None:
 
         scored = add_scoring_columns(df, vol_col, kd_col, kw_col)
 
-        # ---------- Build export_df ----------
-        filename_base = f"outrankiq_{scoring_mode.lower().replace(' ', '_')}_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
-        base_cols = ([kw_col] if kw_col else []) + [vol_col, kd_col, "Score","Tier","Eligible","Reason","Category"]
-        export_df = scored[base_cols].copy()
-        export_df["Strategy"] = scoring_mode
-
-        export_df["_EligibleSort"] = export_df["Eligible"].map({"Yes":1,"No":0}).fillna(0)
-        export_df = export_df.sort_values(by=["_EligibleSort", kd_col, vol_col], ascending=[False, True, False], kind="mergesort").drop(columns=["_EligibleSort"])
-
-        # ---------- Prepare signature for mapping state ----------
-        sig_cols = [c for c in [kw_col, vol_col, kd_col] if c]
-        try:
-            sig_df = export_df[sig_cols].copy()
-        except Exception:
-            sig_df = export_df[[col for col in sig_cols if col in export_df.columns]].copy()
-        sig_csv = sig_df.fillna("").astype(str).to_csv(index=False)
-        sig_base = f"site-map-v13-unweighted-phrase-first|{_normalize_base(base_site_url.strip()).lower()}|{scoring_mode}|{kw_col}|{vol_col}|{kd_col}|{len(export_df)}|subdomains={include_subdomains}"
-        curr_signature = hashlib.md5((sig_base + "\n" + sig_csv).encode("utf-8")).hexdigest()
-
-        # Invalidate previous map if inputs changed
-        if st.session_state.get("map_signature") != curr_signature:
-            st.session_state["map_ready"] = False
-	        # ======================= BEGIN MAPPING BLOCK (guarded) =======================
-        import re
-        import pandas as pd
-
-        # Only run if export_df exists and is a DataFrame
-        if isinstance(globals().get("export_df", None), pd.DataFrame) and not export_df.empty:
-
-            # Build case-insensitive column resolver
-            cols_lower_to_orig = {c.lower(): c for c in export_df.columns}
-            def _resolve(cands, allow_missing=False, default_val=None):
-                for c in cands:
-                    if c in export_df.columns:
-                        return c
-                    cl = str(c).lower()
-                    if cl in cols_lower_to_orig:
-                        return cols_lower_to_orig[cl]
-                if allow_missing:
-                    return default_val
-                raise ValueError(f"Missing expected column: one of {cands}")
-
-            KW_COL       = _resolve(["Keyword","keyword","query","term"])
-            VOL_COL      = _resolve(["Search Volume","search volume","volume","sv"])
-            KD_COL       = _resolve(["Keyword Difficulty","keyword difficulty","kd","difficulty"])
-            ELIGIBLE_COL = _resolve(["Eligible","eligible"])
-            SCORE_COL    = _resolve(["Score","score"], allow_missing=True, default_val=None)
-            CATEGORY_COL = _resolve(["Category","Tags","categories","tag"], allow_missing=True, default_val=None)
-
-            # Ensure Mapped URL column exists
-            MAPPED_URL_COL = "Mapped URL"
-            if MAPPED_URL_COL not in export_df.columns:
-                export_df[MAPPED_URL_COL] = ""
-
-            # Pull crawl/page signals
-            page_signals_by_url = (
-                st.session_state.get("url_signals")
-                or st.session_state.get("crawl_signals")
-                or {}
-            )
-
-            # Use new weighted mapping function from mapping.py
-            results = weighted_map_keywords(export_df, page_signals_by_url)
-
-
-            # Apply results back into export_df
-            for res in results:
-                kw = res["keyword"]
-                url = res["chosen_url"] or ""
-                score = res.get("weighted_score", 0)
-                reasons = res.get("reasons", "")
-
-                # Always apply mapping results (whether URL is found or not)
-                matches = export_df.index[export_df["Keyword"] == kw].tolist()
-                for i in matches:
-                    export_df.at[i, MAPPED_URL_COL] = url
-                    export_df.at[i, "Weighted Score"] = score
-                    export_df.at[i, "Mapping Reasons"] = reasons
-
-            st.session_state["map_ready"] = True
-
-        # ---------- Manual mapping button ----------
-        can_map = bool(base_site_url.strip())
-        map_btn = st.button("Map keywords to site", type="primary", disabled=not can_map, help="Crawls & assigns the best page per keyword for this strategy (unweighted match; exact phrase wins).")
+        # ELITE MAPPING BUTTON
+        map_btn = st.button("Run Elite Structural Mapping → Best URL per Keyword", type="primary", use_container_width=True)
 
         if map_btn and not st.session_state.get("mapping_running", False):
             st.session_state["mapping_running"] = True
-            if "map_cache" not in st.session_state:
-                st.session_state["map_cache"] = {}
             loader = st.empty()
-            loader.markdown(
-                """
-                <div class="oiq-loader">
-                  <div class="oiq-spinner"></div>
-                  <div class="oiq-loader-text">Mapping keywords to your site…</div>
-                </div>
-                """, unsafe_allow_html=True)
-            with st.spinner("Crawling & matching keywords…"):
-                cache = st.session_state["map_cache"]
-                if curr_signature in cache and len(cache[curr_signature]) == len(export_df):
-                    map_series = pd.Series(cache[curr_signature], index=export_df.index, dtype="string")
-                else:
-                    map_series = map_keywords_to_urls(
-                        export_df, kw_col=kw_col, vol_col=vol_col, kd_col=kd_col,
-                        base_url=base_site_url.strip(), include_subdomains=True, use_sitemap_first=True
-                    )
-                    cache[curr_signature] = map_series.fillna("").astype(str).tolist()
-                st.session_state["map_result"] = map_series
-                st.session_state["map_signature"] = curr_signature
-                st.session_state["map_ready"] = True
+            loader.markdown('<div class="oiq-loader"><div class="oiq-spinner"></div><div class="oiq-loader-text">Running ELITE structural mapping...<br>Only Slug • Title • H1 • H2/H3 used.</div></div>', unsafe_allow_html=True)
+
+            with st.spinner("Crawling your URLs and applying elite structural scoring..."):
+                try:
+                    url_input = base_site_url.strip()
+                    url_list = [u.strip() for u in url_input.replace(",", "\n").split("\n") if u.strip()][:10]
+
+                    if not url_list:
+                        st.error("Please enter at least one URL in the base site field.")
+                    else:
+                        page_signals = fetch_profiles(url_list)
+                        results = weighted_map_keywords(scored, page_signals)
+
+                        url_map = {r["keyword"]: r["chosen_url"] for r in results}
+                        note_map = {r["keyword"]: r["note"] for r in results}
+
+                        scored["Map URL"] = scored["Keyword"].map(url_map).fillna("")
+                        scored["Mapping Note"] = scored["Keyword"].map(note_map)
+
+                        mapped_count = scored["Map URL"].notna().sum()
+                        st.success(f"ELITE MAPPING COMPLETE — {mapped_count} keywords mapped with structural precision!")
+
+                except Exception as e:
+                    st.error(f"Elite mapping failed: {e}")
+                    import traceback
+                    st.code(traceback.format_exc())
+
             loader.empty()
             st.session_state["mapping_running"] = False
+            st.rerun()
 
-        # ---------- Build CSV for download ----------
-        if st.session_state.get("map_ready") and st.session_state.get("map_signature") == curr_signature:
-            export_df["Map URL"] = st.session_state["map_result"]
-            # Do not show a URL where row is not eligible
-            export_df.loc[export_df["Eligible"] != "Yes", "Map URL"] = ""
-            can_download = True
-        else:
-            export_df["Map URL"] = pd.Series([""]*len(export_df), index=export_df.index, dtype="string")
-            can_download = False
-            if base_site_url.strip():
-                st.info("Click **Map keywords to site** to generate Map URLs for this strategy and dataset.")
-
-        export_cols = base_cols + ["Strategy","Map URL"]
-        export_df = export_df[export_cols]
+        # Export with new Mapping Note column
+        base_cols = ([kw_col] if kw_col else []) + [vol_col, kd_col, "Score","Tier","Eligible","Reason","Category"]
+        export_cols = base_cols + ["Strategy", "Map URL", "Mapping Note"]
+        export_df = scored[export_cols].copy()
+        export_df["Strategy"] = scoring_mode
 
         csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")
         st.download_button(
-            label="⬇️ Download scored CSV",
+            label="Download scored + mapped CSV",
             data=csv_bytes,
-            file_name=f"{filename_base}.csv",
+            file_name=f"outrankiq_{scoring_mode.lower().replace(' ', '_')}_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}.csv",
             mime="text/csv",
-            help="Sorted by eligibility (Yes first), KD ascending, Volume descending",
-            disabled=not can_download
+            use_container_width=True
         )
 
-st.markdown("<div class='oiq-footer'>© 2025 OutrankIQ</div>", unsafe_allow_html=True)
+st.markdown("<div class='oiq-footer'>© 2025 OutrankIQ — Now with elite structural mapping</div>", unsafe_allow_html=True)
