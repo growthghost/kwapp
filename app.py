@@ -306,15 +306,101 @@ st.markdown(
 </div>
 """, unsafe_allow_html=True)
 
-# ---------- Category Tagging ----------
-AIO_PAT = re.compile(r"\b(what is|what's|define|definition|how to|step[- ]?by[- ]?step|tutorial|guide|is)\b", re.I)
-AEO_PAT = re.compile(r"^\s*(who|what|when|where|why|how|which|can|should)\b", re.I)
-VEO_PAT = re.compile(r"\b(near me|open now|closest|call now|directions|ok google|alexa|siri|hey google)\b", re.I)
-GEO_PAT = re.compile(r"\b(how to|best way to|steps? to|examples? of|checklist|framework|template)\b", re.I)
-SXO_PAT = re.compile(r"\b(best|top|compare|comparison|vs\.?|review|pricing|cost|cheap|free download|template|examples?)\b", re.I)
-LLM_PAT = re.compile(r"\b(prompt|prompting|prompt[- ]?engineering|chatgpt|gpt[- ]?\d|llm|rag|embedding|vector|few[- ]?shot|zero[- ]?shot)\b", re.I)
-AIO_PAGE_SIG = re.compile(r"\b(what is|how to|guide|tutorial|step[- ]?by[- ]?step|checklist|framework|template|examples?)\b", re.I)
+# ---------- Category Tagging (updated for AI / answer engines) ----------
+
+# AIO = informational / educational, “explain this to me”
+AIO_PAT = re.compile(
+    r"\b("
+        r"what is|what's|define|definition|meaning of|"
+        r"explain|explained|explanation|"
+        r"overview|introduction|intro to|guide to|"
+        r"pros and cons|advantages|disadvantages|benefits|risks|"
+        r"examples? of|types of"
+    r")\b",
+    re.I,
+)
+
+# AEO = direct answer / question-style queries
+AEO_PAT = re.compile(
+    r"^\s*("
+        r"who|what|when|where|why|how|which|"
+        r"can|could|should|would|"
+        r"do|does|did|"
+        r"is|are|was|were|will"
+    r")\b",
+    re.I,
+)
+
+# VEO = voice / local / assistant-style queries
+VEO_PAT = re.compile(
+    r"\b("
+        r"near me|nearby|near you|around me|close to me|"
+        r"local|in my area|"
+        r"open now|"
+        r"closest|"
+        r"call now|"
+        r"directions|"
+        r"hours|opening hours|closing time|"
+        r"ok google|alexa|siri|hey google"
+    r")\b",
+    re.I,
+)
+
+# GEO = generative engine / workflow / “do this for me” style
+GEO_PAT = re.compile(
+    r"\b("
+        r"how to|best way to|steps? to|step[- ]?by[- ]?step|"
+        r"checklist|framework|template|playbook|roadmap|"
+        r"workflow|process|system|strategy|blueprint|"
+        r"examples? of|outline for|"
+        r"write|generate|create|draft|"
+        r"prompt|prompts|prompt ideas|"
+        r"ai recommends|according to ai"
+    r")\b",
+    re.I,
+)
+
+# SXO = search experience / commercial & comparison queries
+SXO_PAT = re.compile(
+    r"\b("
+        r"best|top|"
+        r"compare|comparison|versus|vs\.?|"
+        r"alternative|alternatives|"
+        r"review|reviews|rating|ratings|ranking|ranked|"
+        r"pricing|price|cost|fee|fees|"
+        r"cheap|cheapest|affordable|budget|"
+        r"deal|deals|discount|coupon|promo code|"
+        r"free trial|free download|template|examples?"
+    r")\b",
+    re.I,
+)
+
+# LLM = explicitly AI / LLM / answer-engine tech terms
+LLM_PAT = re.compile(
+    r"\b("
+        r"prompt|prompts|prompting|prompt[- ]?engineering|"
+        r"chatgpt|gpt[- ]?\d+|"
+        r"claude|perplexity|grok|llama|gemini|copilot|"
+        r"deepseek|mistral|"
+        r"llm|large language model|"
+        r"rag|retrieval[- ]augmented|"
+        r"embedding|embeddings|vector search|"
+        r"answer engine|ai search"
+    r")\b",
+    re.I,
+)
+
+# Page-level “this looks like an AIO/GEO resource” signal
+AIO_PAGE_SIG = re.compile(
+    r"\b("
+        r"what is|how to|guide|tutorial|step[- ]?by[- ]?step|"
+        r"checklist|framework|template|examples?|playbook|overview"
+    r")\b",
+    re.I,
+)
+
 CATEGORY_ORDER = ["SEO","AIO","VEO","GEO","AEO","SXO","LLM"]
+
 
 def categorize_keyword(kw: str) -> List[str]:
     if not isinstance(kw,str) or not kw.strip():
