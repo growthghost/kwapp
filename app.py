@@ -14,6 +14,7 @@ from datetime import datetime
 from mapping import weighted_map_keywords
 from crawler import fetch_profiles
 
+
 # ---------- Optional deps ----------
 try:
     import aiohttp  # type: ignore
@@ -1297,7 +1298,7 @@ if uploaded is not None:
         # Invalidate previous map if inputs changed
         if st.session_state.get("map_signature") != curr_signature:
             st.session_state["map_ready"] = False
-            # ======================= BEGIN MAPPING BLOCK (guarded) =======================
+	        # ======================= BEGIN MAPPING BLOCK (guarded) =======================
         import re
         import pandas as pd
 
@@ -1338,6 +1339,7 @@ if uploaded is not None:
 
             # Use new weighted mapping function from mapping.py
             results = weighted_map_keywords(export_df, page_signals_by_url)
+
 
             # Apply results back into export_df
             for res in results:
@@ -1413,4 +1415,3 @@ if uploaded is not None:
         )
 
 st.markdown("<div class='oiq-footer'>© 2025 OutrankIQ</div>", unsafe_allow_html=True)
-
