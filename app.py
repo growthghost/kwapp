@@ -1278,7 +1278,7 @@ if uploaded is not None:
 
         # ---------- Build export_df ----------
         filename_base = f"outrankiq_{scoring_mode.lower().replace(' ', '_')}_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
-        base_cols = ([kw_col] if kw_col else []) + [vol_col, kd_col, "Score","Tier","Eligible","Reason","Category"]
+        base_cols = ([kw_col] if kw_col else []) + [vol_col, kd_col, "Score","Tier","Eligible","Category"]
         export_df = scored[base_cols].copy()
         export_df["Strategy"] = scoring_mode
 
