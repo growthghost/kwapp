@@ -1,199 +1,108 @@
+This file maps keywords to URLs using weighted signals and per-page caps.”
 # mapping.py
-# Elite Structural SEO Scoring Model — No body text. Only Slug/Title/H1/H2/H3.
-# Exact token match only. Synergy bonuses. Threshold >=5.
+# This file contains the weighted keyword-to-URL mapping logic.
 
-import re
-from urllib.parse import urlparse
-from typing import Dict, List, Any, Tuple
 import pandas as pd
+from typing import Dict, List
 
-# Informational intent markers in slugs (e.g. "how-to", "best-", "guide")
-INTENT_MARKERS = [
-    "how-to", "best-", "top-", "guide", "tutorial", "ultimate", "complete",
-    "step-by-step", "vs-", "review", "comparison", "what-is", "why-", "how-"
-]
-
-# Common short verbs — helps classify tokens
-COMMON_VERBS = {
-    "be", "have", "do", "go", "get", "make", "know", "think", "take",
-    "see", "come", "want", "use", "find", "give", "tell", "work", "call",
-    "buy", "sell", "need", "ask", "try", "help", "learn", "start", "stop"
+# ---------- Weights ----------
+WEIGHTS = {
+    "slug": 5,
+    "title": 4,
+    "h1": 3,
+    "meta": 2,
+    "body": 1
 }
 
-def classify_token(token: str) -> str:
-    """Simple, fast POS-like classification for keywords"""
-    token = token.lower().strip()
-    if len(token) <= 2 or token in COMMON_VERBS:
-        return "verb"
-    if len(token) == 3:
-        return "adj"   # most 3-letter keyword words are adjectives
-    return "noun"      # length >=4 → treat as noun (most accurate for SEO keywords)
+# ---------- Per-page caps ----------
+PAGE_CAPS = {
+    "SEO": 2,
+    "AIO": 1,
+    "VEO": 1
+}
 
-
-def has_intent_marker(slug: str) -> bool:
-    """Detect informational/commercial intent in slug"""
-    slug_clean = slug.lower().replace("_", "-")
-    return any(marker in slug_clean for marker in INTENT_MARKERS)
-
-
-def calculate_structural_score(keyword: str, signals: Dict[str, str]) -> Tuple[float, str]:
-    """Core scoring logic — exactly as you designed"""
-    if not keyword.strip():
-        return 0.0, "empty keyword"
-
-    tokens = [t.strip() for t in keyword.lower().split() if t.strip()]
-    if not tokens:
-        return 0.0, "no tokens"
-
-    score = 0.0
-    details = []
-
-    slug = signals.get("slug", "")
-    title = signals.get("title", "")
-    h1 = signals.get("h1", "")
-    h2 = signals.get("h2", "")
-    h3 = signals.get("h3", "")
-    h2_h3 = " ".join([h2, h3]).lower()
-
-    # Track which major sections matched
-    slug_hit = False
-    title_hit = False
-    h1_hit = False
-    h2h3_hit = False
-
-    # === 1. SLUG / URL ===
-    slug_lower = slug.lower().replace("_", " ")
-    for token in tokens:
-        if token in slug_lower and classify_token(token) == "noun":
-            score += 6
-            details.append("slug(noun)")
-            slug_hit = True
-    if has_intent_marker(slug):
-        score += 2
-        details.append("slug(intent)")
-
-    # === 2. TITLE ===
-    title_lower = title.lower()
-    title_nouns = sum(1 for t in tokens if classify_token(t) == "noun" and t in title_lower)
-    title_adjs  = sum(1 for t in tokens if classify_token(t) == "adj"  and t in title_lower)
-    title_verbs = sum(1 for t in tokens if classify_token(t) == "verb" and t in title_lower)
-
-    if title_nouns:  score += title_nouns * 5;  details.append(f"title(noun×{title_nouns})"); title_hit = True
-    if title_adjs:   score += title_adjs  * 4;  details.append(f"title(adj×{title_adjs})");  title_hit = True
-    if title_verbs:  score += title_verbs * 3;  details.append(f"title(verb×{title_verbs})"); title_hit = True
-
-    # Cap title contribution at +12
-    title_contribution = sum([title_nouns*5, title_adjs*4, title_verbs*3])
-    if title_contribution > 12:
-        score -= (title_contribution - 12)
-
-    # === 3. H1 ===
-    h1_lower = h1.lower()
-    h1_nouns = sum(1 for t in tokens if classify_token(t) == "noun" and t in h1_lower)
-    h1_adjs  = sum(1 for t in tokens if classify_token(t) == "adj"  and t in h1_lower)
-    h1_verbs = sum(1 for t in tokens if classify_token(t) == "verb" and t in h1_lower)
-
-    if h1_nouns:  score += h1_nouns * 5;  details.append(f"h1(noun×{h1_nouns})"); h1_hit = True
-    if h1_adjs:   score += h1_adjs  * 4;  details.append(f"h1(adj×{h1_adjs})");  h1_hit = True
-    if h1_verbs:  score += h1_verbs * 3;  details.append(f"h1(verb×{h1_verbs})"); h1_hit = True
-
-    h1_contribution = sum([h1_nouns*5, h1_adjs*4, h1_verbs*3])
-    if h1_contribution > 12:
-        score -= (h1_contribution - 12)
-
-    # === 4. H2 + H3 ===
-    h2h3_nouns = sum(1 for t in tokens if classify_token(t) == "noun" and t in h2_h3)
-    h2h3_adjs  = sum(1 for t in tokens if classify_token(t) == "adj"  and t in h2_h3)
-
-    if h2h3_nouns: score += h2h3_nouns * 5; details.append(f"h2h3(noun×{h2h3_nouns})"); h2h3_hit = True
-    if h2h3_adjs:  score += h2h3_adjs  * 3; details.append(f"h2h3(adj×{h2h3_adjs})");  h2h3_hit = True
-
-    h2h3_contribution = h2h3_nouns*5 + h2h3_adjs*3
-    if h2h3_contribution > 8:
-        score -= (h2h3_contribution - 8)
-
-    # === 5. SYNERGY BONUSES ===
-    if slug_hit and title_hit:
-        score += 5
-        details.append("synergy:slug+title")
-    if title_hit and h1_hit:
-        score += 10
-        details.append("synergy:title+h1")
-    if h2h3_hit and (slug_hit or title_hit or h1_hit):
-        score += 15
-        details.append("synergy:h2h3+top")
-
-    note = ", ".join(details) if details else "no signal"
-    return score, note
-
+def overlap_count(keyword: str, text: str) -> int:
+    """
+    Count the number of overlapping tokens between a keyword and some text.
+    """
+    if not text:
+        return 0
+    kw_tokens = set(keyword.lower().split())
+    txt_tokens = set(text.lower().split())
+    return len(kw_tokens & txt_tokens)
 
 def url_depth(url: str) -> int:
-    path = urlparse(url).path
-    return len([p for p in path.strip("/").split("/") if p])
+    """
+    Calculate the depth of a URL (number of path segments).
+    Example: https://site.com/a/b/c -> depth = 3
+    """
+    parts = url.strip("/").split("/")
+    return len(parts) - 1 if parts[0].startswith("http") else len(parts)
 
+def weighted_map_keywords(df: pd.DataFrame, page_signals_by_url: Dict) -> List[Dict]:
+    """
+    Maps each keyword in df to the best URL using weighted signals.
 
-def has_exact_phrase(keyword: str, text: str) -> bool:
-    if not text or not keyword:
-        return False
-    pattern = re.escape(keyword.strip())
-    return bool(re.search(r"\b" + pattern + r"\b", text, re.IGNORECASE))
+    Inputs:
+        df: pandas DataFrame with keywords, category, etc.
+        page_signals_by_url: dict {url: {slug, title, h1, meta, body}}
 
+    Output:
+        mapping_results: list of dicts with:
+            keyword, category, chosen_url, weighted_score, reasons
+    """
 
-def weighted_map_keywords(df: pd.DataFrame, page_signals: Dict[str, Dict]) -> List[Dict[str, Any]]:
-    """Main mapping function — returns list of results"""
-    if not page_signals:
-        return [{"keyword": row.get("Keyword",""), "chosen_url": None, "note": "no pages crawled"} 
-                for _, row in df.iterrows()]
+    # Track assigned counts per page/category
+    assigned_counts = {url: {"SEO": 0, "AIO": 0, "VEO": 0} for url in page_signals_by_url}
 
-    # Track how many keywords assigned per URL per category
-    assigned = {url: {"SEO": 0, "AIO": 0, "VEO": 0} for url in page_signals}
     results = []
 
     for _, row in df.iterrows():
-        kw = str(row.get("Keyword", "")).strip()
-        category = str(row.get("Category", "SEO")).split(",")[0].strip() or "SEO"
+        kw = row.get("Keyword", "")
+        category = row.get("Category", "SEO")
 
-        candidates = []
-        for url, signals in page_signals.items():
-            raw_score, note = calculate_structural_score(kw, signals)
-            if raw_score < 5:  # Strict threshold
-                continue
+        candidate_scores = []
+        for url, signals in page_signals_by_url.items():
+            score = 0
+            reasons = []
 
-            # Tiebreakers
-            title_h1_text = signals.get("title", "") + " " + signals.get("h1", "")
-            exact_in_top = has_exact_phrase(kw, title_h1_text)
-            depth = url_depth(url)
+            for field, text in signals.items():
+                matches = overlap_count(kw, text)
+                if matches > 0:
+                    score += matches * WEIGHTS.get(field, 0)
+                    reasons.append(f"{field} match x{matches}")
 
-            candidates.append((
-                raw_score,
-                exact_in_top,      # exact phrase in title/h1 wins ties
-                -depth,            # shallower depth wins
-                -len(url),         # shorter URL wins
-                url,
-                note
-            ))
+            if score > 0:
+                candidate_scores.append((url, score, reasons))
 
-        if not candidates:
-            results.append({"keyword": kw, "chosen_url": None, "note": "score<5"})
-            continue
-
-        # Sort: highest score first
-        candidates.sort(reverse=True)
-
-        placed = False
-        for _, _, _, _, url, note in candidates:
-            cap = 2 if category == "SEO" else 1
-            if assigned[url].get(category, 0) < cap:
-                assigned[url][category] = assigned[url].get(category, 0) + 1
-                results.append({
-                    "keyword": kw,
-                    "chosen_url": url,
-                    "note": note
-                })
-                placed = Tru
-                break
-
-        if not placed:
-            results.append({"keyword": kw, "chosen_url": None, "note": "caps exceeded"})
+        if candidate_scores:
+            # Sort by score (desc), then depth (shallowest wins), then URL length (shorter wins)
+            candidate_scores.sort(
+                key=lambda x: (x[1], -url_depth(x[0]), -len(x[0])),
+                reverse=True
+            )
+            for url, score, reasons in candidate_scores:
+                # Enforce per-page caps
+                if assigned_counts[url][category] < PAGE_CAPS.get(category, 99):
+                    assigned_counts[url][category] += 1
+                    results.append({
+                        "keyword": kw,
+                        "category": category,
+                        "chosen_url": url,
+                        "weighted_score": score,
+                        "reasons": "; ".join(reasons)
+                    })
+                    break
+        else:
+            # No matches → unmapped
+            results.append({
+                "keyword": kw,
+                "category": category,
+                "chosen_url": None,
+                "weighted_score": 0,
+                "reasons": "No signal matches"
+            })
 
     return results
+
+
