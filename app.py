@@ -1315,46 +1315,23 @@ with st.form("single"):
 st.markdown("---")
 st.subheader("Bulk Scoring (CSV Upload)")
 
-# User-supplied URLs for mapping (one per line, max 10)
-urls_text = st.text_area(
+# User-supplied URLs for mapping (one per line, up to 10)
+url_text = st.text_area(
     "Key URLs for mapping (one per line, up to 10)",
     placeholder="https://example.com/page-1\nhttps://example.com/page-2",
-    help="Only these URLs will be crawled and will be eligible for keyword mapping."
+    help="Only these URLs will be crawled and eligible for keyword mapping.",
 )
 
-user_urls: List[str] = []
-if urls_text.strip():
-    base_norm = _normalize_base(base_site_url.strip()) if base_site_url.strip() else ""
-    base_host, base_root = _derive_roots(base_norm) if base_norm else ("", "")
-    seen = set()
+# Turn textarea text into a clean list of up to 10 URLs
+urls: List[str] = []
+if url_text.strip():
+    urls = [line.strip() for line in url_text.splitlines() if line.strip()]
+    urls = urls[:10]  # cap at 10
 
-    for line in urls_text.splitlines():
-        u = line.strip()
-        if not u:
-            continue
+# Store in session_state for later use (mapping + signature)
+st.session_state["user_mapping_urls"] = tuple(urls)
 
-        # If user enters a path (e.g. /services), join with base URL
-        if not u.startswith(("http://", "https://")) and base_norm:
-            u = urljoin(base_norm + "/", u)
-
-        # Enforce same-site as base URL if base is given
-        if base_norm:
-            if not _same_site(u, base_host, base_root, include_subdomains=True):
-                continue
-
-        key = _url_key(u)
-        if key in seen:
-            continue
-        seen.add(key)
-        user_urls.append(u)
-
-        if len(user_urls) >= 10:
-            break
-
-    st.session_state["user_mapping_urls"] = tuple(user_urls)
-else:
-    st.session_state["user_mapping_urls"] = tuple()
-
+# CSV upload control
 uploaded = st.file_uploader("Upload CSV", type=["csv"])
 
 # ---------- CSV ingest ----------
@@ -1419,8 +1396,19 @@ if uploaded is not None:
         except Exception:
             sig_df = export_df[[col for col in sig_cols if col in export_df.columns]].copy()
         sig_csv = sig_df.fillna("").astype(str).to_csv(index=False)
-        sig_base = f"site-map-v13-unweighted-phrase-first|{_normalize_base(base_site_url.strip()).lower()}|{scoring_mode}|{kw_col}|{vol_col}|{kd_col}|{len(export_df)}|subdomains={include_subdomains}"
+
+        # Derive a base host from the first user URL (if any) for signature stability
+        user_urls_for_sig = st.session_state.get("user_mapping_urls") or ()
+        first_for_sig = user_urls_for_sig[0] if user_urls_for_sig else ""
+        base_norm = _normalize_base(first_for_sig.strip()) if first_for_sig.strip() else ""
+
+        sig_base = (
+            f"site-map-v13-unweighted-phrase-first|"
+            f"{base_norm.lower()}|{scoring_mode}|{kw_col}|{vol_col}|{kd_col}|"
+            f"{len(export_df)}|subdomains={include_subdomains}"
+        )
         curr_signature = hashlib.md5((sig_base + "\n" + sig_csv).encode("utf-8")).hexdigest()
+
 
         # Invalidate previous map if inputs changed
         if st.session_state.get("map_signature") != curr_signature:
