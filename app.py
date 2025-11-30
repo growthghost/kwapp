@@ -1355,6 +1355,8 @@ if urls_text.strip():
 else:
     st.session_state["user_mapping_urls"] = tuple()
 
+uploaded = st.file_uploader("Upload CSV", type=["csv"])
+
 # ---------- CSV ingest ----------
 if uploaded is not None:
     raw = uploaded.getvalue()
