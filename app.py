@@ -1084,7 +1084,18 @@ def cached_fetch_profiles(urls: Tuple[str, ...]) -> List[Dict]:
 # ---------- Mapping (UNWEIGHTED overlap with exact-phrase precedence) ----------
 def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, kd_col: str,
                          base_url: str, include_subdomains: bool, use_sitemap_first: bool) -> pd.Series:
-    url_list, srcmap, _smeta = cached_discover_and_sources(base_url, include_subdomains, use_sitemap_first)
+    # Use only user-supplied URLs (max 10) for mapping instead of crawling the entire site
+    user_urls = st.session_state.get("user_mapping_urls") or ()
+    url_list = list(user_urls)[:10]
+
+    if not url_list:
+        # No URLs supplied => nothing can be mapped
+        return pd.Series([""] * len(df), index=df.index, dtype="string")
+
+    # Treat all supplied URLs as 'page' type for tie-breaking
+    srcmap = { _url_key(u): "page" for u in url_list }
+
+    # Fetch only the user-supplied URLs
     profiles = cached_fetch_profiles(tuple(url_list))
 
     # Build per-profile token sets (unweighted union) + helpers
@@ -1102,7 +1113,7 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
     page_depths: List[int] = []
     for p in profiles:
         u = p.get("url") or p.get("final_url") or p.get("requested_url")
-        if not u: 
+        if not u:
             continue
         tokens = set()
         # union of everything we know (unweighted)
@@ -1241,7 +1252,6 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
                     mapped[i] = u
                 else:
                     # try next best candidate that isn't capped out
-                    # build ordered list again and pick next
                     ordered_candidates = []
                     if exact_hits:
                         ordered_candidates = sorted(exact_hits, key=lambda pi: tie_key(pi))
@@ -1256,8 +1266,7 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
                             placed = True
                             break
                     if not placed:
-                        # soft overflow: allow replacing only if same URL holds nobody? (No)
-                        # Leave unmapped to respect caps strictly
+                        # Strict caps: leave unmapped
                         pass
             else:
                 # SEO list up to 2
@@ -1306,15 +1315,45 @@ with st.form("single"):
 st.markdown("---")
 st.subheader("Bulk Scoring (CSV Upload)")
 
-# Mapping controls
-base_site_url = st.text_input("Base site URL (for URL mapping)", placeholder="https://example.com")
-include_subdomains = True
-use_sitemap_first = True  # always use sitemap first
+# User-supplied URLs for mapping (one per line, max 10)
+urls_text = st.text_area(
+    "Key URLs for mapping (one per line, up to 10)",
+    placeholder="https://example.com/page-1\nhttps://example.com/page-2",
+    help="Only these URLs will be crawled and will be eligible for keyword mapping."
+)
 
-uploaded = st.file_uploader("Upload CSV", type=["csv"])
-example = pd.DataFrame({"Keyword":["best running shoes","seo tools","crm software"], "Volume":[5400,880,12000], "KD":[38,72,18]})
-with st.expander("See example CSV format"):
-    st.dataframe(example, use_container_width=True)
+user_urls: List[str] = []
+if urls_text.strip():
+    base_norm = _normalize_base(base_site_url.strip()) if base_site_url.strip() else ""
+    base_host, base_root = _derive_roots(base_norm) if base_norm else ("", "")
+    seen = set()
+
+    for line in urls_text.splitlines():
+        u = line.strip()
+        if not u:
+            continue
+
+        # If user enters a path (e.g. /services), join with base URL
+        if not u.startswith(("http://", "https://")) and base_norm:
+            u = urljoin(base_norm + "/", u)
+
+        # Enforce same-site as base URL if base is given
+        if base_norm:
+            if not _same_site(u, base_host, base_root, include_subdomains=True):
+                continue
+
+        key = _url_key(u)
+        if key in seen:
+            continue
+        seen.add(key)
+        user_urls.append(u)
+
+        if len(user_urls) >= 10:
+            break
+
+    st.session_state["user_mapping_urls"] = tuple(user_urls)
+else:
+    st.session_state["user_mapping_urls"] = tuple()
 
 # ---------- CSV ingest ----------
 if uploaded is not None:
@@ -1443,9 +1482,15 @@ if uploaded is not None:
 
             st.session_state["map_ready"] = True
 
-        # ---------- Manual mapping button ----------
-        can_map = bool(base_site_url.strip())
-        map_btn = st.button("Map keywords to site", type="primary", disabled=not can_map, help="Crawls & assigns the best page per keyword for this strategy (unweighted match; exact phrase wins).")
+            # ---------- Manual mapping button ----------
+            user_urls_for_btn = st.session_state.get("user_mapping_urls") or ()
+            can_map = bool(base_site_url.strip()) and len(user_urls_for_btn) > 0
+            map_btn = st.button(
+                "Map keywords to site",
+                type="primary",
+                disabled=not can_map,
+                help="Crawls & assigns the best page per keyword for this strategy (only using the URLs you supplied above)."
+            )
 
         if map_btn and not st.session_state.get("mapping_running", False):
             st.session_state["mapping_running"] = True
