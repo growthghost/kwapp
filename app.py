@@ -148,7 +148,7 @@ div[data-testid="stSelectbox"] > label,
 div[data-testid="stNumberInput"] > label,
 div[data-testid="stTextInput"] > label,
 div[data-testid="stTextArea"] > label,
-div[data-testid="stCheckbox"] > label { color: var(--ink) !important; font-weight: 700; }}
+div[data-testid="stCheckbox"] > label { color: var(--ink) !important; font-weight: 700; }
 
 /* Expander header ("See example") — blue text + blue arrow */
 [data-testid="stExpander"] > details > summary {{
