@@ -1082,9 +1082,16 @@ def cached_fetch_profiles(urls: Tuple[str, ...]) -> List[Dict]:
     return _fetch_profiles(list(urls))
 
 # ---------- Mapping (UNWEIGHTED overlap with exact-phrase precedence) ----------
-def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, kd_col: str,
-                         base_url: str, include_subdomains: bool, use_sitemap_first: bool) -> pd.Series:
-    # Use only user-supplied URLs (max 10) for mapping instead of crawling the entire site
+def map_keywords_to_urls(
+    df: pd.DataFrame,
+    kw_col: Optional[str],
+    vol_col: str,
+    kd_col: str,
+) -> pd.Series:
+    """
+    Map keywords to URLs using ONLY the user-supplied URLs (max 10).
+    """
+    # Get up to 10 URLs from session state
     user_urls = st.session_state.get("user_mapping_urls") or ()
     url_list = list(user_urls)[:10]
 
@@ -1092,14 +1099,18 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
         # No URLs supplied => nothing can be mapped
         return pd.Series([""] * len(df), index=df.index, dtype="string")
 
+    # Base URL for nav harvesting = first URL's domain
+    first_for_nav = url_list[0]
+    base_for_nav = _normalize_base(first_for_nav)
+
     # Treat all supplied URLs as 'page' type for tie-breaking
-    srcmap = { _url_key(u): "page" for u in url_list }
+    srcmap = {_url_key(u): "page" for u in url_list}
 
     # Fetch only the user-supplied URLs
     profiles = cached_fetch_profiles(tuple(url_list))
 
     # Build per-profile token sets (unweighted union) + helpers
-    nav_anchor_map, _ = cached_nav(base_url)
+    nav_anchor_map, _ = cached_nav(base_for_nav)
     nav_keys = set(nav_anchor_map.keys())
 
     def _is_nav(purl: str) -> bool:
@@ -1128,12 +1139,16 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
         page_urls.append(u)
         page_tokens.append(tokens)
         page_src_types.append(srcmap.get(_url_key(u), "other"))
-        page_texts.append((p.get("text_concat") or "").lower() + " " + u.lower().replace('-', ' ').replace('_', ' ').replace('/', ' '))
-        page_depths.append(len([seg for seg in urlparse(u).path.split('/') if seg]))
+        page_texts.append(
+            (p.get("text_concat") or "").lower()
+            + " "
+            + u.lower().replace("-", " ").replace("_", " ").replace("/", " ")
+        )
+        page_depths.append(len([seg for seg in urlparse(u).path.split("/") if seg]))
 
     n_pages = len(page_urls)
     if n_pages == 0:
-        return pd.Series([""]*len(df), index=df.index, dtype="string")
+        return pd.Series([""] * len(df), index=df.index, dtype="string")
 
     # Build inverted index token -> set(page indices)
     inv: Dict[str, Set[int]] = defaultdict(set)
@@ -1144,8 +1159,10 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
     # slot detection
     def kw_slot_for(text: str) -> str:
         cats = set(categorize_keyword(text))
-        if "VEO" in cats: return "VEO"
-        if "AIO" in cats: return "AIO"
+        if "VEO" in cats:
+            return "VEO"
+        if "AIO" in cats:
+            return "AIO"
         return "SEO"
 
     # Opportunity ordering (per strategy; same as before)
@@ -1154,32 +1171,32 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
 
     def opportunity(idx: int) -> float:
         row = df.loc[idx]
-        kd_val = float(pd.to_numeric(row.get(kd_col,0), errors="coerce") or 0)
-        vol_val = float(pd.to_numeric(row.get(vol_col,0), errors="coerce") or 0)
-        kd_norm = max(0.0, 1.0 - kd_val/100.0)
+        kd_val = float(pd.to_numeric(row.get(kd_col, 0), errors="coerce") or 0)
+        vol_val = float(pd.to_numeric(row.get(vol_col, 0), errors="coerce") or 0)
+        kd_norm = max(0.0, 1.0 - kd_val / 100.0)
         vol_norm = math.log(1 + max(0.0, vol_val)) / max_log_local
         return vol_norm * kd_norm
 
     # Caps per URL (per current strategy run)
-    caps = {"VEO":1, "AIO":1, "SEO":2}
+    caps = {"VEO": 1, "AIO": 1, "SEO": 2}
     per_url_caps: Dict[str, Dict[str, List[int] or Optional[int]]] = {}
     for u in page_urls:
         per_url_caps[u] = {"VEO": None, "AIO": None, "SEO": []}
 
-    mapped = {i:"" for i in df.index}
+    mapped = {i: "" for i in df.index}
 
     # Prepare eligible ids by slot, sorted by opportunity (desc)
     ids_by_slot: Dict[str, List[int]] = {"VEO": [], "AIO": [], "SEO": []}
     kw_texts: Dict[int, str] = {}
     for idx, row in df.iterrows():
-        vol_val = float(pd.to_numeric(row.get(vol_col,0), errors="coerce") or 0)
+        vol_val = float(pd.to_numeric(row.get(vol_col, 0), errors="coerce") or 0)
         if vol_val < MIN_VALID_VOLUME:
             continue  # ineligible for mapping under current strategy
-        kw_text = str(row.get(kw_col, "")) if kw_col else str(row.get("Keyword",""))
+        kw_text = str(row.get(kw_col, "")) if kw_col else str(row.get("Keyword", ""))
         kw_texts[idx] = kw_text
         ids_by_slot[kw_slot_for(kw_text)].append(idx)
 
-    for slot_name in ["VEO","AIO","SEO"]:
+    for slot_name in ["VEO", "AIO", "SEO"]:
         ids = ids_by_slot[slot_name]
         ids.sort(key=lambda i: (-opportunity(i), i))
 
@@ -1204,30 +1221,23 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
                     exact_hits.append(pi)
 
             def tie_key(pi: int) -> Tuple:
-                # Deterministic tie-breaks:
-                # 1) shallower depth
-                # 2) page-like over post-like
-                # 3) shorter URL
-                # 4) alphabetical URL
                 stype = srcmap.get(_url_key(page_urls[pi]), "other")
                 is_nav_flag = _is_nav(page_urls[pi])
                 page_like = _is_page_like(stype, page_urls[pi], is_nav_flag)
                 return (
-                    page_depths[pi],                # smaller is better
-                    0 if page_like else 1,          # page-like first
-                    len(page_urls[pi]),             # shorter is better
-                    page_urls[pi]                   # alphabetical
+                    page_depths[pi],  # smaller is better
+                    0 if page_like else 1,  # page-like first
+                    len(page_urls[pi]),  # shorter is better
+                    page_urls[pi],  # alphabetical
                 )
 
             chosen_index: Optional[int] = None
 
             if exact_hits:
-                # exact phrase always wins; break ties deterministically
                 exact_hits.sort(key=lambda pi: tie_key(pi))
                 chosen_index = exact_hits[0]
             else:
-                # No exact hit — use unweighted coverage, then overlap, then tie-break
-                scored: List[Tuple[float,int,int,int]] = []
+                scored: List[Tuple[float, int, int, int]] = []
                 for pi in candidates:
                     inter = kw_tokens & page_tokens[pi]
                     if not inter:
@@ -1244,19 +1254,22 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
                 continue
 
             u = page_urls[chosen_index]
-            # enforce per-URL caps (soft; try next candidate if cap full)
-            if slot_name in {"VEO","AIO"}:
+            if slot_name in {"VEO", "AIO"}:
                 already = per_url_caps[u][slot_name]
                 if already is None:
                     per_url_caps[u][slot_name] = i
                     mapped[i] = u
                 else:
-                    # try next best candidate that isn't capped out
                     ordered_candidates = []
                     if exact_hits:
                         ordered_candidates = sorted(exact_hits, key=lambda pi: tie_key(pi))
                     else:
-                        ordered_candidates = [pi for _,_,pi,_ in sorted(scored, key=lambda x: (-x[0], -x[1], tie_key(x[2])))]
+                        ordered_candidates = [
+                            pi
+                            for _, _, pi, _ in sorted(
+                                scored, key=lambda x: (-x[0], -x[1], tie_key(x[2]))
+                            )
+                        ]
                     placed = False
                     for pi in ordered_candidates:
                         u2 = page_urls[pi]
@@ -1266,22 +1279,24 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
                             placed = True
                             break
                     if not placed:
-                        # Strict caps: leave unmapped
                         pass
             else:
-                # SEO list up to 2
                 current_list = per_url_caps[u]["SEO"]
                 assert isinstance(current_list, list)
                 if len(current_list) < 2:
                     current_list.append(i)
                     mapped[i] = u
                 else:
-                    # try next candidate
                     ordered_candidates = []
                     if exact_hits:
                         ordered_candidates = sorted(exact_hits, key=lambda pi: tie_key(pi))
                     else:
-                        ordered_candidates = [pi for _,_,pi,_ in sorted(scored, key=lambda x: (-x[0], -x[1], tie_key(x[2])))]
+                        ordered_candidates = [
+                            pi
+                            for _, _, pi, _ in sorted(
+                                scored, key=lambda x: (-x[0], -x[1], tie_key(x[2]))
+                            )
+                        ]
                     placed = False
                     for pi in ordered_candidates:
                         u2 = page_urls[pi]
@@ -1293,10 +1308,10 @@ def map_keywords_to_urls(df: pd.DataFrame, kw_col: Optional[str], vol_col: str, 
                             placed = True
                             break
                     if not placed:
-                        # Strict caps: leave unmapped
                         pass
 
     return pd.Series([mapped[i] for i in df.index], index=df.index, dtype="string")
+
 
 # ---------- Single Keyword ----------
 st.subheader("Single Keyword Score")
@@ -1405,7 +1420,7 @@ if uploaded is not None:
         sig_base = (
             f"site-map-v13-unweighted-phrase-first|"
             f"{base_norm.lower()}|{scoring_mode}|{kw_col}|{vol_col}|{kd_col}|"
-            f"{len(export_df)}|subdomains={include_subdomains}"
+            f"{len(export_df)}"
         )
         curr_signature = hashlib.md5((sig_base + "\n" + sig_csv).encode("utf-8")).hexdigest()
 
@@ -1474,7 +1489,7 @@ if uploaded is not None:
 
             # ---------- Manual mapping button ----------
             user_urls_for_btn = st.session_state.get("user_mapping_urls") or ()
-            can_map = bool(base_site_url.strip()) and len(user_urls_for_btn) > 0
+            can_map = len(user_urls_for_btn) > 0
             map_btn = st.button(
                 "Map keywords to site",
                 type="primary",
@@ -1493,15 +1508,19 @@ if uploaded is not None:
                   <div class="oiq-spinner"></div>
                   <div class="oiq-loader-text">Mapping keywords to your site…</div>
                 </div>
-                """, unsafe_allow_html=True)
+                """,
+                unsafe_allow_html=True,
+            )
             with st.spinner("Crawling & matching keywords…"):
                 cache = st.session_state["map_cache"]
                 if curr_signature in cache and len(cache[curr_signature]) == len(export_df):
                     map_series = pd.Series(cache[curr_signature], index=export_df.index, dtype="string")
                 else:
                     map_series = map_keywords_to_urls(
-                        export_df, kw_col=kw_col, vol_col=vol_col, kd_col=kd_col,
-                        base_url=base_site_url.strip(), include_subdomains=True, use_sitemap_first=True
+                        export_df,
+                        kw_col=kw_col,
+                        vol_col=vol_col,
+                        kd_col=kd_col,
                     )
                     cache[curr_signature] = map_series.fillna("").astype(str).tolist()
                 st.session_state["map_result"] = map_series
@@ -1519,8 +1538,9 @@ if uploaded is not None:
         else:
             export_df["Map URL"] = pd.Series([""]*len(export_df), index=export_df.index, dtype="string")
             can_download = False
-            if base_site_url.strip():
-                st.info("Click **Map keywords to site** to generate Map URLs for this strategy and dataset.")
+            if st.session_state.get("user_mapping_urls"):
+                st.info("Enter up to 10 URLs above, then click **Map keywords to site** to generate Map URLs for this strategy and dataset.")
+
 
         export_cols = base_cols + ["Strategy","Map URL"]
         export_df = export_df[export_cols]
