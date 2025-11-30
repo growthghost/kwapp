@@ -143,6 +143,11 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--ink) !important; }}
   content:"▾"; position:absolute; right:12px; top:50%; transform:translateY(-50%); color:var(--ink); pointer-events:none; font-size:14px; font-weight:700;
 }}
 
+/* Force visible caret in text_area (URL input) */
+div[data-testid="stTextArea"] textarea {{
+    caret-color: var(--ink) !important;
+}}
+
 /* BLUE labels */
 div[data-testid="stSelectbox"] > label,
 div[data-testid="stNumberInput"] > label,
