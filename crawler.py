@@ -57,20 +57,25 @@ def extract_profile(url: str) -> Dict[str, str]:
         "meta": meta
     }
 
+from typing import List, Dict  # make sure this import is at the top
 
-def fetch_profiles(base_url: str, include_subdomains: bool = True) -> Dict[str, Dict[str, str]]:
+def fetch_profiles(urls: List[str]) -> Dict[str, Dict[str, str]]:
     """
-    Crawl starting from base_url and extract signals for each discovered page.
-    For now, this is a simple version: only fetches the base URL.
-    (Can be expanded later to full crawl.)
+    Fetch and extract signals for a list of URLs.
+    Only the supplied URLs are crawled and eligible for mapping.
     """
-    profiles = {}
+    profiles: Dict[str, Dict[str, str]] = {}
 
-    # Normalize URL
-    if not base_url.startswith("http"):
-        base_url = "https://" + base_url.strip("/")
+    for raw in urls:
+        u = (raw or "").strip()
+        if not u:
+            continue
 
-    # Right now, just fetch the base URL
-    profiles[base_url] = extract_profile(base_url)
+        # Normalize URL (add scheme if missing)
+        if not u.startswith(("http://", "https://")):
+            u = "https://" + u.lstrip("/")
+
+        # Extract profile for this URL
+        profiles[u] = extract_profile(u)
 
     return profiles
