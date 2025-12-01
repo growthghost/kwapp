@@ -1544,8 +1544,6 @@ if uploaded is not None:
         else:
             export_df["Map URL"] = pd.Series([""]*len(export_df), index=export_df.index, dtype="string")
             can_download = False
-            if st.session_state.get("user_mapping_urls"):
-                st.info("Enter up to 10 URLs above, then click **Map keywords to site** to generate Map URLs for this strategy and dataset.")
 
 
         export_cols = base_cols + ["Strategy","Map URL"]
