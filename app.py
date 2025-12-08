@@ -1165,8 +1165,8 @@ def map_keywords_to_urls(
     # slot detection
     def kw_slot_for(text: str) -> str:
         cats = set(categorize_keyword(text))
-        if "VEO" in cats:
-            return "VEO"
+        if "AEO" in cats:
+            return "AEO"
         if "AIO" in cats:
             return "AIO"
         return "SEO"
@@ -1184,15 +1184,15 @@ def map_keywords_to_urls(
         return vol_norm * kd_norm
 
     # Caps per URL (per current strategy run)
-    caps = {"VEO": 1, "AIO": 1, "SEO": 2}
+    caps = {"AEO": 1, "AIO": 1, "SEO": 2}
     per_url_caps: Dict[str, Dict[str, List[int] or Optional[int]]] = {}
     for u in page_urls:
-        per_url_caps[u] = {"VEO": None, "AIO": None, "SEO": []}
+        per_url_caps[u] = {"AEO": None, "AIO": None, "SEO": []}
 
     mapped = {i: "" for i in df.index}
 
     # Prepare eligible ids by slot, sorted by opportunity (desc)
-    ids_by_slot: Dict[str, List[int]] = {"VEO": [], "AIO": [], "SEO": []}
+    ids_by_slot: Dict[str, List[int]] = {"AEO": [], "AIO": [], "SEO": []}
     kw_texts: Dict[int, str] = {}
     for idx, row in df.iterrows():
         vol_val = float(pd.to_numeric(row.get(vol_col, 0), errors="coerce") or 0)
@@ -1202,7 +1202,7 @@ def map_keywords_to_urls(
         kw_texts[idx] = kw_text
         ids_by_slot[kw_slot_for(kw_text)].append(idx)
 
-    for slot_name in ["VEO", "AIO", "SEO"]:
+    for slot_name in ["AEO", "AIO", "SEO"]:
         ids = ids_by_slot[slot_name]
         ids.sort(key=lambda i: (-opportunity(i), i))
 
@@ -1260,7 +1260,7 @@ def map_keywords_to_urls(
                 continue
 
             u = page_urls[chosen_index]
-            if slot_name in {"VEO", "AIO"}:
+            if slot_name in {"AEO", "AIO"}:
                 already = per_url_caps[u][slot_name]
                 if already is None:
                     per_url_caps[u][slot_name] = i
