@@ -1523,7 +1523,7 @@ if uploaded is not None:
             st.session_state["map_ready"] = True
             st.session_state["mapping_running"] = False
             st.success("Strategy applied. Your CSV is ready to download.")
-            st.stop()
+            st.rerun()
         else:
             st.session_state["mapping_running"] = True
             if "map_cache" not in st.session_state:
