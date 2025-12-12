@@ -1497,25 +1497,25 @@ if uploaded is not None:
 
                 st.session_state["map_ready"] = True
 
+    map_btn = False
+    # ---------- Manual mapping / strategy button ----------
+    user_urls_for_btn = st.session_state.get("user_mapping_urls") or ()
+    can_map = len(user_urls_for_btn) > 0
 
-            # ---------- Manual mapping / strategy button ----------
-            user_urls_for_btn = st.session_state.get("user_mapping_urls") or ()
-            can_map = len(user_urls_for_btn) > 0
-
-            if ENABLE_MAPPING:
-                map_btn = st.button(
-                    "Map keywords to site",
-                    type="primary",
-                    disabled=not can_map,
-                    help="Crawls & assigns the best page per keyword for this strategy (only using the URLs you supplied above)."
-                )
-            else:
-                map_btn = st.button(
-                    "Apply Strategy",
-                    type="primary",
-                    disabled=(export_df is None) or export_df.empty,
-                    help="Applies the selected strategy and prepares your file for download."
-                )
+    if ENABLE_MAPPING:
+        map_btn = st.button(
+            "Map keywords to site",
+            type="primary",
+            disabled=not can_map,
+            help="Crawls & assigns the best page per keyword for this strategy (only using the URLs you supplied above)."
+        )
+    else:
+        map_btn = st.button(
+            "Apply Strategy",
+            type="primary",
+            disabled=(export_df is None) or export_df.empty,
+            help="Applies the selected strategy and prepares your file for download."
+        )
 
 
     if map_btn and not st.session_state.get("mapping_running", False):
