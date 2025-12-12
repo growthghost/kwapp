@@ -1563,22 +1563,22 @@ if uploaded is not None:
         export_df.loc[export_df["Eligible"] != "Yes", "Map URL"] = ""
         can_download = True
     else:
-        can_download = True
+        can_download = bool(st.session_state.get("map_ready", False))
 
-        export_cols = base_cols + ["Strategy"]
-        if ENABLE_MAPPING:
-            export_cols += ["Map URL"]
+    export_cols = base_cols + ["Strategy"]
+    if ENABLE_MAPPING:
+        export_cols += ["Map URL"]
 
-        export_df = export_df[export_cols]
+    export_df = export_df[export_cols]
 
-        csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")
-        st.download_button(
-            label="⬇️ Download scored CSV",
-            data=csv_bytes,
-            file_name=f"{filename_base}.csv",
-            mime="text/csv",
-            help="Sorted by eligibility (Yes first), KD ascending, Volume descending",
-            disabled=not can_download
-        )
+    csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")
+    st.download_button(
+        label="⬇️ Download scored CSV",
+        data=csv_bytes,
+        file_name=f"{filename_base}.csv",
+        mime="text/csv",
+        help="Sorted by eligibility (Yes first), KD ascending, Volume descending",
+        disabled=not can_download
+    )
 
 st.markdown("<div class='oiq-footer'>© 2025 OutrankIQ</div>", unsafe_allow_html=True)
