@@ -13,8 +13,6 @@ import streamlit as st
 from datetime import datetime
 from mapping import weighted_map_keywords
 from crawler import fetch_profiles
-ENABLE_MAPPING = False
-
 
 
 # ---------- Optional deps ----------
@@ -1476,55 +1474,36 @@ if uploaded is not None:
             )
 
             # Use new weighted mapping function from mapping.py
-            if ENABLE_MAPPING:
-                results = weighted_map_keywords(export_df, page_signals_by_url)
-            else:
-                results = []
+            results = weighted_map_keywords(export_df, page_signals_by_url)
+
 
             # Apply results back into export_df
-            if results:
-                for res in results:
-                    kw = res.get("keyword", "") or ""
-                    url = res.get("chosen_url", "") or ""
-                    score = res.get("weighted_score", 0)
-                    reasons = res.get("reasons", "")
+            for res in results:
+                kw = res["keyword"]
+                url = res["chosen_url"] or ""
+                score = res.get("weighted_score", 0)
+                reasons = res.get("reasons", "")
 
-                    matches = export_df.index[export_df[KW_COL].fillna("") == kw].tolist()
-                    for i in matches:
-                        export_df.at[i, MAPPED_URL_COL] = url
-                        export_df.at[i, "Weighted Score"] = score
-                        export_df.at[i, "Mapping Reasons"] = reasons
+                # Always apply mapping results (whether URL is found or not)
+                matches = export_df.index[export_df["Keyword"] == kw].tolist()
+                for i in matches:
+                    export_df.at[i, MAPPED_URL_COL] = url
+                    export_df.at[i, "Weighted Score"] = score
+                    export_df.at[i, "Mapping Reasons"] = reasons
 
-                st.session_state["map_ready"] = True
-
-    map_btn = False
-    # ---------- Manual mapping / strategy button ----------
-    user_urls_for_btn = st.session_state.get("user_mapping_urls") or ()
-    can_map = len(user_urls_for_btn) > 0
-
-    if ENABLE_MAPPING:
-        map_btn = st.button(
-            "Map keywords to site",
-            type="primary",
-            disabled=not can_map,
-            help="Crawls & assigns the best page per keyword for this strategy (only using the URLs you supplied above)."
-        )
-    else:
-        map_btn = st.button(
-            "Apply Strategy",
-            type="primary",
-            disabled=(export_df is None) or export_df.empty,
-            help="Applies the selected strategy and prepares your file for download."
-        )
-
-
-    if map_btn and not st.session_state.get("mapping_running", False):
-        if not ENABLE_MAPPING:
             st.session_state["map_ready"] = True
-            st.session_state["mapping_running"] = False
-            st.success("Strategy applied. Your CSV is ready to download.")
-            st.rerun()
-        else:
+
+            # ---------- Manual mapping button ----------
+            user_urls_for_btn = st.session_state.get("user_mapping_urls") or ()
+            can_map = len(user_urls_for_btn) > 0
+            map_btn = st.button(
+                "Map keywords to site",
+                type="primary",
+                disabled=not can_map,
+                help="Crawls & assigns the best page per keyword for this strategy (only using the URLs you supplied above)."
+            )
+
+        if map_btn and not st.session_state.get("mapping_running", False):
             st.session_state["mapping_running"] = True
             if "map_cache" not in st.session_state:
                 st.session_state["map_cache"] = {}
@@ -1538,7 +1517,7 @@ if uploaded is not None:
                 """,
                 unsafe_allow_html=True,
             )
-            with st.spinner("Applying strategy…"):
+            with st.spinner("Crawling & matching keywords…"):
                 cache = st.session_state["map_cache"]
                 if curr_signature in cache and len(cache[curr_signature]) == len(export_df):
                     map_series = pd.Series(cache[curr_signature], index=export_df.index, dtype="string")
@@ -1556,29 +1535,28 @@ if uploaded is not None:
             loader.empty()
             st.session_state["mapping_running"] = False
 
-    # ---------- Build CSV for download ----------
-    if ENABLE_MAPPING and st.session_state.get("map_ready") and st.session_state.get("map_signature") == curr_signature:
-        export_df["Map URL"] = st.session_state["map_result"]
-        # Do not show a URL where row is not eligible
-        export_df.loc[export_df["Eligible"] != "Yes", "Map URL"] = ""
-        can_download = True
-    else:
-        can_download = bool(st.session_state.get("map_ready", False))
+        # ---------- Build CSV for download ----------
+        if st.session_state.get("map_ready") and st.session_state.get("map_signature") == curr_signature:
+            export_df["Map URL"] = st.session_state["map_result"]
+            # Do not show a URL where row is not eligible
+            export_df.loc[export_df["Eligible"] != "Yes", "Map URL"] = ""
+            can_download = True
+        else:
+            export_df["Map URL"] = pd.Series([""]*len(export_df), index=export_df.index, dtype="string")
+            can_download = False
 
-    export_cols = base_cols + ["Strategy"]
-    if ENABLE_MAPPING:
-        export_cols += ["Map URL"]
 
-    export_df = export_df[export_cols]
+        export_cols = base_cols + ["Strategy","Map URL"]
+        export_df = export_df[export_cols]
 
-    csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")
-    st.download_button(
-        label="⬇️ Download scored CSV",
-        data=csv_bytes,
-        file_name=f"{filename_base}.csv",
-        mime="text/csv",
-        help="Sorted by eligibility (Yes first), KD ascending, Volume descending",
-        disabled=not can_download
-    )
+        csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")
+        st.download_button(
+            label="⬇️ Download scored CSV",
+            data=csv_bytes,
+            file_name=f"{filename_base}.csv",
+            mime="text/csv",
+            help="Sorted by eligibility (Yes first), KD ascending, Volume descending",
+            disabled=not can_download
+        )
 
 st.markdown("<div class='oiq-footer'>© 2025 OutrankIQ</div>", unsafe_allow_html=True)
