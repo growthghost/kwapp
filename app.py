@@ -1556,18 +1556,19 @@ if uploaded is not None:
             loader.empty()
             st.session_state["mapping_running"] = False
 
-        # ---------- Build CSV for download ----------
-        if st.session_state.get("map_ready") and st.session_state.get("map_signature") == curr_signature:
-            export_df["Map URL"] = st.session_state["map_result"]
-            # Do not show a URL where row is not eligible
-            export_df.loc[export_df["Eligible"] != "Yes", "Map URL"] = ""
-            can_download = True
-        else:
-            export_df["Map URL"] = pd.Series([""]*len(export_df), index=export_df.index, dtype="string")
-            can_download = False
+    # ---------- Build CSV for download ----------
+    if ENABLE_MAPPING and st.session_state.get("map_ready") and st.session_state.get("map_signature") == curr_signature:
+        export_df["Map URL"] = st.session_state["map_result"]
+        # Do not show a URL where row is not eligible
+        export_df.loc[export_df["Eligible"] != "Yes", "Map URL"] = ""
+        can_download = True
+    else:
+        can_download = True
 
+        export_cols = base_cols + ["Strategy"]
+        if ENABLE_MAPPING:
+            export_cols += ["Map URL"]
 
-        export_cols = base_cols + ["Strategy","Map URL"]
         export_df = export_df[export_cols]
 
         csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")
