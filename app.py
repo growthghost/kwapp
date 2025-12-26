@@ -11,7 +11,7 @@ from urllib.parse import urlparse, urljoin
 import pandas as pd
 import streamlit as st
 from datetime import datetime
-from mapping import weighted_map_keywords
+from mapping import run_mapping
 from crawler import fetch_profiles
 
 
@@ -1088,6 +1088,7 @@ def cached_fetch_profiles(urls: Tuple[str, ...]) -> List[Dict]:
     return _fetch_profiles(list(urls))
 
 # ---------- Mapping (UNWEIGHTED overlap with exact-phrase precedence) ----------
+""""""
 def map_keywords_to_urls(
     df: pd.DataFrame,
     kw_col: Optional[str],
@@ -1185,7 +1186,7 @@ def map_keywords_to_urls(
 
     # Caps per URL (per current strategy run)
     caps = {"AEO": 1, "AIO": 1, "SEO": 2}
-    per_url_caps: Dict[str, Dict[str, List[int] or Optional[int]]] = {}
+    per_url_caps = {}
     for u in page_urls:
         per_url_caps[u] = {"AEO": None, "AIO": None, "SEO": []}
 
@@ -1474,22 +1475,16 @@ if uploaded is not None:
             )
 
             # Use new weighted mapping function from mapping.py
-            results = weighted_map_keywords(export_df, page_signals_by_url)
+            export_df = run_mapping(
+                df=export_df,
+                page_signals_by_url=page_signals_by_url
+            )
 
 
-            # Apply results back into export_df
-            for res in results:
-                kw = res["keyword"]
-                url = res["chosen_url"] or ""
-                score = res.get("weighted_score", 0)
-                reasons = res.get("reasons", "")
 
-                # Always apply mapping results (whether URL is found or not)
-                matches = export_df.index[export_df["Keyword"] == kw].tolist()
-                for i in matches:
-                    export_df.at[i, MAPPED_URL_COL] = url
-                    export_df.at[i, "Weighted Score"] = score
-                    export_df.at[i, "Mapping Reasons"] = reasons
+            
+
+                
 
             st.session_state["map_ready"] = True
 
