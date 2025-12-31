@@ -1119,14 +1119,7 @@ def cached_discover_and_sources(base_url: str, include_subdomains: bool, use_sit
 def cached_fetch_profiles(urls: Tuple[str, ...]) -> List[Dict]:
     return _fetch_profiles(list(urls))
 
-# ---------- Mapping (UNWEIGHTED overlap with exact-phrase precedence) ----------
-""""""
-def map_keywords_to_urls(
-    df: pd.DataFrame,
-    kw_col: Optional[str],
-    vol_col: str,
-    kd_col: str,
-) -> pd.Series:
+    
     """
     Map keywords to URLs using ONLY the user-supplied URLs (max 10).
     """
@@ -1512,10 +1505,6 @@ if uploaded is not None:
                 page_signals_by_url=page_signals_by_url
             )
 
-
-
-            
-
                 
 
             st.session_state["map_ready"] = True
@@ -1532,39 +1521,17 @@ if uploaded is not None:
 
         if map_btn and not st.session_state.get("mapping_running", False):
             st.session_state["mapping_running"] = True
-            if "map_cache" not in st.session_state:
-                st.session_state["map_cache"] = {}
-            loader = st.empty()
-            loader.markdown(
-                """
-                <div class="oiq-loader">
-                  <div class="oiq-spinner"></div>
-                  <div class="oiq-loader-text">Mapping keywords to your site…</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            with st.spinner("Crawling & matching keywords…"):
-                cache = st.session_state["map_cache"]
-                if curr_signature in cache and len(cache[curr_signature]) == len(export_df):
-                    map_series = pd.Series(cache[curr_signature], index=export_df.index, dtype="string")
-                else:
-                    map_series = map_keywords_to_urls(
-                        export_df,
-                        kw_col=kw_col,
-                        vol_col=vol_col,
-                        kd_col=kd_col,
-                    )
-                    cache[curr_signature] = map_series.fillna("").astype(str).tolist()
-                st.session_state["map_result"] = map_series
-                st.session_state["map_signature"] = curr_signature
-                st.session_state["map_ready"] = True
-            loader.empty()
+
+        with st.spinner("Crawling & matching keywords…"):
+            export_df = run_mapping(export_df, page_signals_by_url)
+            st.session_state["mapped_df"] = export_df
+            st.session_state["map_ready"] = True
+
             st.session_state["mapping_running"] = False
+
 
         # ---------- Build CSV for download ----------
         if st.session_state.get("map_ready") and st.session_state.get("map_signature") == curr_signature:
-            export_df["Map URL"] = st.session_state["map_result"]
             # Do not show a URL where row is not eligible
             export_df.loc[export_df["Eligible"] != "Yes", "Map URL"] = ""
             can_download = True
