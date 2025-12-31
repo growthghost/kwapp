@@ -435,19 +435,51 @@ def calculate_score(volume: float, kd: float) -> int:
 
 def add_scoring_columns(df: pd.DataFrame, volume_col: str, kd_col: str, kw_col: Optional[str]) -> pd.DataFrame:
     out = df.copy()
-    def _eligibility_reason(vol,kd):
-        if pd.isna(vol) or pd.isna(kd): return "No","Invalid Volume/KD"
-        if vol < MIN_VALID_VOLUME: return "No", f"Below min volume for {scoring_mode} ({MIN_VALID_VOLUME})"
-        return "Yes",""
-    eligible, reason = zip(*(_eligibility_reason(v,k) for v,k in zip(out[volume_col], out[kd_col])))
-    out["Eligible"] = list(eligible); out["Reason"] = list(reason)
-    out["Score"] = [calculate_score(v,k) for v,k in zip(out[volume_col], out[kd_col])]
-    out["Tier"]  = out["Score"].map(LABEL_MAP).fillna("Not rated")
-    kw_series = out[kw_col] if kw_col else pd.Series([""]*len(out), index=out.index)
+
+    # 1️⃣ Calculate Score FIRST (strategy-aware via KD_BUCKETS)
+    out["Score"] = [
+        calculate_score(v, k)
+        for v, k in zip(out[volume_col], out[kd_col])
+    ]
+
+    # 2️⃣ Eligibility now hard-gated by Score
+    def _eligibility_reason(vol, kd, score):
+        if pd.isna(vol) or pd.isna(kd):
+            return "No", "Invalid Volume/KD"
+        if vol < MIN_VALID_VOLUME:
+            return "No", f"Below min volume for {scoring_mode} ({MIN_VALID_VOLUME})"
+        if score <= 0:
+            return "No", f"KD outside {scoring_mode} thresholds"
+        return "Yes", ""
+
+    eligible, reason = zip(*(
+        _eligibility_reason(v, k, s)
+        for v, k, s in zip(out[volume_col], out[kd_col], out["Score"])
+    ))
+
+    out["Eligible"] = list(eligible)
+    out["Reason"]   = list(reason)
+
+    # 3️⃣ Tier remains unchanged
+    out["Tier"] = out["Score"].map(LABEL_MAP).fillna("Not rated")
+
+    # 4️⃣ Category logic unchanged
+    kw_series = out[kw_col] if kw_col else pd.Series([""] * len(out), index=out.index)
     out["Category"] = [", ".join(categorize_keyword(str(k))) for k in kw_series]
-    ordered = ([kw_col] if kw_col else []) + [volume_col, kd_col, "Score","Tier","Eligible","Reason","Category"]
+
+    ordered = ([kw_col] if kw_col else []) + [
+        volume_col,
+        kd_col,
+        "Score",
+        "Tier",
+        "Eligible",
+        "Reason",
+        "Category",
+    ]
+
     remaining = [c for c in out.columns if c not in ordered]
     return out[ordered + remaining]
+
 
 # ---------- Tokenization & normalization ----------
 TOKEN_RE = re.compile(r"[a-z0-9]+", re.I)
