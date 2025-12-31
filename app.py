@@ -1378,6 +1378,15 @@ if url_text.strip():
 # Store in session_state for later use (mapping + signature)
 st.session_state["user_mapping_urls"] = tuple(urls)
 
+# ---------- STEP 3: Crawl user-supplied URLs ----------
+page_signals_by_url = {}
+
+user_urls = st.session_state.get("user_mapping_urls") or ()
+if user_urls:
+    page_signals_by_url = fetch_profiles(list(user_urls))
+    st.session_state["crawl_signals"] = page_signals_by_url
+
+
 # CSV upload control
 uploaded = st.file_uploader("Upload CSV", type=["csv"])
 
@@ -1512,22 +1521,13 @@ if uploaded is not None:
             # ---------- Manual mapping button ----------
             user_urls_for_btn = st.session_state.get("user_mapping_urls") or ()
             can_map = len(user_urls_for_btn) > 0
+
             map_btn = st.button(
                 "Map keywords to site",
                 type="primary",
                 disabled=not can_map,
                 help="Crawls & assigns the best page per keyword for this strategy (only using the URLs you supplied above)."
             )
-
-        if map_btn and not st.session_state.get("mapping_running", False):
-            st.session_state["mapping_running"] = True
-
-        with st.spinner("Crawling & matching keywords…"):
-            export_df = run_mapping(export_df, page_signals_by_url)
-            st.session_state["mapped_df"] = export_df
-            st.session_state["map_ready"] = True
-
-            st.session_state["mapping_running"] = False
 
 
         # ---------- Build CSV for download ----------
