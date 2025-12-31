@@ -1508,16 +1508,7 @@ if uploaded is not None:
                 or {}
             )
 
-            # Use new weighted mapping function from mapping.py
-            export_df = run_mapping(
-                df=export_df,
-                page_signals_by_url=page_signals_by_url
-            )
-
-                
-
-            st.session_state["map_ready"] = True
-
+            
             # ---------- Manual mapping button ----------
             user_urls_for_btn = st.session_state.get("user_mapping_urls") or ()
             can_map = len(user_urls_for_btn) > 0
@@ -1528,10 +1519,25 @@ if uploaded is not None:
                 disabled=not can_map,
                 help="Crawls & assigns the best page per keyword for this strategy (only using the URLs you supplied above)."
             )
+            if map_btn and not st.session_state.get("mapping_running", False):
+                st.session_state["mapping_running"] = True
+
+            with st.spinner("Crawling & matching keywords…"):
+                export_df = run_mapping(
+                    df=export_df,
+                    page_signals_by_url=page_signals_by_url
+                )
+
+                st.session_state["mapped_df"] = export_df
+                st.session_state["map_ready"] = True
+
+        st.session_state["mapping_running"] = False
 
 
         # ---------- Build CSV for download ----------
-        if st.session_state.get("map_ready") and st.session_state.get("map_signature") == curr_signature:
+        if st.session_state.get("map_ready"):
+            export_df = st.session_state.get("mapped_df", export_df)
+
             # Do not show a URL where row is not eligible
             export_df.loc[export_df["Eligible"] != "Yes", "Map URL"] = ""
             can_download = True
