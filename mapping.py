@@ -252,8 +252,9 @@ def _distinctive_tokens(keyword: str) -> Set[str]:
 
 def passes_distinctive_gate(keyword: str, signals: Dict[str, str]) -> bool:
     distinct = _distinctive_tokens(keyword)
-    if len(distinct) < MIN_DISTINCTIVE_TOKENS_TO_GATE:
+    if not distinct:
         return True
+
 
     page_tokens = (
         _token_set(signals.get("slug", "") or "")
