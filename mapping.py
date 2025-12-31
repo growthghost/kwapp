@@ -85,6 +85,41 @@ def tokenize(text: str) -> List[str]:
 def _token_set(text: str) -> Set[str]:
     return set(tokenize(text))
 
+# ---------- Site Vocabulary Gate ----------
+
+def build_site_vocabulary(page_signals_by_url: Dict[str, Dict[str, str]]) -> Set[str]:
+    """
+    Build a site-wide vocabulary from all crawled page signals.
+    """
+    vocab: Set[str] = set()
+
+    for signals in page_signals_by_url.values():
+        for field in ("slug", "title", "h1", "h2", "h3"):
+            text = signals.get(field, "")
+            if not text:
+                continue
+            vocab.update(_token_set(text))
+
+    return vocab
+
+
+def keyword_in_site_vocab(keyword: str, site_vocab: Set[str]) -> bool:
+    """
+    Keyword passes if it shares at least one distinctive, non-generic token
+    with the site vocabulary.
+    """
+    distinct = {
+        t for t in _token_set(keyword)
+        if t not in STOPWORDS
+        and t not in GENERIC_TOKENS
+        and not t.isdigit()
+    }
+
+    # If keyword has no distinctive tokens, don't block it here
+    if not distinct:
+        return True
+
+    return bool(distinct & site_vocab)
 
 # ---------- URL depth helper ----------
 def url_depth(url: str) -> int:
@@ -337,6 +372,8 @@ def run_mapping(
 
     if not page_signals_by_url:
         return df
+    site_vocab = build_site_vocabulary(page_signals_by_url)
+
 
     # Precompute URL types once
     url_type_by_url: Dict[str, str] = {
@@ -377,6 +414,10 @@ def run_mapping(
 
             # Gate first to avoid generic-only matches
             if not passes_distinctive_gate(kw, signals):
+                continue
+
+            # 🔒 Site vocabulary gate (topical boundary)
+            if not keyword_in_site_vocab(kw, site_vocab):
                 continue
 
             base = structural_score(kw, signals)
