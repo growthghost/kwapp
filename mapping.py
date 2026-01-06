@@ -1,464 +1,278 @@
-# mapping.py
-# Structural scoring model with intent + URL-type containers (staged selection)
-# - Uses slug/title/H1/H2/H3 for scoring
-# - Adds:
-#     * Keyword intent detection (NAV/INFO/TRANS/COMMERCIAL)
-#     * URL type detection (HOME/HUB/CONTENT/ACTION/OTHER)
-#     * Intent → URL-type preference bonus (soft staging)
-#     * Distinctive-token gate: prevents mappings driven only by generic tokens
-#
-# STEP B1–B3 (Mapping Improvements; NO UI changes):
-#   ✅ Global keyword uniqueness (keyword used only once across all URLs)
-#   ✅ Per-URL caps: AEO=1, AIO=1, SEO=2
-#   ✅ Fill order per URL: AEO → AIO → SEO → SEO
-#
-# NOTE: This function writes Map URL directly onto df and returns df.
+### START mapping.py — PART 1 / 4
 
-import pandas as pd
 import re
-from typing import Dict, List, Set, Tuple, Optional
+from typing import Dict, List, Set, Tuple
+from collections import defaultdict
+import pandas as pd
 
+TOKEN_RE = re.compile(r"[a-z0-9]+", re.I)
 
-# ---------- Structural Weights ----------
-WEIGHTS = {
-    "slug": 6,
-    "title": 5,
-    "h1": 5,
-    "h2h3": 5,
-}
-
-# ---------- Threshold and Bonuses ----------
-THRESHOLD = 3  # must reach or exceed this to map
-BONUS_URL_TITLE = 5
-BONUS_TITLE_H1 = 10
-BONUS_H2H3_ANY = 15
-
-TOKENIZER = re.compile(r"[a-zA-Z0-9]+")
-
-# ---------- Intent & URL-Type Constants ----------
-INTENT_NAVIGATIONAL = "NAVIGATIONAL"
-INTENT_INFORMATIONAL = "INFORMATIONAL"
-INTENT_TRANSACTIONAL = "TRANSACTIONAL"
-INTENT_COMMERCIAL = "COMMERCIAL"
-
-URL_TYPE_HOME = "HOME"
-URL_TYPE_HUB = "HUB"
-URL_TYPE_CONTENT = "CONTENT"
-URL_TYPE_ACTION = "ACTION"
-URL_TYPE_OTHER = "OTHER"
-
-
-# ---------- Intent -> URL Type Priority (soft staged preference) ----------
-INTENT_URLTYPE_PRIORITY: Dict[str, List[str]] = {
-    INTENT_NAVIGATIONAL:  [URL_TYPE_HOME, URL_TYPE_HUB, URL_TYPE_CONTENT, URL_TYPE_ACTION, URL_TYPE_OTHER],
-    INTENT_INFORMATIONAL: [URL_TYPE_CONTENT, URL_TYPE_HUB, URL_TYPE_OTHER, URL_TYPE_ACTION],  # ACTION last for INFO
-    INTENT_TRANSACTIONAL: [URL_TYPE_ACTION, URL_TYPE_HUB, URL_TYPE_CONTENT, URL_TYPE_OTHER],
-    INTENT_COMMERCIAL:    [URL_TYPE_CONTENT, URL_TYPE_HUB, URL_TYPE_OTHER, URL_TYPE_ACTION],
-}
-
-# ---------- Generic/Stop Tokens (Distinctive Token Gate) ----------
 STOPWORDS = {
-    "a", "an", "and", "are", "as", "at", "be", "by", "can", "could", "do", "does", "did", "for",
-    "from", "get", "how", "i", "in", "into", "is", "it", "its", "me", "my", "of", "on", "or",
-    "our", "the", "their", "then", "there", "they", "this", "to", "up", "was", "we", "what",
-    "when", "where", "which", "who", "why", "will", "with", "you", "your",
-    "need", "needed", "make", "creating", "create",
+    "the","and","for","to","a","an","of","with","in","on","at","by","from",
+    "is","are","be","can","should","how","what","who","where","why","when",
+    "me","you","us","our","your","we","it","they","them"
 }
 
-GENERIC_TOKENS = {
-    "home", "homepage", "official", "site", "website",
-    "community", "resources", "resource", "services", "service", "program", "programs",
-    "support", "help", "information", "about", "contact",
-    "who", "what", "where", "how", "why",
-    "give", "giving", "donate", "donation", "donations", "ways",
-    "advocacy",
-    "benefits", "benefit",
-}
+# -------------------------------
+# Keyword tokenization
+# -------------------------------
 
-MIN_DISTINCTIVE_TOKENS_TO_GATE = 1
-
-
-# ---------- Tokenization ----------
-def tokenize(text: str) -> List[str]:
-    return TOKENIZER.findall(text.lower()) if text else []
-
-def _token_set(text: str) -> Set[str]:
-    return set(tokenize(text))
-
-# ---------- Site Vocabulary Gate ----------
-
-def build_site_vocabulary(page_signals_by_url: Dict[str, Dict[str, str]]) -> Set[str]:
-    """
-    Build a site-wide vocabulary from all crawled page signals.
-    """
-    vocab: Set[str] = set()
-
-    for signals in page_signals_by_url.values():
-        for field in ("slug", "title", "h1", "h2", "h3"):
-            text = signals.get(field, "")
-            if not text:
-                continue
-            vocab.update(_token_set(text))
-
-    return vocab
-
-
-def keyword_in_site_vocab(keyword: str, site_vocab: Set[str]) -> bool:
-    """
-    Keyword passes if it shares at least one distinctive, non-generic token
-    with the site vocabulary.
-    """
-    distinct = {
-        t for t in _token_set(keyword)
-        if t not in STOPWORDS
-        and t not in GENERIC_TOKENS
-        and not t.isdigit()
+def _tokenize(text: str) -> Set[str]:
+    if not isinstance(text, str):
+        return set()
+    return {
+        t.lower()
+        for t in TOKEN_RE.findall(text.lower())
+        if t.lower() not in STOPWORDS
     }
 
-    # If keyword has no distinctive tokens, don't block it here
-    if not distinct:
-        return True
+# -------------------------------
+# Intent slot detection
+# -------------------------------
 
-    return bool(distinct & site_vocab)
+AEO_PAT = re.compile(
+    r"^(who|what|when|where|why|how|can|should|is|are|do|does|did|will)\\b",
+    re.I,
+)
 
-# ---------- URL depth helper ----------
-def url_depth(url: str) -> int:
-    parts = [p for p in url.strip("/").split("/") if p]
-    return len(parts)
+AIO_PAT = re.compile(
+    r"(what is|definition|meaning|guide|overview|explain|examples|types of)",
+    re.I,
+)
 
-
-# ---------- Keyword Intent ----------
-def detect_intent(keyword: str) -> str:
-    """
-    Detect high-level search intent from the keyword text.
-    Order of checks:
-      1) Navigational
-      2) Transactional
-      3) Commercial
-      4) Default to Informational
-    """
-    kw = (keyword or "").strip().lower()
-
-    nav_terms = [
-        " login", " log in", "homepage", "home page", "official site",
-        " website", ".com", ".org", ".net", " contact", " about us",
-        " about ", " careers", " jobs at ",
-    ]
-    if any(term in kw for term in nav_terms):
-        return INTENT_NAVIGATIONAL
-
-    trans_terms = [
-        "buy ", " buy", "purchase", "order ", " order", "sign up", "signup", "register",
-        "apply", "enroll", "book ", " book", "schedule", "donate", "give now",
-        "get quote", "request quote", "estimate", "get started",
-    ]
-    if any(term in kw for term in trans_terms):
-        return INTENT_TRANSACTIONAL
-
-    comm_terms = [
-        "best ", " top ", " vs ", " versus ", "review", "reviews",
-        "compare ", " comparison", "pricing", "price of", "cost of",
-        "cheap ", "affordable ",
-    ]
-    if any(term in kw for term in comm_terms):
-        return INTENT_COMMERCIAL
-
-    return INTENT_INFORMATIONAL
-
-
-# ---------- URL Type Detection ----------
-def _normalize_path(url: str) -> str:
-    raw = (url or "").strip()
-    path = re.sub(r"^https?://[^/]+", "", raw)
-    if not path:
-        path = "/"
-    if not path.startswith("/"):
-        path = "/" + path
-    return path
-
-
-def classify_url_type(url: str, signals: Dict[str, str]) -> str:
-    """
-    Classify a URL into one of: HOME, ACTION, HUB, CONTENT, OTHER.
-    Rule priority: HOME > ACTION > HUB > CONTENT > OTHER.
-    """
-    path = _normalize_path(url)
-    path_lower = path.lower()
-
-    title = (signals.get("title") or "").lower()
-    h1 = (signals.get("h1") or "").lower()
-
-    # HOME
-    if path == "/" or path == "":
-        return URL_TYPE_HOME
-
-    # ACTION pages
-    action_terms = [
-        "apply", "donate", "contact", "login", "log-in", "sign-up", "signup",
-        "checkout", "book", "schedule", "register", "quote", "get-quote",
-        "get_quote",
-    ]
-    if (
-        any(t in path_lower for t in action_terms)
-        or any(t in title for t in action_terms)
-        or any(t in h1 for t in action_terms)
-    ):
-        return URL_TYPE_ACTION
-
-    segments = [p for p in path.strip("/").split("/") if p]
-    last_seg = segments[-1].lower() if segments else ""
-
-    hub_like_terms = {
-        "services", "service", "products", "product", "solutions", "programs",
-        "resources", "blog", "news", "locations", "benefits",
-        "about", "who-we-are", "what-we-do", "ways-to-give",
-        "contact", "advocacy",
-    }
-    if len(segments) <= 2:
-        if last_seg in hub_like_terms:
-            return URL_TYPE_HUB
-        sectionish = (
-            ("services" in title or "services" in h1 or "about" in title or "about" in h1
-             or "resources" in title or "resources" in h1 or "programs" in title or "programs" in h1
-             or "advocacy" in title or "advocacy" in h1)
-        )
-        if sectionish and last_seg and last_seg.count("-") <= 3:
-            return URL_TYPE_HUB
-
-    content_terms = [
-        "blog", "article", "articles", "guide", "guides", "how-to", "how_to",
-        "case-study", "case_study", "faq", "faqs", "insights",
-    ]
-    if (
-        any(t in path_lower for t in content_terms)
-        or any(t in title for t in content_terms)
-        or any(t in h1 for t in content_terms)
-    ):
-        return URL_TYPE_CONTENT
-
-    if len(segments) >= 2:
-        return URL_TYPE_CONTENT
-    if len(segments) == 1 and last_seg:
-        return URL_TYPE_CONTENT
-
-    return URL_TYPE_OTHER
-
-
-# ---------- Distinctive Token Gate ----------
-def _distinctive_tokens(keyword: str) -> Set[str]:
-    kw_tokens = _token_set(keyword)
-    return {t for t in kw_tokens if t not in STOPWORDS and t not in GENERIC_TOKENS and not t.isdigit()}
-
-
-def passes_distinctive_gate(keyword: str, signals: Dict[str, str]) -> bool:
-    distinct = _distinctive_tokens(keyword)
-    if not distinct:
-        return True
-
-
-    page_tokens = (
-        _token_set(signals.get("slug", "") or "")
-        | _token_set(signals.get("title", "") or "")
-        | _token_set(signals.get("h1", "") or "")
-        | _token_set(signals.get("h2", "") or "")
-        | _token_set(signals.get("h3", "") or "")
-    )
-    return bool(distinct & page_tokens)
-
-
-# ---------- Structural Scoring ----------
-def structural_score(keyword: str, signals: Dict[str, str]) -> int:
-    kw_tokens = _token_set(keyword)
-    score = 0
-    matched_fields = set()
-
-    slug = signals.get("slug", "") or ""
-    title = signals.get("title", "") or ""
-    h1 = signals.get("h1", "") or ""
-    h2 = signals.get("h2", "") or ""
-    h3 = signals.get("h3", "") or ""
-
-    slug_tokens = _token_set(slug)
-    slug_overlap = kw_tokens & slug_tokens
-    if slug_overlap:
-        score += WEIGHTS["slug"] * len(slug_overlap)
-        matched_fields.add("slug")
-
-    title_tokens = _token_set(title)
-    title_overlap = kw_tokens & title_tokens
-    if title_overlap:
-        score += WEIGHTS["title"] * len(title_overlap)
-        matched_fields.add("title")
-
-    h1_tokens = _token_set(h1)
-    h1_overlap = kw_tokens & h1_tokens
-    if h1_overlap:
-        score += WEIGHTS["h1"] * len(h1_overlap)
-        matched_fields.add("h1")
-
-    h2h3_tokens = _token_set(h2) | _token_set(h3)
-    h2h3_overlap = kw_tokens & h2h3_tokens
-    if h2h3_overlap:
-        score += WEIGHTS["h2h3"] * len(h2h3_overlap)
-        matched_fields.add("h2h3")
-
-    if "slug" in matched_fields and "title" in matched_fields:
-        score += BONUS_URL_TITLE
-    if "title" in matched_fields and "h1" in matched_fields:
-        score += BONUS_TITLE_H1
-    if "h2h3" in matched_fields and ({"slug", "title", "h1"} & matched_fields):
-        score += BONUS_H2H3_ANY
-
-    return int(round(score))
-
-
-# ---------- Slot selection helpers ----------
-def _is_yes(val: object) -> bool:
-    return str(val or "").strip().lower() == "yes"
-
-
-def _primary_slot_from_category(category: str) -> str:
-    """
-    Each keyword must serve one slot type for mapping.
-    Priority: AEO > AIO > SEO.
-    Category can be like: "SEO, GEO, AEO" or "SEO" etc.
-    """
-    c = (category or "").upper()
-    if "AEO" in c:
+def keyword_slot(keyword: str) -> str:
+    if not isinstance(keyword, str):
+        return "SEO"
+    text = keyword.strip().lower()
+    if AEO_PAT.search(text):
         return "AEO"
-    if "AIO" in c:
+    if AIO_PAT.search(text):
         return "AIO"
     return "SEO"
 
+### END mapping.py — PART 1 / 4
 
-def _intent_urltype_bonus(intent: str, url_type: str) -> int:
+### START mapping.py — PART 2 / 4
+
+# -------------------------------
+# Page token construction
+# -------------------------------
+
+def build_page_tokens(page_signals_by_url: Dict[str, Dict]) -> Tuple[
+    List[str],                 # page_urls
+    List[Set[str]],             # page_token_sets
+    Dict[str, bool],            # veo_ready flags
+]:
     """
-    Soft preference bonus based on intent URL-type priority rank.
-    Earlier types get a small bonus. Does NOT override structural mismatch.
+    Build clean, structural-only token sets per page.
     """
-    priority = INTENT_URLTYPE_PRIORITY.get(intent, INTENT_URLTYPE_PRIORITY[INTENT_INFORMATIONAL])
-    if url_type not in priority:
-        return 0
-    rank = priority.index(url_type)  # 0 is best
-    # Simple decreasing bonus: 8,6,4,2,0 ...
-    return max(0, 8 - (rank * 2))
+    page_urls: List[str] = []
+    page_token_sets: List[Set[str]] = []
+    veo_ready: Dict[str, bool] = {}
+
+    for url, sig in page_signals_by_url.items():
+        tokens = set()
+
+        # STRICTLY structural signals from crawler
+        tokens |= set(sig.get("slug_tokens", []))
+        tokens |= set(sig.get("title_tokens", []))
+        tokens |= set(sig.get("h1_tokens", []))
+        tokens |= set(sig.get("h2h3_tokens", []))
+        tokens |= set(sig.get("meta_tokens", []))
+
+        if not tokens:
+            continue
+
+        page_urls.append(url)
+        page_token_sets.append(tokens)
+        veo_ready[url] = bool(sig.get("veo_ready", False))
+
+    return page_urls, page_token_sets, veo_ready
 
 
-# ==========================================================
-# 🔑 SINGLE ENTRY POINT USED BY APP.PY
-# ==========================================================
+# -------------------------------
+# Inverted index
+# -------------------------------
+
+def build_inverted_index(page_token_sets: List[Set[str]]) -> Dict[str, Set[int]]:
+    """
+    token -> set(page indices)
+    """
+    index: Dict[str, Set[int]] = defaultdict(set)
+    for i, toks in enumerate(page_token_sets):
+        for t in toks:
+            index[t].add(i)
+    return index
+
+### END mapping.py — PART 2 / 4
+
+### START mapping.py — PART 3 / 4
+
+# -------------------------------
+# Candidate scoring
+# -------------------------------
+
+def score_keyword_against_pages(
+    kw_tokens: Set[str],
+    page_token_sets: List[Set[str]],
+    inv_index: Dict[str, Set[int]],
+) -> List[Tuple[int, float, int]]:
+    """
+    Returns list of:
+      (page_index, coverage, overlap)
+    """
+    if not kw_tokens:
+        return []
+
+    # Candidate pages via inverted index
+    candidate_pages: Set[int] = set()
+    for t in kw_tokens:
+        candidate_pages |= inv_index.get(t, set())
+
+    scored: List[Tuple[int, float, int]] = []
+
+    for pi in candidate_pages:
+        page_tokens = page_token_sets[pi]
+        overlap_tokens = kw_tokens & page_tokens
+        if not overlap_tokens:
+            continue
+
+        overlap = len(overlap_tokens)
+        coverage = overlap / max(1, len(kw_tokens))
+
+        scored.append((pi, coverage, overlap))
+
+    return scored
+
+
+def rank_candidates(
+    candidates: List[Tuple[int, float, int]],
+    page_urls: List[str],
+) -> List[int]:
+    """
+    Deterministic ranking:
+    1. coverage DESC
+    2. overlap DESC
+    3. URL depth ASC
+    4. URL string ASC
+    """
+    def url_depth(u: str) -> int:
+        return len([p for p in u.split("/") if p])
+
+    ranked = sorted(
+        candidates,
+        key=lambda x: (
+            -x[1],                    # coverage
+            -x[2],                    # overlap
+            url_depth(page_urls[x[0]]),
+            page_urls[x[0]],
+        )
+    )
+
+    return [pi for pi, _, _ in ranked]
+
+### END mapping.py — PART 3 / 4
+
+### START mapping.py — PART 4 / 4
+
+# -------------------------------
+# Slot enforcement + assignment
+# -------------------------------
+
+SLOT_LIMITS = {
+    "SEO": 2,
+    "AIO": 1,
+    "AEO": 1,
+}
+
 def run_mapping(
     df: pd.DataFrame,
-    page_signals_by_url: Dict[str, Dict[str, str]],
+    page_signals_by_url: Dict[str, Dict],
 ) -> pd.DataFrame:
     """
-    Mapping engine (no UI changes):
-      - Uses Eligible == Yes as the candidate pool
-      - Assigns up to 4 keywords per URL: AEO=1, AIO=1, SEO=2
-      - Enforces global uniqueness: a keyword row can only be assigned once total
-      - Fill order per URL: AEO → AIO → SEO → SEO
-
-    Writes "Map URL" directly onto df and returns df.
-
-    Required columns in df:
-      - Keyword
-      - Category
-      - Eligible (Yes/No)
+    Deterministic keyword → URL mapping.
+    - Uses crawler signals ONLY
+    - Enforces slot caps per URL
+    - Enforces global keyword uniqueness
     """
 
-    df = df.copy()
+    # Resolve required columns
+    def _resolve(colnames):
+        for c in colnames:
+            if c in df.columns:
+                return c
+        raise ValueError(f"Missing required column: one of {colnames}")
 
-    # Ensure Map URL exists and starts blank for this run
-    df["Map URL"] = ""
+    KW_COL = _resolve(["Keyword", "keyword", "query", "term"])
+    ELIGIBLE_COL = _resolve(["Eligible", "eligible"])
 
-    if not page_signals_by_url:
+    # Prepare output column
+    if "Mapped URL" not in df.columns:
+        df["Mapped URL"] = ""
+
+    # Build page token structures
+    page_urls, page_token_sets, veo_ready = build_page_tokens(page_signals_by_url)
+    if not page_urls:
         return df
-    site_vocab = build_site_vocabulary(page_signals_by_url)
 
+    inv_index = build_inverted_index(page_token_sets)
 
-    # Precompute URL types once
-    url_type_by_url: Dict[str, str] = {
-        url: classify_url_type(url, signals or {})
-        for url, signals in page_signals_by_url.items()
+    # Per-URL slot usage
+    slot_usage: Dict[str, Dict[str, int]] = {
+        u: {"SEO": 0, "AIO": 0, "AEO": 0}
+        for u in page_urls
     }
 
-    # Candidate pool: only Eligible == Yes
-    eligible_idx = [i for i, v in df["Eligible"].items()] if "Eligible" in df.columns else list(df.index)
-    if "Eligible" in df.columns:
-        eligible_idx = [i for i in df.index if _is_yes(df.at[i, "Eligible"])]
+    # Global keyword usage
+    used_keywords: Set[int] = set()
 
-    # Precompute per-row primary slot + intent + keyword text
-    row_kw: Dict[int, str] = {}
-    row_slot: Dict[int, str] = {}
-    row_intent: Dict[int, str] = {}
-
-    for i in eligible_idx:
-        kw = str(df.at[i, "Keyword"] if "Keyword" in df.columns else "").strip()
-        if not kw:
+    # Iterate keywords in row order (CSV already sorted upstream)
+    for idx, row in df.iterrows():
+        if row.get(ELIGIBLE_COL) != "Yes":
             continue
-        cat = str(df.at[i, "Category"] if "Category" in df.columns else "SEO").strip()
-        row_kw[i] = kw
-        row_slot[i] = _primary_slot_from_category(cat)
-        row_intent[i] = detect_intent(kw)
+        if idx in used_keywords:
+            continue
 
-    # Build candidate lists per URL per slot
-    # candidates[url][slot] -> list of (score, idx) sorted desc
-    candidates: Dict[str, Dict[str, List[Tuple[int, int]]]] = {}
-    for url, signals in page_signals_by_url.items():
-        candidates[url] = {"AEO": [], "AIO": [], "SEO": []}
+        keyword = str(row.get(KW_COL, "")).strip()
+        if not keyword:
+            continue
 
-        url_type = url_type_by_url.get(url, URL_TYPE_OTHER)
+        slot = keyword_slot(keyword)
+        kw_tokens = _tokenize(keyword)
 
-        for i, kw in row_kw.items():
-            slot = row_slot.get(i, "SEO")
-            intent = row_intent.get(i, INTENT_INFORMATIONAL)
+        if not kw_tokens:
+            continue
 
-            # Gate first to avoid generic-only matches
-            if not passes_distinctive_gate(kw, signals):
+        # Score candidates
+        scored = score_keyword_against_pages(
+            kw_tokens=kw_tokens,
+            page_token_sets=page_token_sets,
+            inv_index=inv_index,
+        )
+
+        if not scored:
+            continue
+
+        ranked_pages = rank_candidates(scored, page_urls)
+
+        placed = False
+
+        for pi in ranked_pages:
+            url = page_urls[pi]
+
+            # Slot capacity check
+            if slot_usage[url][slot] >= SLOT_LIMITS[slot]:
                 continue
 
-            # 🔒 Site vocabulary gate (topical boundary)
-            if not keyword_in_site_vocab(kw, site_vocab):
-                continue
+            # Assign
+            df.at[idx, "Mapped URL"] = url
+            slot_usage[url][slot] += 1
+            used_keywords.add(idx)
+            placed = True
+            break
 
-            base = structural_score(kw, signals)
-            if base < THRESHOLD:
-                continue
-
-            score = base + _intent_urltype_bonus(intent, url_type)
-            candidates[url][slot].append((score, i))
-
-        # Sort each slot list once
-        for slot in ("AEO", "AIO", "SEO"):
-            candidates[url][slot].sort(key=lambda x: x[0], reverse=True)
-
-    # Assignment (global uniqueness + per-URL caps)
-    used_rows: Set[int] = set()
-
-    caps = {"AEO": 1, "AIO": 1, "SEO": 2}
-    fill_sequence = ["AEO", "AIO", "SEO", "SEO"]
-
-    # Preserve URL order as provided by caller dict
-    for url in page_signals_by_url.keys():
-        filled = {"AEO": 0, "AIO": 0, "SEO": 0}
-
-        for slot in fill_sequence:
-            if filled[slot] >= caps[slot]:
-                continue
-
-            # Find best available unused candidate for this url+slot
-            picked_idx = None
-            for score, idx in candidates[url][slot]:
-                if idx in used_rows:
-                    continue
-                picked_idx = idx
-                break
-
-            if picked_idx is None:
-                continue
-
-            df.at[picked_idx, "Map URL"] = url
-            used_rows.add(picked_idx)
-            filled[slot] += 1
+        # If not placed, keyword remains unmapped (by design)
 
     return df
+
+### END mapping.py — PART 4 / 4
