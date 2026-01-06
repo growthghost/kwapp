@@ -45,9 +45,9 @@ def _slug_tokens(url: str) -> List[str]:
 # VEO detection (secondary flag)
 # -------------------------------
 
-PHONE_PAT = re.compile(r"(\\+?\\d{1,2}[\\s.-]?)?(\\(?\\d{3}\\)?[\\s.-]?\\d{3}[\\s.-]?\\d{4})")
+PHONE_PAT = re.compile(r"(\+?\d{1,2}[\s.-]?)?(\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4})")
 ADDR_PAT = re.compile(
-    r"\\b(street|st\\.|road|rd\\.|avenue|ave\\.|blvd|lane|ln\\.|drive|dr\\.)\\b",
+    r"\b(street|st\.|road|rd\.|avenue|ave\.|blvd|lane|ln\.|drive|dr\.)\b",
     re.I,
 )
 
