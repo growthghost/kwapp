@@ -206,9 +206,9 @@ def run_mapping(
     KW_COL = _resolve(["Keyword", "keyword", "query", "term"])
     ELIGIBLE_COL = _resolve(["Eligible", "eligible"])
 
-    # Prepare output column
-    if "Mapped URL" not in df.columns:
-        df["Mapped URL"] = ""
+    # Prepare output column (single authority: Map URL)
+    if "Map URL" not in df.columns:
+        df["Map URL"] = ""
 
     # Build page token structures
     page_urls, page_token_sets, veo_ready = build_page_tokens(page_signals_by_url)
@@ -223,7 +223,7 @@ def run_mapping(
         for u in page_urls
     }
 
-    # Global keyword usage
+    # Global keyword usage (by row index)
     used_keywords: Set[int] = set()
 
     # Iterate keywords in row order (CSV already sorted upstream)
@@ -255,8 +255,6 @@ def run_mapping(
 
         ranked_pages = rank_candidates(scored, page_urls)
 
-        placed = False
-
         for pi in ranked_pages:
             url = page_urls[pi]
 
@@ -265,10 +263,9 @@ def run_mapping(
                 continue
 
             # Assign
-            df.at[idx, "Mapped URL"] = url
+            df.at[idx, "Map URL"] = url
             slot_usage[url][slot] += 1
             used_keywords.add(idx)
-            placed = True
             break
 
         # If not placed, keyword remains unmapped (by design)
