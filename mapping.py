@@ -112,6 +112,8 @@ def build_inverted_index(page_token_sets: List[Set[str]]) -> Dict[str, Set[int]]
 # Candidate scoring
 # -------------------------------
 
+MIN_OVERLAP = 2  # NEW: require at least 2 shared tokens to allow mapping
+
 def score_keyword_against_pages(
     kw_tokens: Set[str],
     page_token_sets: List[Set[str]],
@@ -134,12 +136,13 @@ def score_keyword_against_pages(
     for pi in candidate_pages:
         page_tokens = page_token_sets[pi]
         overlap_tokens = kw_tokens & page_tokens
-        if not overlap_tokens:
+        overlap = len(overlap_tokens)
+
+        # NEW: block weak 1-token matches
+        if overlap < MIN_OVERLAP:
             continue
 
-        overlap = len(overlap_tokens)
         coverage = overlap / max(1, len(kw_tokens))
-
         scored.append((pi, coverage, overlap))
 
     return scored
@@ -172,6 +175,7 @@ def rank_candidates(
     return [pi for pi, _, _ in ranked]
 
 ### END mapping.py — PART 3 / 4
+
 
 ### START mapping.py — PART 4 / 4
 
