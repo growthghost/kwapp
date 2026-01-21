@@ -193,9 +193,9 @@ def run_mapping(
     page_signals_by_url: Dict[str, Dict],
 ) -> pd.DataFrame:
     """
-    Deterministic keyword → URL mapping (URL-FIRST quota fill).
+    Deterministic keyword → URL mapping.
     - Uses crawler signals ONLY
-    - Enforces per-URL quotas: 2 SEO, 1 AIO, 1 AEO
+    - Enforces slot caps per URL
     - Enforces global keyword uniqueness
     """
 
@@ -209,31 +209,44 @@ def run_mapping(
     KW_COL = _resolve(["Keyword", "keyword", "query", "term"])
     ELIGIBLE_COL = _resolve(["Eligible", "eligible"])
 
-    # Prepare output column (single authority)
-    if "Map URL" not in df.columns:
-        df["Map URL"] = ""
-    else:
-        # Clear stale mappings before recompute
-        df["Map URL"] = ""
+    # Output column (prefer Map URL if app already created it)
+    OUT_COL = "Map URL" if "Map URL" in df.columns else "Mapped URL"
+    if OUT_COL not in df.columns:
+        df[OUT_COL] = ""
 
-    # Build page token structures
-    page_urls, page_token_sets, _veo_ready = build_page_tokens(page_signals_by_url)
+    # Build page token structures (all structural tokens)
+    page_urls, page_token_sets, veo_ready = build_page_tokens(page_signals_by_url)
     if not page_urls:
         return df
 
     inv_index = build_inverted_index(page_token_sets)
 
-    # Deterministic row position (reflects upstream sorting)
-    row_pos: Dict[int, int] = {idx: pos for pos, idx in enumerate(df.index)}
+    # Build STRONG token sets per page (slug/title/h1 only) for fallback
+    strong_token_sets: List[Set[str]] = []
+    for u in page_urls:
+        sig = page_signals_by_url.get(u, {}) or {}
+        strong = set()
+        strong |= set(sig.get("slug_tokens", []))
+        strong |= set(sig.get("title_tokens", []))
+        strong |= set(sig.get("h1_tokens", []))
+        strong_token_sets.append(strong)
 
-    # Per-page candidate buckets: url -> slot -> list[(coverage, overlap, row_pos, idx)]
-    per_page: Dict[str, Dict[str, List[Tuple[float, int, int, int]]]] = {
-        u: {"SEO": [], "AIO": [], "AEO": []} for u in page_urls
+    inv_index_strong = build_inverted_index(strong_token_sets)
+
+    # Per-URL slot usage
+    slot_usage: Dict[str, Dict[str, int]] = {
+        u: {"SEO": 0, "AIO": 0, "AEO": 0}
+        for u in page_urls
     }
 
-    # Build candidates (keyword-first gathering, URL-first assigning)
+    # Global keyword usage
+    used_keywords: Set[int] = set()
+
+    # Iterate keywords in row order (CSV already sorted upstream)
     for idx, row in df.iterrows():
         if row.get(ELIGIBLE_COL) != "Yes":
+            continue
+        if idx in used_keywords:
             continue
 
         keyword = str(row.get(KW_COL, "")).strip()
@@ -242,50 +255,73 @@ def run_mapping(
 
         slot = keyword_slot(keyword)
         kw_tokens = _tokenize(keyword)
+
         if not kw_tokens:
             continue
 
-        # Candidate pages via inverted index (fast)
+        # ---------- Pass 1: strict overlap against ALL structural tokens ----------
+        scored = score_keyword_against_pages(
+            kw_tokens=kw_tokens,
+            page_token_sets=page_token_sets,
+            inv_index=inv_index,
+        )
+
+        ranked_pages: List[int] = []
+        if scored:
+            ranked_pages = rank_candidates(scored, page_urls)
+
+        placed = False
+
+        for pi in ranked_pages:
+            url = page_urls[pi]
+
+            # Slot capacity check
+            if slot_usage[url][slot] >= SLOT_LIMITS[slot]:
+                continue
+
+            # Assign
+            df.at[idx, OUT_COL] = url
+            slot_usage[url][slot] += 1
+            used_keywords.add(idx)
+            placed = True
+            break
+
+        # ---------- Pass 2 (FALLBACK): allow 1-token match ONLY in slug/title/h1 ----------
+        if placed:
+            continue
+
+        # Build candidates using strong inverted index
         candidate_pages: Set[int] = set()
         for t in kw_tokens:
-            candidate_pages |= inv_index.get(t, set())
+            candidate_pages |= inv_index_strong.get(t, set())
+
         if not candidate_pages:
             continue
 
+        fallback_scored: List[Tuple[int, float, int]] = []
         for pi in candidate_pages:
-            overlap_tokens = kw_tokens & page_token_sets[pi]
-            overlap = len(overlap_tokens)
-
-            # Respect MIN_OVERLAP rule from PART 3
-            if overlap < MIN_OVERLAP:
+            overlap_tokens = kw_tokens & strong_token_sets[pi]
+            if not overlap_tokens:
                 continue
 
+            overlap = len(overlap_tokens)          # will be >= 1
             coverage = overlap / max(1, len(kw_tokens))
+            fallback_scored.append((pi, coverage, overlap))
+
+        if not fallback_scored:
+            continue
+
+        ranked_pages_fb = rank_candidates(fallback_scored, page_urls)
+
+        for pi in ranked_pages_fb:
             url = page_urls[pi]
-            per_page[url][slot].append((coverage, overlap, row_pos.get(idx, 10**9), idx))
+            if slot_usage[url][slot] >= SLOT_LIMITS[slot]:
+                continue
 
-    # Sort candidate lists (best first, deterministic)
-    for url in page_urls:
-        for slot in ("AEO", "AIO", "SEO"):
-            per_page[url][slot].sort(key=lambda x: (-x[0], -x[1], x[2], x[3]))
-
-    # URL-FIRST quota fill
-    used_keywords: Set[int] = set()
-
-    for url in page_urls:
-        # Fill AEO then AIO then SEO (so each page gets its answer-style slots first)
-        for slot in ("AEO", "AIO", "SEO"):
-            need = SLOT_LIMITS[slot]
-            filled = 0
-
-            for (_cov, _ov, _pos, idx) in per_page[url][slot]:
-                if idx in used_keywords:
-                    continue
-                df.at[idx, "Map URL"] = url
-                used_keywords.add(idx)
-                filled += 1
-                if filled >= need:
-                    break
+            df.at[idx, OUT_COL] = url
+            slot_usage[url][slot] += SLOT_LIMITS.get(slot, 1) and 1
+            used_keywords.add(idx)
+            break
 
     return df
 
