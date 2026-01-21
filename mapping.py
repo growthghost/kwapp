@@ -176,7 +176,6 @@ def rank_candidates(
 
 ### END mapping.py — PART 3 / 4
 
-
 ### START mapping.py — PART 4 / 4
 
 # -------------------------------
@@ -194,9 +193,9 @@ def run_mapping(
     page_signals_by_url: Dict[str, Dict],
 ) -> pd.DataFrame:
     """
-    Deterministic keyword → URL mapping.
+    Deterministic keyword → URL mapping (URL-FIRST quota fill).
     - Uses crawler signals ONLY
-    - Enforces slot caps per URL
+    - Enforces per-URL quotas: 2 SEO, 1 AIO, 1 AEO
     - Enforces global keyword uniqueness
     """
 
@@ -210,31 +209,31 @@ def run_mapping(
     KW_COL = _resolve(["Keyword", "keyword", "query", "term"])
     ELIGIBLE_COL = _resolve(["Eligible", "eligible"])
 
-    # Prepare output column (single authority: Map URL)
+    # Prepare output column (single authority)
     if "Map URL" not in df.columns:
+        df["Map URL"] = ""
+    else:
+        # Clear stale mappings before recompute
         df["Map URL"] = ""
 
     # Build page token structures
-    page_urls, page_token_sets, veo_ready = build_page_tokens(page_signals_by_url)
+    page_urls, page_token_sets, _veo_ready = build_page_tokens(page_signals_by_url)
     if not page_urls:
         return df
 
     inv_index = build_inverted_index(page_token_sets)
 
-    # Per-URL slot usage
-    slot_usage: Dict[str, Dict[str, int]] = {
-        u: {"SEO": 0, "AIO": 0, "AEO": 0}
-        for u in page_urls
+    # Deterministic row position (reflects upstream sorting)
+    row_pos: Dict[int, int] = {idx: pos for pos, idx in enumerate(df.index)}
+
+    # Per-page candidate buckets: url -> slot -> list[(coverage, overlap, row_pos, idx)]
+    per_page: Dict[str, Dict[str, List[Tuple[float, int, int, int]]]] = {
+        u: {"SEO": [], "AIO": [], "AEO": []} for u in page_urls
     }
 
-    # Global keyword usage (by row index)
-    used_keywords: Set[int] = set()
-
-    # Iterate keywords in row order (CSV already sorted upstream)
+    # Build candidates (keyword-first gathering, URL-first assigning)
     for idx, row in df.iterrows():
         if row.get(ELIGIBLE_COL) != "Yes":
-            continue
-        if idx in used_keywords:
             continue
 
         keyword = str(row.get(KW_COL, "")).strip()
@@ -243,37 +242,52 @@ def run_mapping(
 
         slot = keyword_slot(keyword)
         kw_tokens = _tokenize(keyword)
-
         if not kw_tokens:
             continue
 
-        # Score candidates
-        scored = score_keyword_against_pages(
-            kw_tokens=kw_tokens,
-            page_token_sets=page_token_sets,
-            inv_index=inv_index,
-        )
-
-        if not scored:
+        # Candidate pages via inverted index (fast)
+        candidate_pages: Set[int] = set()
+        for t in kw_tokens:
+            candidate_pages |= inv_index.get(t, set())
+        if not candidate_pages:
             continue
 
-        ranked_pages = rank_candidates(scored, page_urls)
+        for pi in candidate_pages:
+            overlap_tokens = kw_tokens & page_token_sets[pi]
+            overlap = len(overlap_tokens)
 
-        for pi in ranked_pages:
-            url = page_urls[pi]
-
-            # Slot capacity check
-            if slot_usage[url][slot] >= SLOT_LIMITS[slot]:
+            # Respect MIN_OVERLAP rule from PART 3
+            if overlap < MIN_OVERLAP:
                 continue
 
-            # Assign
-            df.at[idx, "Map URL"] = url
-            slot_usage[url][slot] += 1
-            used_keywords.add(idx)
-            break
+            coverage = overlap / max(1, len(kw_tokens))
+            url = page_urls[pi]
+            per_page[url][slot].append((coverage, overlap, row_pos.get(idx, 10**9), idx))
 
-        # If not placed, keyword remains unmapped (by design)
+    # Sort candidate lists (best first, deterministic)
+    for url in page_urls:
+        for slot in ("AEO", "AIO", "SEO"):
+            per_page[url][slot].sort(key=lambda x: (-x[0], -x[1], x[2], x[3]))
+
+    # URL-FIRST quota fill
+    used_keywords: Set[int] = set()
+
+    for url in page_urls:
+        # Fill AEO then AIO then SEO (so each page gets its answer-style slots first)
+        for slot in ("AEO", "AIO", "SEO"):
+            need = SLOT_LIMITS[slot]
+            filled = 0
+
+            for (_cov, _ov, _pos, idx) in per_page[url][slot]:
+                if idx in used_keywords:
+                    continue
+                df.at[idx, "Map URL"] = url
+                used_keywords.add(idx)
+                filled += 1
+                if filled >= need:
+                    break
 
     return df
 
 ### END mapping.py — PART 4 / 4
+
