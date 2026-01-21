@@ -450,6 +450,9 @@ if uploaded is not None:
         st.session_state.pop("map_result_df", None)
         st.session_state.pop("crawl_signals", None)
 
+    # ---------- DEBUG (temporary) ----------
+    debug_mapping = st.checkbox("Debug mapping (temporary)", value=False)
+
     # ---------- Mapping button ----------
     user_urls_for_btn = st.session_state.get("user_mapping_urls") or ()
     can_map = len(user_urls_for_btn) > 0
@@ -491,6 +494,21 @@ if uploaded is not None:
 
             page_signals_by_url = st.session_state["crawl_signals"]
 
+            # ---- DEBUG prints (prove what we have) ----
+            if debug_mapping:
+                st.write("profiles:", len(profiles))
+                st.write("crawl_signals:", len(page_signals_by_url))
+                st.write("signal sample keys:", list(page_signals_by_url.keys())[:3])
+                if page_signals_by_url:
+                    first_sig = next(iter(page_signals_by_url.values()))
+                    st.write(
+                        "token counts (first page):",
+                        {
+                            k: len(first_sig.get(k, []))
+                            for k in ["slug_tokens", "title_tokens", "h1_tokens", "h2h3_tokens", "meta_tokens"]
+                        },
+                    )
+
             if not page_signals_by_url:
                 st.error("No crawl data found. Please click Map keywords to site again.")
                 st.session_state["mapping_running"] = False
@@ -506,6 +524,9 @@ if uploaded is not None:
                 page_signals_by_url=page_signals_by_url,
             )
 
+            if debug_mapping and isinstance(mapped_df, pd.DataFrame) and "Map URL" in mapped_df.columns:
+                st.write("mapped count:", int((mapped_df["Map URL"].astype(str).str.len() > 0).sum()))
+
             st.session_state["map_result_df"] = mapped_df
             st.session_state["map_signature"] = curr_signature
             st.session_state["map_ready"] = True
@@ -514,6 +535,7 @@ if uploaded is not None:
         st.session_state["mapping_running"] = False
 
 ### END app.py — PART 4 / 6
+
 
 ### START app.py — PART 5 / 6
 
