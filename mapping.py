@@ -30,8 +30,9 @@ def _tokenize(text: str) -> Set[str]:
 # Intent slot detection
 # -------------------------------
 
+# FIX: \b word-boundary was incorrectly written as \\b (literal backslash+b).
 AEO_PAT = re.compile(
-    r"^(who|what|when|where|why|how|can|should|is|are|do|does|did|will)\\b",
+    r"^(who|what|when|where|why|how|can|should|is|are|do|does|did|will)\b",
     re.I,
 )
 
@@ -40,15 +41,29 @@ AIO_PAT = re.compile(
     re.I,
 )
 
-def keyword_slot(keyword: str) -> str:
+def keyword_slots(keyword: str) -> List[str]:
+    """
+    Return ALL slots this keyword can qualify for, ordered by intent strength.
+    (We choose the final slot per-URL later based on which caps are still open.)
+    """
     if not isinstance(keyword, str):
-        return "SEO"
+        return ["SEO"]
+
     text = keyword.strip().lower()
+    slots: List[str] = []
+
     if AEO_PAT.search(text):
-        return "AEO"
+        slots.append("AEO")
     if AIO_PAT.search(text):
-        return "AIO"
-    return "SEO"
+        slots.append("AIO")
+
+    slots.append("SEO")  # always allow SEO fallback
+    # de-dupe while preserving order
+    out: List[str] = []
+    for s in slots:
+        if s not in out:
+            out.append(s)
+    return out
 
 ### END mapping.py — PART 1 / 4
 
@@ -195,8 +210,8 @@ def run_mapping(
     """
     Deterministic keyword → URL mapping.
     - Uses crawler signals ONLY
-    - Enforces slot caps per URL
-    - Enforces global keyword uniqueness
+    - Enforces slot caps per URL (2 SEO, 1 AIO, 1 AEO)
+    - Chooses the best slot PER URL when a keyword qualifies for multiple
     """
 
     # Resolve required columns
@@ -209,29 +224,17 @@ def run_mapping(
     KW_COL = _resolve(["Keyword", "keyword", "query", "term"])
     ELIGIBLE_COL = _resolve(["Eligible", "eligible"])
 
-    # Output column (prefer Map URL if app already created it)
+    # Output column (align with app export)
     OUT_COL = "Map URL" if "Map URL" in df.columns else "Mapped URL"
     if OUT_COL not in df.columns:
         df[OUT_COL] = ""
 
-    # Build page token structures (all structural tokens)
+    # Build page token structures
     page_urls, page_token_sets, veo_ready = build_page_tokens(page_signals_by_url)
     if not page_urls:
         return df
 
     inv_index = build_inverted_index(page_token_sets)
-
-    # Build STRONG token sets per page (slug/title/h1 only) for fallback
-    strong_token_sets: List[Set[str]] = []
-    for u in page_urls:
-        sig = page_signals_by_url.get(u, {}) or {}
-        strong = set()
-        strong |= set(sig.get("slug_tokens", []))
-        strong |= set(sig.get("title_tokens", []))
-        strong |= set(sig.get("h1_tokens", []))
-        strong_token_sets.append(strong)
-
-    inv_index_strong = build_inverted_index(strong_token_sets)
 
     # Per-URL slot usage
     slot_usage: Dict[str, Dict[str, int]] = {
@@ -239,88 +242,58 @@ def run_mapping(
         for u in page_urls
     }
 
-    # Global keyword usage
-    used_keywords: Set[int] = set()
+    def _remaining(u: str, slot: str) -> int:
+        return max(0, SLOT_LIMITS[slot] - slot_usage[u][slot])
+
+    def _choose_slot_for_url(u: str, possible_slots: List[str]) -> str:
+        """
+        If keyword qualifies for multiple slots, use the slot this URL still needs most.
+        """
+        # Only consider slots that still have room
+        candidates = [s for s in possible_slots if _remaining(u, s) > 0]
+        if not candidates:
+            return ""  # none available
+
+        # Prefer the slot with the highest remaining capacity on that URL.
+        # Tie-break keeps original order from possible_slots (AEO, AIO, SEO).
+        best = max(candidates, key=lambda s: (_remaining(u, s), -possible_slots.index(s)))
+        return best
 
     # Iterate keywords in row order (CSV already sorted upstream)
     for idx, row in df.iterrows():
         if row.get(ELIGIBLE_COL) != "Yes":
-            continue
-        if idx in used_keywords:
             continue
 
         keyword = str(row.get(KW_COL, "")).strip()
         if not keyword:
             continue
 
-        slot = keyword_slot(keyword)
         kw_tokens = _tokenize(keyword)
-
         if not kw_tokens:
             continue
 
-        # ---------- Pass 1: strict overlap against ALL structural tokens ----------
+        possible_slots = keyword_slots(keyword)  # NEW: can be ["AEO","AIO","SEO"] etc.
+
+        # Score candidates
         scored = score_keyword_against_pages(
             kw_tokens=kw_tokens,
             page_token_sets=page_token_sets,
             inv_index=inv_index,
         )
+        if not scored:
+            continue
 
-        ranked_pages: List[int] = []
-        if scored:
-            ranked_pages = rank_candidates(scored, page_urls)
+        ranked_pages = rank_candidates(scored, page_urls)
 
-        placed = False
-
+        # Try to place on best page, picking best slot for that page
         for pi in ranked_pages:
             url = page_urls[pi]
-
-            # Slot capacity check
-            if slot_usage[url][slot] >= SLOT_LIMITS[slot]:
-                continue
-
-            # Assign
-            df.at[idx, OUT_COL] = url
-            slot_usage[url][slot] += 1
-            used_keywords.add(idx)
-            placed = True
-            break
-
-        # ---------- Pass 2 (FALLBACK): allow 1-token match ONLY in slug/title/h1 ----------
-        if placed:
-            continue
-
-        # Build candidates using strong inverted index
-        candidate_pages: Set[int] = set()
-        for t in kw_tokens:
-            candidate_pages |= inv_index_strong.get(t, set())
-
-        if not candidate_pages:
-            continue
-
-        fallback_scored: List[Tuple[int, float, int]] = []
-        for pi in candidate_pages:
-            overlap_tokens = kw_tokens & strong_token_sets[pi]
-            if not overlap_tokens:
-                continue
-
-            overlap = len(overlap_tokens)          # will be >= 1
-            coverage = overlap / max(1, len(kw_tokens))
-            fallback_scored.append((pi, coverage, overlap))
-
-        if not fallback_scored:
-            continue
-
-        ranked_pages_fb = rank_candidates(fallback_scored, page_urls)
-
-        for pi in ranked_pages_fb:
-            url = page_urls[pi]
-            if slot_usage[url][slot] >= SLOT_LIMITS[slot]:
+            chosen_slot = _choose_slot_for_url(url, possible_slots)
+            if not chosen_slot:
                 continue
 
             df.at[idx, OUT_COL] = url
-            slot_usage[url][slot] += SLOT_LIMITS.get(slot, 1) and 1
-            used_keywords.add(idx)
+            slot_usage[url][chosen_slot] += 1
             break
 
     return df
