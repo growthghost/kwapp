@@ -14,12 +14,12 @@ from mapping import run_mapping
 from crawler import fetch_profiles
 
 # ---------- Brand / Theme ----------
-BRAND_BG = "#FFFFFF"     # page background (white)
-BRAND_INK = "#242F40"    # dark blue text on white
-BRAND_ACCENT = "#329662" # green
+BRAND_BG = "#F2F2F2"     # page background (light gray)
+BRAND_INK = "#000000"    # black text
+BRAND_ACCENT = "#329662" # (no longer used for buttons; keep for now)
 BRAND_LIGHT = "#FFFFFF"  # white
 
-st.set_page_config(page_title="OutrankIQ", page_icon="🔎", layout="centered")
+st.set_page_config(page_title="RANKEDBOX", page_icon="🔎", layout="centered")
 
 # ---------- Global CSS ----------
 st.markdown(
@@ -34,11 +34,20 @@ st.markdown(
 }}
 
 .stApp {{ background-color: var(--bg); }}
-html, body, [class^="css"], [class*=" css"] {{ color: var(--ink) !important; }}
-h1, h2, h3, h4, h5, h6 {{ color: var(--ink) !important; }}
 
+/* Global typography */
+html, body, .stApp, [class^="css"], [class*=" css"] {{
+  color: var(--ink) !important;
+  font-family: "Aptos", "Segoe UI", Arial, sans-serif !important;
+}}
+h1, h2, h3, h4, h5, h6 {{
+  color: var(--ink) !important;
+  font-family: "Aptos", "Segoe UI", Arial, sans-serif !important;
+}}
+
+/* Header */
 .oiq-header {{
-  background: var(--accent);
+  background: #000000;
   color: #ffffff;
   padding: 22px 20px;
   margin-bottom: 16px;
@@ -56,22 +65,138 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--ink) !important; }}
 .oiq-title {{
   font-size: 40px;
   font-weight: 800;
+  font-family: "Century Gothic", "Aptos", "Segoe UI", Arial, sans-serif !important;
+  text-transform: uppercase;
+  letter-spacing: 1px;
 }}
 .oiq-sub {{
   margin-top: 6px;
   font-size: 16px;
+  font-family: "Aptos", "Segoe UI", Arial, sans-serif !important;
 }}
 
-.stButton > button, .stDownloadButton > button {{
-  background-color: var(--accent) !important;
-  color: var(--ink) !important;
+/* ---------- Buttons: default black, hover red ---------- */
+.stButton > button,
+.stDownloadButton > button,
+button[data-testid="baseButton-primary"],
+button[data-testid="baseButton-secondary"] {{
+  background: #000000 !important;
+  color: #ffffff !important;
+  border: 1px solid #000000 !important;
   font-weight: 700 !important;
+  border-radius: 10px !important;
+}}
+
+.stButton > button:hover,
+.stDownloadButton > button:hover,
+button[data-testid="baseButton-primary"]:hover,
+button[data-testid="baseButton-secondary"]:hover {{
+  background: #EE1733 !important;
+  color: #ffffff !important;
+  border-color: #EE1733 !important;
+}}
+
+.stButton > button:focus,
+.stDownloadButton > button:focus,
+button[data-testid="baseButton-primary"]:focus,
+button[data-testid="baseButton-secondary"]:focus {{
+  outline: none !important;
+  box-shadow: 0 0 0 3px rgba(238, 23, 51, 0.25) !important;
+}}
+
+.stButton > button:disabled,
+.stDownloadButton > button:disabled,
+button[data-testid="baseButton-primary"]:disabled,
+button[data-testid="baseButton-secondary"]:disabled {{
+  background: #111111 !important;
+  color: rgba(255,255,255,0.55) !important;
+  border-color: #111111 !important;
+  cursor: not-allowed !important;
+  opacity: 0.6 !important;
+}}
+
+/* ---------- Selectbox (Strategy Dropdown): red bar + white text ---------- */
+div[data-testid="stSelectbox"] [data-baseweb="select"] > div {{
+  background: #EE1733 !important;
+  border-color: #EE1733 !important;
+  border-radius: 10px !important;
+}}
+div[data-testid="stSelectbox"] [data-baseweb="select"] span,
+div[data-testid="stSelectbox"] [data-baseweb="select"] input {{
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+}}
+div[data-testid="stSelectbox"] svg {{
+  fill: #ffffff !important;
+}}
+div[data-testid="stSelectbox"] [data-baseweb="select"]:focus-within > div {{
+  box-shadow: 0 0 0 3px rgba(238, 23, 51, 0.25) !important;
+}}
+
+/* ---------- Inputs: dark background + white text ---------- */
+div[data-testid="stTextInput"] input,
+div[data-testid="stNumberInput"] input,
+div[data-testid="stTextArea"] textarea {{
+  background: #111111 !important;
+  color: #ffffff !important;
+  border: 1px solid #111111 !important;
+  border-radius: 10px !important;
+}}
+
+div[data-testid="stTextInput"] input::placeholder,
+div[data-testid="stNumberInput"] input::placeholder,
+div[data-testid="stTextArea"] textarea::placeholder {{
+  color: rgba(255,255,255,0.65) !important;
+}}
+
+div[data-testid="stTextInput"] input:focus,
+div[data-testid="stNumberInput"] input:focus,
+div[data-testid="stTextArea"] textarea:focus {{
+  border-color: #EE1733 !important;
+  box-shadow: 0 0 0 3px rgba(238, 23, 51, 0.20) !important;
+  outline: none !important;
+}}
+
+/* BaseWeb wrapper (covers some Streamlit versions/themes) */
+div[data-testid="stTextInput"] [data-baseweb="input"] > div,
+div[data-testid="stNumberInput"] [data-baseweb="input"] > div {{
+  background: #111111 !important;
+  border-color: #111111 !important;
+  border-radius: 10px !important;
+}}
+
+/* Number input steppers */
+div[data-testid="stNumberInput"] button {{
+  color: #ffffff !important;
+}}
+div[data-testid="stNumberInput"] svg {{
+  fill: #ffffff !important;
+}}
+
+/* File uploader dropzone (best-effort; Streamlit varies by version) */
+div[data-testid="stFileUploader"] section {{
+  background: #111111 !important;
+  border: 1px dashed rgba(255,255,255,0.35) !important;
+  border-radius: 12px !important;
+}}
+div[data-testid="stFileUploader"] section * {{
+  color: #ffffff !important;
+}}
+
+/* ---------- White section cards ---------- */
+.oiq-card {{
+  background: #ffffff;
+  border-radius: 14px;
+  padding: 18px 18px;
+  margin: 0 0 16px 0;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.06);
 }}
 
 .oiq-footer {{
   color: var(--ink);
   font-size: 13px;
   margin-top: 24px;
+  font-family: "Aptos", "Segoe UI", Arial, sans-serif !important;
 }}
 </style>
 """,
@@ -83,7 +208,7 @@ st.markdown(
     """
 <div class="oiq-header oiq-bleed">
   <div class="oiq-header-inner">
-    <div class="oiq-title">OutrankIQ</div>
+    <div class="oiq-title">RANKEDBOX</div>
     <div class="oiq-sub">
       Score keywords by Search Volume (A) and Keyword Difficulty (B)
     </div>
@@ -114,6 +239,17 @@ LABEL_MAP = {
     0: "Not rated",
 }
 
+# Used for the single-word color card (tiers)
+COLOR_MAP = {
+    6: "#2ecc71",
+    5: "#a3e635",
+    4: "#facc15",
+    3: "#fb923c",
+    2: "#f87171",
+    1: "#ef4444",
+    0: "#9ca3af",
+}
+
 ### END app.py — PART 1 / 6
 
 ### START app.py — PART 2 / 6
@@ -131,7 +267,9 @@ strategy_descriptions = {
     ),
 }
 
-# ---------- Strategy ----------
+# ---------- Strategy (CARD) ----------
+st.markdown("<div class='oiq-card'>", unsafe_allow_html=True)
+
 scoring_mode = st.selectbox(
     "Choose Scoring Strategy",
     ["Low Hanging Fruit", "In The Game", "Competitive"],
@@ -165,7 +303,7 @@ else:
 
 st.markdown(
     f"""
-<div class="info-banner" style="margin-bottom:16px;">
+<div class="info-banner" style="margin-bottom:0;">
   <div style="font-size:13px;">Minimum Search Volume Required:
     <strong>{MIN_VALID_VOLUME}</strong>
   </div>
@@ -175,6 +313,8 @@ st.markdown(
 """,
     unsafe_allow_html=True,
 )
+
+st.markdown("</div>", unsafe_allow_html=True)
 
 # ---------- Category Tagging ----------
 AIO_PAT = re.compile(
@@ -262,9 +402,12 @@ def add_scoring_columns(
     return out
 
 ### END app.py — PART 2 / 6
+
 ### START app.py — PART 3 / 6
 
-# ---------- Single Keyword ----------
+# ---------- Single Keyword (CARD) ----------
+st.markdown("<div class='oiq-card'>", unsafe_allow_html=True)
+
 st.subheader("Single Keyword Score")
 
 with st.form("single_keyword_form"):
@@ -287,14 +430,22 @@ with st.form("single_keyword_form"):
     if st.form_submit_button("Calculate Score"):
         score = calculate_score(vol_val, kd_val)
         tier = LABEL_MAP.get(score, "Not rated")
+        bg = COLOR_MAP.get(score, COLOR_MAP[0])
+
         st.markdown(
             f"""
-            <div style="padding:16px;border-radius:12px;
-                        background:#f1f5f9;text-align:center;">
-              <div style="font-size:22px;font-weight:700;">
-                Score: {score}
+            <div style="
+                padding:16px;
+                border-radius:12px;
+                background:{bg};
+                text-align:center;
+                color:#ffffff;
+                font-weight:700;
+            ">
+              <div style="font-size:22px;">
+                Score {score}
               </div>
-              <div style="font-size:16px;">
+              <div style="font-size:16px;font-weight:600;">
                 Tier: {tier}
               </div>
             </div>
@@ -306,7 +457,11 @@ with st.form("single_keyword_form"):
                 f"This strategy requires a minimum volume of {MIN_VALID_VOLUME}."
             )
 
-st.markdown("---")
+st.markdown("</div>", unsafe_allow_html=True)
+
+# ---------- Bulk Scoring Inputs (CARD) ----------
+st.markdown("<div class='oiq-card'>", unsafe_allow_html=True)
+
 st.subheader("Bulk Scoring (CSV Upload)")
 
 # ---------- User URLs ----------
@@ -325,6 +480,8 @@ st.session_state["user_mapping_urls"] = tuple(urls)
 
 # ---------- CSV Upload ----------
 uploaded = st.file_uploader("Upload CSV", type=["csv"])
+
+st.markdown("</div>", unsafe_allow_html=True)
 
 if uploaded is not None:
     raw = uploaded.getvalue()
@@ -416,6 +573,9 @@ if uploaded is not None:
 ### END app.py — PART 3 / 6
 
 ### START app.py — PART 4 / 6
+
+    # ---------- Mapping + Export (CARD) ----------
+    st.markdown("<div class='oiq-card'>", unsafe_allow_html=True)
 
     # ---------- Mapping signature ----------
     sig_df = export_df[[kw_col, vol_col, kd_col]].copy()
@@ -512,6 +672,7 @@ if uploaded is not None:
             if not page_signals_by_url:
                 st.error("No crawl data found. Please click Map keywords to site again.")
                 st.session_state["mapping_running"] = False
+                st.markdown("</div>", unsafe_allow_html=True)
                 st.stop()
 
             # 2️⃣ Ensure Map URL column exists
@@ -535,7 +696,6 @@ if uploaded is not None:
         st.session_state["mapping_running"] = False
 
 ### END app.py — PART 4 / 6
-
 
 ### START app.py — PART 5 / 6
 
@@ -597,6 +757,9 @@ if uploaded is not None:
         disabled=not can_download,
         help="Mapping runs only after clicking 'Map keywords to site'",
     )
+
+    # Close Mapping + Export card
+    st.markdown("</div>", unsafe_allow_html=True)
 
 ### END app.py — PART 5 / 6
 
