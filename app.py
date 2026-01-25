@@ -75,25 +75,48 @@ h1, h2, h3, h4, h5, h6 {{
   font-family: "Aptos", "Segoe UI", Arial, sans-serif !important;
 }}
 
-/* ---------- Buttons: default black, hover red ---------- */
+/* ===================== BUTTONS (FIXED) ===================== */
+/* Cover st.button, st.form_submit_button, st.download_button */
 .stButton > button,
 .stDownloadButton > button,
 button[data-testid="baseButton-primary"],
-button[data-testid="baseButton-secondary"] {{
-  background: #000000 !important;
+button[data-testid="baseButton-secondary"],
+button[kind="primary"],
+button[kind="secondary"] {{
+  background-color: #000000 !important;
   color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
   border: 1px solid #000000 !important;
   font-weight: 700 !important;
   border-radius: 10px !important;
 }}
 
+.stButton > button * ,
+.stDownloadButton > button * ,
+button[data-testid="baseButton-primary"] *,
+button[data-testid="baseButton-secondary"] * {{
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+}}
+
 .stButton > button:hover,
 .stDownloadButton > button:hover,
 button[data-testid="baseButton-primary"]:hover,
-button[data-testid="baseButton-secondary"]:hover {{
-  background: #EE1733 !important;
+button[data-testid="baseButton-secondary"]:hover,
+button[kind="primary"]:hover,
+button[kind="secondary"]:hover {{
+  background-color: #EE1733 !important;
   color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
   border-color: #EE1733 !important;
+}}
+
+.stButton > button:hover * ,
+.stDownloadButton > button:hover * ,
+button[data-testid="baseButton-primary"]:hover *,
+button[data-testid="baseButton-secondary"]:hover * {{
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
 }}
 
 .stButton > button:focus,
@@ -108,12 +131,14 @@ button[data-testid="baseButton-secondary"]:focus {{
 .stDownloadButton > button:disabled,
 button[data-testid="baseButton-primary"]:disabled,
 button[data-testid="baseButton-secondary"]:disabled {{
-  background: #111111 !important;
+  background-color: #111111 !important;
   color: rgba(255,255,255,0.55) !important;
+  -webkit-text-fill-color: rgba(255,255,255,0.55) !important;
   border-color: #111111 !important;
   cursor: not-allowed !important;
   opacity: 0.6 !important;
 }}
+/* ============================================================ */
 
 /* ---------- Selectbox (Strategy Dropdown): red bar + white text ---------- */
 div[data-testid="stSelectbox"] [data-baseweb="select"] > div {{
@@ -144,7 +169,6 @@ div[data-testid="stFileUploader"] label,
 div[data-testid="stSelectbox"] label {{
   color: #000000 !important;
 }}
-/* Some Streamlit builds use these label wrappers */
 div[data-testid="stNumberInput"] label p,
 div[data-testid="stTextInput"] label p,
 div[data-testid="stTextArea"] label p,
@@ -177,7 +201,6 @@ div[data-testid="stTextArea"] textarea:focus {{
   outline: none !important;
 }}
 
-/* BaseWeb wrapper (covers some Streamlit versions/themes) */
 div[data-testid="stTextInput"] [data-baseweb="input"] > div,
 div[data-testid="stNumberInput"] [data-baseweb="input"] > div {{
   background: #111111 !important;
@@ -185,7 +208,6 @@ div[data-testid="stNumberInput"] [data-baseweb="input"] > div {{
   border-radius: 10px !important;
 }}
 
-/* Number input steppers */
 div[data-testid="stNumberInput"] button {{
   color: #ffffff !important;
 }}
@@ -193,7 +215,7 @@ div[data-testid="stNumberInput"] svg {{
   fill: #ffffff !important;
 }}
 
-/* File uploader dropzone (best-effort; Streamlit varies by version) */
+/* File uploader dropzone */
 div[data-testid="stFileUploader"] section {{
   background: #111111 !important;
   border: 1px dashed rgba(255,255,255,0.35) !important;
@@ -203,7 +225,7 @@ div[data-testid="stFileUploader"] section * {{
   color: #ffffff !important;
 }}
 
-/* ---------- Real Cards: style the Streamlit container that contains our marker ---------- */
+/* ---------- Real Cards ---------- */
 .oiq-card-marker {{ display:none; }}
 
 div[data-testid="stVerticalBlock"]:has(.oiq-card-marker) {{
@@ -236,7 +258,7 @@ st.markdown(
   <div class="oiq-header-inner">
     <div class="oiq-title">RANKEDBOX</div>
     <div class="oiq-sub">
-      Smart Keyword Scoring Engine
+      Score keywords by Search Volume (A) and Keyword Difficulty (B)
     </div>
   </div>
 </div>
