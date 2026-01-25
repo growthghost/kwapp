@@ -132,6 +132,10 @@ div[data-testid="stSelectbox"] svg {{
 div[data-testid="stSelectbox"] [data-baseweb="select"]:focus-within > div {{
   box-shadow: 0 0 0 3px rgba(238, 23, 51, 0.25) !important;
 }}
+/* Fix: label must be readable on white card/background */
+div[data-testid="stSelectbox"] label {{
+  color: #000000 !important;
+}}
 
 /* ---------- Inputs: dark background + white text ---------- */
 div[data-testid="stTextInput"] input,
@@ -183,13 +187,21 @@ div[data-testid="stFileUploader"] section * {{
   color: #ffffff !important;
 }}
 
-/* ---------- White section cards ---------- */
-.oiq-card {{
+/* ---------- Real Cards: style the Streamlit container that contains our marker ---------- */
+.oiq-card-marker {{ display:none; }}
+
+/* Primary card style (applied to the container block that has the marker somewhere inside) */
+div[data-testid="stVerticalBlock"]:has(.oiq-card-marker) {{
   background: #ffffff;
   border-radius: 14px;
   padding: 18px 18px;
   margin: 0 0 16px 0;
   box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+}}
+
+/* Prevent some inner block default spacing from looking too airy */
+div[data-testid="stVerticalBlock"]:has(.oiq-card-marker) .stMarkdown {{
+  margin-bottom: 0.25rem;
 }}
 
 .oiq-footer {{
@@ -268,42 +280,43 @@ strategy_descriptions = {
 }
 
 # ---------- Strategy (CARD) ----------
-st.markdown("<div class='oiq-card'>", unsafe_allow_html=True)
+with st.container():
+    st.markdown("<span class='oiq-card-marker'></span>", unsafe_allow_html=True)
 
-scoring_mode = st.selectbox(
-    "Choose Scoring Strategy",
-    ["Low Hanging Fruit", "In The Game", "Competitive"],
-)
+    scoring_mode = st.selectbox(
+        "Choose Scoring Strategy",
+        ["Low Hanging Fruit", "In The Game", "Competitive"],
+    )
 
-# Reset mapping state on strategy switch
-if "last_strategy" not in st.session_state:
-    st.session_state["last_strategy"] = scoring_mode
+    # Reset mapping state on strategy switch
+    if "last_strategy" not in st.session_state:
+        st.session_state["last_strategy"] = scoring_mode
 
-if st.session_state.get("last_strategy") != scoring_mode:
-    st.session_state["last_strategy"] = scoring_mode
-    # Reset ONLY the mapping lifecycle keys
-    for k in [
-        "map_signature",
-        "map_ready",
-        "mapping_running",
-        "map_result_df",
-        "crawl_signals",
-    ]:
-        st.session_state.pop(k, None)
+    if st.session_state.get("last_strategy") != scoring_mode:
+        st.session_state["last_strategy"] = scoring_mode
+        # Reset ONLY the mapping lifecycle keys
+        for k in [
+            "map_signature",
+            "map_ready",
+            "mapping_running",
+            "map_result_df",
+            "crawl_signals",
+        ]:
+            st.session_state.pop(k, None)
 
-if scoring_mode == "Low Hanging Fruit":
-    MIN_VALID_VOLUME = 10
-    KD_BUCKETS = [(0, 15, 6), (16, 20, 5), (21, 25, 4), (26, 50, 3), (51, 75, 2), (76, 100, 1)]
-elif scoring_mode == "In The Game":
-    MIN_VALID_VOLUME = 1500
-    KD_BUCKETS = [(0, 30, 6), (31, 45, 5), (46, 60, 4), (61, 70, 3), (71, 80, 2), (81, 100, 1)]
-else:
-    MIN_VALID_VOLUME = 3000
-    KD_BUCKETS = [(0, 40, 6), (41, 60, 5), (61, 75, 4), (76, 85, 3), (86, 95, 2), (96, 100, 1)]
+    if scoring_mode == "Low Hanging Fruit":
+        MIN_VALID_VOLUME = 10
+        KD_BUCKETS = [(0, 15, 6), (16, 20, 5), (21, 25, 4), (26, 50, 3), (51, 75, 2), (76, 100, 1)]
+    elif scoring_mode == "In The Game":
+        MIN_VALID_VOLUME = 1500
+        KD_BUCKETS = [(0, 30, 6), (31, 45, 5), (46, 60, 4), (61, 70, 3), (71, 80, 2), (81, 100, 1)]
+    else:
+        MIN_VALID_VOLUME = 3000
+        KD_BUCKETS = [(0, 40, 6), (41, 60, 5), (61, 75, 4), (76, 85, 3), (86, 95, 2), (96, 100, 1)]
 
-st.markdown(
-    f"""
-<div class="info-banner" style="margin-bottom:0;">
+    st.markdown(
+        f"""
+<div class="info-banner" style="margin-top:10px;">
   <div style="font-size:13px;">Minimum Search Volume Required:
     <strong>{MIN_VALID_VOLUME}</strong>
   </div>
@@ -311,10 +324,8 @@ st.markdown(
   <span>{strategy_descriptions[scoring_mode]}</span>
 </div>
 """,
-    unsafe_allow_html=True,
-)
-
-st.markdown("</div>", unsafe_allow_html=True)
+        unsafe_allow_html=True,
+    )
 
 # ---------- Category Tagging ----------
 AIO_PAT = re.compile(
@@ -406,82 +417,80 @@ def add_scoring_columns(
 ### START app.py — PART 3 / 6
 
 # ---------- Single Keyword (CARD) ----------
-st.markdown("<div class='oiq-card'>", unsafe_allow_html=True)
+with st.container():
+    st.markdown("<span class='oiq-card-marker'></span>", unsafe_allow_html=True)
 
-st.subheader("Single Keyword Score")
+    st.subheader("Single Keyword Score")
 
-with st.form("single_keyword_form"):
-    c1, c2 = st.columns(2)
-    with c1:
-        vol_val = st.number_input(
-            "Search Volume (A)",
-            min_value=0,
-            step=10,
-            value=0,
-        )
-    with c2:
-        kd_val = st.number_input(
-            "Keyword Difficulty (B)",
-            min_value=0,
-            step=1,
-            value=0,
-        )
-
-    if st.form_submit_button("Calculate Score"):
-        score = calculate_score(vol_val, kd_val)
-        tier = LABEL_MAP.get(score, "Not rated")
-        bg = COLOR_MAP.get(score, COLOR_MAP[0])
-
-        st.markdown(
-            f"""
-            <div style="
-                padding:16px;
-                border-radius:12px;
-                background:{bg};
-                text-align:center;
-                color:#ffffff;
-                font-weight:700;
-            ">
-              <div style="font-size:22px;">
-                Score {score}
-              </div>
-              <div style="font-size:16px;font-weight:600;">
-                Tier: {tier}
-              </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        if vol_val < MIN_VALID_VOLUME:
-            st.warning(
-                f"This strategy requires a minimum volume of {MIN_VALID_VOLUME}."
+    with st.form("single_keyword_form"):
+        c1, c2 = st.columns(2)
+        with c1:
+            vol_val = st.number_input(
+                "Search Volume (A)",
+                min_value=0,
+                step=10,
+                value=0,
+            )
+        with c2:
+            kd_val = st.number_input(
+                "Keyword Difficulty (B)",
+                min_value=0,
+                step=1,
+                value=0,
             )
 
-st.markdown("</div>", unsafe_allow_html=True)
+        if st.form_submit_button("Calculate Score"):
+            score = calculate_score(vol_val, kd_val)
+            tier = LABEL_MAP.get(score, "Not rated")
+            bg = COLOR_MAP.get(score, COLOR_MAP[0])
+
+            st.markdown(
+                f"""
+                <div style="
+                    padding:16px;
+                    border-radius:12px;
+                    background:{bg};
+                    text-align:center;
+                    color:#ffffff;
+                    font-weight:700;
+                ">
+                  <div style="font-size:22px;">
+                    Score {score}
+                  </div>
+                  <div style="font-size:16px;font-weight:600;">
+                    Tier: {tier}
+                  </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            if vol_val < MIN_VALID_VOLUME:
+                st.warning(
+                    f"This strategy requires a minimum volume of {MIN_VALID_VOLUME}."
+                )
 
 # ---------- Bulk Scoring Inputs (CARD) ----------
-st.markdown("<div class='oiq-card'>", unsafe_allow_html=True)
+with st.container():
+    st.markdown("<span class='oiq-card-marker'></span>", unsafe_allow_html=True)
 
-st.subheader("Bulk Scoring (CSV Upload)")
+    st.subheader("Bulk Scoring (CSV Upload)")
 
-# ---------- User URLs ----------
-url_text = st.text_area(
-    "Key URLs for mapping (one per line, up to 10)",
-    placeholder="https://example.com/page-1\nhttps://example.com/page-2",
-    help="Only these URLs will be crawled and eligible for keyword mapping.",
-)
+    # ---------- User URLs ----------
+    url_text = st.text_area(
+        "Key URLs for mapping (one per line, up to 10)",
+        placeholder="https://example.com/page-1\nhttps://example.com/page-2",
+        help="Only these URLs will be crawled and eligible for keyword mapping.",
+    )
 
-urls: List[str] = []
-if url_text.strip():
-    urls = [u.strip() for u in url_text.splitlines() if u.strip()]
-    urls = urls[:10]
+    urls: List[str] = []
+    if url_text.strip():
+        urls = [u.strip() for u in url_text.splitlines() if u.strip()]
+        urls = urls[:10]
 
-st.session_state["user_mapping_urls"] = tuple(urls)
+    st.session_state["user_mapping_urls"] = tuple(urls)
 
-# ---------- CSV Upload ----------
-uploaded = st.file_uploader("Upload CSV", type=["csv"])
-
-st.markdown("</div>", unsafe_allow_html=True)
+    # ---------- CSV Upload ----------
+    uploaded = st.file_uploader("Upload CSV", type=["csv"])
 
 if uploaded is not None:
     raw = uploaded.getvalue()
@@ -575,125 +584,125 @@ if uploaded is not None:
 ### START app.py — PART 4 / 6
 
     # ---------- Mapping + Export (CARD) ----------
-    st.markdown("<div class='oiq-card'>", unsafe_allow_html=True)
+    with st.container():
+        st.markdown("<span class='oiq-card-marker'></span>", unsafe_allow_html=True)
 
-    # ---------- Mapping signature ----------
-    sig_df = export_df[[kw_col, vol_col, kd_col]].copy()
-    sig_csv = sig_df.fillna("").astype(str).to_csv(index=False)
+        # ---------- Mapping signature ----------
+        sig_df = export_df[[kw_col, vol_col, kd_col]].copy()
+        sig_csv = sig_df.fillna("").astype(str).to_csv(index=False)
 
-    user_urls_for_sig = st.session_state.get("user_mapping_urls") or ()
-    first_for_sig = user_urls_for_sig[0] if user_urls_for_sig else ""
+        user_urls_for_sig = st.session_state.get("user_mapping_urls") or ()
+        first_for_sig = user_urls_for_sig[0] if user_urls_for_sig else ""
 
-    base_norm = ""
-    if first_for_sig:
-        try:
-            p = urlparse(first_for_sig.strip())
-            if p.scheme and p.netloc:
-                base_norm = f"{p.scheme}://{p.netloc}".lower()
-            else:
+        base_norm = ""
+        if first_for_sig:
+            try:
+                p = urlparse(first_for_sig.strip())
+                if p.scheme and p.netloc:
+                    base_norm = f"{p.scheme}://{p.netloc}".lower()
+                else:
+                    base_norm = first_for_sig.strip().lower()
+            except Exception:
                 base_norm = first_for_sig.strip().lower()
-        except Exception:
-            base_norm = first_for_sig.strip().lower()
 
-    sig_base = (
-        f"site-map-v14-run_mapping_only|"
-        f"{base_norm}|{scoring_mode}|{kw_col}|{vol_col}|{kd_col}|{len(export_df)}"
-    )
-
-    curr_signature = hashlib.md5(
-        (sig_base + "\n" + sig_csv).encode("utf-8")
-    ).hexdigest()
-
-    # Invalidate previous mapping if inputs changed
-    if st.session_state.get("map_signature") != curr_signature:
-        st.session_state["map_ready"] = False
-        st.session_state.pop("map_result_df", None)
-        st.session_state.pop("crawl_signals", None)
-
-    # ---------- DEBUG (temporary) ----------
-    debug_mapping = st.checkbox("Debug mapping (temporary)", value=False)
-
-    # ---------- Mapping button ----------
-    user_urls_for_btn = st.session_state.get("user_mapping_urls") or ()
-    can_map = len(user_urls_for_btn) > 0
-
-    map_btn = st.button(
-        "Map keywords to site",
-        type="primary",
-        disabled=not can_map,
-        help="Crawls the supplied URLs and maps keywords using crawl signals.",
-    )
-
-    if map_btn and not st.session_state.get("mapping_running", False):
-        st.session_state["mapping_running"] = True
-
-        loader = st.empty()
-        loader.markdown(
-            """
-            <div class="oiq-loader">
-              <div class="oiq-spinner"></div>
-              <div class="oiq-loader-text">
-                Crawling URLs & mapping keywords…
-              </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
+        sig_base = (
+            f"site-map-v14-run_mapping_only|"
+            f"{base_norm}|{scoring_mode}|{kw_col}|{vol_col}|{kd_col}|{len(export_df)}"
         )
 
-        with st.spinner("Running keyword mapping…"):
-            url_list = list(user_urls_for_btn)[:10]
+        curr_signature = hashlib.md5(
+            (sig_base + "\n" + sig_csv).encode("utf-8")
+        ).hexdigest()
 
-            # 1️⃣ Crawl user URLs (single authority)
-            profiles = fetch_profiles(url_list)
+        # Invalidate previous mapping if inputs changed
+        if st.session_state.get("map_signature") != curr_signature:
+            st.session_state["map_ready"] = False
+            st.session_state.pop("map_result_df", None)
+            st.session_state.pop("crawl_signals", None)
 
-            st.session_state["crawl_signals"] = {
-                p["url"]: p
-                for p in profiles
-                if isinstance(p, dict) and p.get("url")
-            }
+        # ---------- DEBUG (temporary) ----------
+        debug_mapping = st.checkbox("Debug mapping (temporary)", value=False)
 
-            page_signals_by_url = st.session_state["crawl_signals"]
+        # ---------- Mapping button ----------
+        user_urls_for_btn = st.session_state.get("user_mapping_urls") or ()
+        can_map = len(user_urls_for_btn) > 0
 
-            # ---- DEBUG prints (prove what we have) ----
-            if debug_mapping:
-                st.write("profiles:", len(profiles))
-                st.write("crawl_signals:", len(page_signals_by_url))
-                st.write("signal sample keys:", list(page_signals_by_url.keys())[:3])
-                if page_signals_by_url:
-                    first_sig = next(iter(page_signals_by_url.values()))
-                    st.write(
-                        "token counts (first page):",
-                        {
-                            k: len(first_sig.get(k, []))
-                            for k in ["slug_tokens", "title_tokens", "h1_tokens", "h2h3_tokens", "meta_tokens"]
-                        },
-                    )
+        map_btn = st.button(
+            "Map keywords to site",
+            type="primary",
+            disabled=not can_map,
+            help="Crawls the supplied URLs and maps keywords using crawl signals.",
+        )
 
-            if not page_signals_by_url:
-                st.error("No crawl data found. Please click Map keywords to site again.")
-                st.session_state["mapping_running"] = False
-                st.markdown("</div>", unsafe_allow_html=True)
-                st.stop()
+        if map_btn and not st.session_state.get("mapping_running", False):
+            st.session_state["mapping_running"] = True
 
-            # 2️⃣ Ensure Map URL column exists
-            if "Map URL" not in export_df.columns:
-                export_df["Map URL"] = ""
-
-            # 3️⃣ Run mapping (single authority)
-            mapped_df = run_mapping(
-                df=export_df,
-                page_signals_by_url=page_signals_by_url,
+            loader = st.empty()
+            loader.markdown(
+                """
+                <div class="oiq-loader">
+                  <div class="oiq-spinner"></div>
+                  <div class="oiq-loader-text">
+                    Crawling URLs & mapping keywords…
+                  </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
             )
 
-            if debug_mapping and isinstance(mapped_df, pd.DataFrame) and "Map URL" in mapped_df.columns:
-                st.write("mapped count:", int((mapped_df["Map URL"].astype(str).str.len() > 0).sum()))
+            with st.spinner("Running keyword mapping…"):
+                url_list = list(user_urls_for_btn)[:10]
 
-            st.session_state["map_result_df"] = mapped_df
-            st.session_state["map_signature"] = curr_signature
-            st.session_state["map_ready"] = True
+                # 1️⃣ Crawl user URLs (single authority)
+                profiles = fetch_profiles(url_list)
 
-        loader.empty()
-        st.session_state["mapping_running"] = False
+                st.session_state["crawl_signals"] = {
+                    p["url"]: p
+                    for p in profiles
+                    if isinstance(p, dict) and p.get("url")
+                }
+
+                page_signals_by_url = st.session_state["crawl_signals"]
+
+                # ---- DEBUG prints (prove what we have) ----
+                if debug_mapping:
+                    st.write("profiles:", len(profiles))
+                    st.write("crawl_signals:", len(page_signals_by_url))
+                    st.write("signal sample keys:", list(page_signals_by_url.keys())[:3])
+                    if page_signals_by_url:
+                        first_sig = next(iter(page_signals_by_url.values()))
+                        st.write(
+                            "token counts (first page):",
+                            {
+                                k: len(first_sig.get(k, []))
+                                for k in ["slug_tokens", "title_tokens", "h1_tokens", "h2h3_tokens", "meta_tokens"]
+                            },
+                        )
+
+                if not page_signals_by_url:
+                    st.error("No crawl data found. Please click Map keywords to site again.")
+                    st.session_state["mapping_running"] = False
+                    st.stop()
+
+                # 2️⃣ Ensure Map URL column exists
+                if "Map URL" not in export_df.columns:
+                    export_df["Map URL"] = ""
+
+                # 3️⃣ Run mapping (single authority)
+                mapped_df = run_mapping(
+                    df=export_df,
+                    page_signals_by_url=page_signals_by_url,
+                )
+
+                if debug_mapping and isinstance(mapped_df, pd.DataFrame) and "Map URL" in mapped_df.columns:
+                    st.write("mapped count:", int((mapped_df["Map URL"].astype(str).str.len() > 0).sum()))
+
+                st.session_state["map_result_df"] = mapped_df
+                st.session_state["map_signature"] = curr_signature
+                st.session_state["map_ready"] = True
+
+            loader.empty()
+            st.session_state["mapping_running"] = False
 
 ### END app.py — PART 4 / 6
 
@@ -757,9 +766,6 @@ if uploaded is not None:
         disabled=not can_download,
         help="Mapping runs only after clicking 'Map keywords to site'",
     )
-
-    # Close Mapping + Export card
-    st.markdown("</div>", unsafe_allow_html=True)
 
 ### END app.py — PART 5 / 6
 
