@@ -132,8 +132,24 @@ div[data-testid="stSelectbox"] svg {{
 div[data-testid="stSelectbox"] [data-baseweb="select"]:focus-within > div {{
   box-shadow: 0 0 0 3px rgba(238, 23, 51, 0.25) !important;
 }}
-/* Fix: label must be readable on white card/background */
 div[data-testid="stSelectbox"] label {{
+  color: #000000 !important;
+}}
+
+/* ---------- FIX: All field labels should be black on white cards ---------- */
+div[data-testid="stNumberInput"] label,
+div[data-testid="stTextInput"] label,
+div[data-testid="stTextArea"] label,
+div[data-testid="stFileUploader"] label,
+div[data-testid="stSelectbox"] label {{
+  color: #000000 !important;
+}}
+/* Some Streamlit builds use these label wrappers */
+div[data-testid="stNumberInput"] label p,
+div[data-testid="stTextInput"] label p,
+div[data-testid="stTextArea"] label p,
+div[data-testid="stFileUploader"] label p,
+div[data-testid="stSelectbox"] label p {{
   color: #000000 !important;
 }}
 
@@ -190,7 +206,6 @@ div[data-testid="stFileUploader"] section * {{
 /* ---------- Real Cards: style the Streamlit container that contains our marker ---------- */
 .oiq-card-marker {{ display:none; }}
 
-/* Primary card style (applied to the container block that has the marker somewhere inside) */
 div[data-testid="stVerticalBlock"]:has(.oiq-card-marker) {{
   background: #ffffff;
   border-radius: 14px;
@@ -199,7 +214,6 @@ div[data-testid="stVerticalBlock"]:has(.oiq-card-marker) {{
   box-shadow: 0 1px 2px rgba(0,0,0,0.06);
 }}
 
-/* Prevent some inner block default spacing from looking too airy */
 div[data-testid="stVerticalBlock"]:has(.oiq-card-marker) .stMarkdown {{
   margin-bottom: 0.25rem;
 }}
@@ -222,7 +236,7 @@ st.markdown(
   <div class="oiq-header-inner">
     <div class="oiq-title">RANKEDBOX</div>
     <div class="oiq-sub">
-      Score keywords by Search Volume (A) and Keyword Difficulty (B)
+      Smart Keyword Scoring Engine
     </div>
   </div>
 </div>
