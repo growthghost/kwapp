@@ -140,8 +140,23 @@ async def _fetch_profiles_async(urls: List[str]) -> List[Dict]:
     results: List[Dict] = []
 
     timeout = aiohttp.ClientTimeout(total=45)
+
+    # Use browser-like headers (many career sites block obvious bot UAs)
     headers = {
-        "User-Agent": "OutrankIQMapper/1.0 (+https://outrankiq.com)"
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/121.0.0.0 Safari/537.36"
+        ),
+        "Accept": (
+            "text/html,application/xhtml+xml,application/xml;"
+            "q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"
+        ),
+        "Accept-Language": "en-US,en;q=0.9",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
+        "Upgrade-Insecure-Requests": "1",
+        "DNT": "1",
     }
 
     async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:

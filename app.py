@@ -532,26 +532,73 @@ if uploaded is not None:
     raw = uploaded.getvalue()
 
     def try_read_csv(data: bytes) -> pd.DataFrame:
-        trials = [
-            {"encoding": None},
-            {"encoding": "utf-8"},
-            {"encoding": "utf-8-sig"},
-            {"encoding": "ISO-8859-1"},
-            {"encoding": "cp1252"},
-            {"encoding": "utf-16"},
-        ]
+        import csv
+
+        # Common encodings users upload
+        encodings = ["utf-8", "utf-8-sig", "cp1252", "ISO-8859-1", "utf-16"]
+
+        # Delimiters we want to support
+        candidate_delims = [",", ";", "\t", "|"]
+
         last_err = None
-        for t in trials:
+
+        # Helper: attempt sniffing delimiter from decoded text
+        def _sniff_delim(text: str) -> str:
+            sample = text[:8192]
             try:
-                return pd.read_csv(io.BytesIO(data), **t)
+                dialect = csv.Sniffer().sniff(sample, delimiters=candidate_delims)
+                return dialect.delimiter
+            except Exception:
+                # Fallback: choose the delimiter that appears most often in sample
+                counts = {d: sample.count(d) for d in candidate_delims}
+                best = max(counts, key=counts.get)
+                return best if counts[best] > 0 else ","
+
+        for enc in encodings:
+            try:
+                text = data.decode(enc, errors="strict")
             except Exception as e:
                 last_err = e
-        raise last_err
+                continue
+
+            delim = _sniff_delim(text)
+
+            # Attempt 1: fast/normal parse
+            try:
+                return pd.read_csv(
+                    io.StringIO(text),
+                    sep=delim,
+                )
+            except Exception as e1:
+                last_err = e1
+
+            # Attempt 2: more tolerant parser
+            try:
+                return pd.read_csv(
+                    io.StringIO(text),
+                    sep=delim,
+                    engine="python",
+                )
+            except Exception as e2:
+                last_err = e2
+
+            # Attempt 3: last-resort — skip malformed rows
+            try:
+                return pd.read_csv(
+                    io.StringIO(text),
+                    sep=delim,
+                    engine="python",
+                    on_bad_lines="skip",
+                )
+            except Exception as e3:
+                last_err = e3
+
+        raise last_err if last_err else ValueError("Unable to read CSV.")
 
     try:
         df = try_read_csv(raw)
-    except Exception:
-        st.error("Could not read the CSV file.")
+    except Exception as e:
+        st.error(f"Could not read the CSV file. ({type(e).__name__}: {e})")
         st.stop()
 
     vol_col = find_column(df, ["volume", "search volume", "sv"])
