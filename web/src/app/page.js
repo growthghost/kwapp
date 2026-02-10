@@ -1,65 +1,124 @@
-import Image from "next/image";
+// web/src/app/try/page.js
+"use client";
 
-export default function Home() {
+import { useMemo, useState } from "react";
+
+const LABEL_MAP = {
+  6: "Elite",
+  5: "Excellent",
+  4: "Good",
+  3: "Fair",
+  2: "Low",
+  1: "Very Low",
+  0: "Not rated",
+};
+
+// Used for the single-word color card (unchanged, since these represent tiers)
+const COLOR_MAP = {
+  6: "#2ecc71",
+  5: "#a3e635",
+  4: "#facc15",
+  3: "#fb923c",
+  2: "#f87171",
+  1: "#ef4444",
+  0: "#9ca3af",
+};
+
+function clamp(n, min, max) {
+  return Math.max(min, Math.min(max, n));
+}
+
+/**
+ * TEMP scoring logic for /try (front-end only).
+ * We'll replace this with a secure API call later.
+ *
+ * For now: simple 0–6 score based on low KD + decent volume.
+ */
+function calcScore(volume, kd) {
+  const v = Number.isFinite(volume) ? volume : 0;
+  const k = Number.isFinite(kd) ? kd : 100;
+
+  // basic heuristics
+  let s = 0;
+
+  if (v >= 10) s += 1;
+  if (v >= 50) s += 1;
+  if (v >= 200) s += 1;
+
+  if (k <= 60) s += 1;
+  if (k <= 40) s += 1;
+  if (k <= 25) s += 1;
+
+  return clamp(s, 0, 6);
+}
+
+export default function TryPage() {
+  const [volume, setVolume] = useState(50);
+  const [kd, setKd] = useState(21);
+  const [score, setScore] = useState(null);
+
+  const tier = useMemo(() => {
+    if (score === null) return null;
+    return LABEL_MAP[score] ?? "Not rated";
+  }, [score]);
+
+  const barColor = useMemo(() => {
+    if (score === null) return "#9ca3af";
+    return COLOR_MAP[score] ?? "#9ca3af";
+  }, [score]);
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.js file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+    <div className="page">
+      <div className="container">
+        <h1 className="h1">Try RankedBox</h1>
+        <p className="sub">
+          This is the public <strong>/try</strong> page. It uses a temporary
+          front-end-only score for now. Later, we’ll call your secure Python API.
+        </p>
+
+        <div className="card">
+          <div className="sectionTitle">Single Keyword Score</div>
+
+          <div className="grid2">
+            <div>
+              <label className="label">Search Volume (A)</label>
+              <input
+                className="input"
+                type="number"
+                min="0"
+                value={volume}
+                onChange={(e) => setVolume(parseInt(e.target.value || "0", 10))}
+              />
+            </div>
+
+            <div>
+              <label className="label">Keyword Difficulty (B)</label>
+              <input
+                className="input"
+                type="number"
+                min="0"
+                value={kd}
+                onChange={(e) => setKd(parseInt(e.target.value || "0", 10))}
+              />
+            </div>
+          </div>
+
+          <div className="btnRow">
+            <button
+              className="btn"
+              onClick={() => setScore(calcScore(Number(volume), Number(kd)))}
             >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+              Calculate Score
+            </button>
+          </div>
+
+          {score !== null && (
+            <div className="scoreBar" style={{ background: barColor }}>
+              Score {score} — Tier: {tier}
+            </div>
+          )}
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+      </div>
     </div>
   );
 }
