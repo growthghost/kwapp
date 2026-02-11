@@ -148,14 +148,16 @@ body {
   opacity: 1;
   text-decoration: underline;
 }
-/* RankedBox top header */
+/* ===== RankedBox Topbar ===== */
 .rbTopbar {
-  background: #f2f2f2; /* light gray */
-  padding: 18px 24px;
+  background: #f2f2f2;
+  padding: 14px 20px;
   border-bottom: 1px solid rgba(0, 0, 0, 0.08);
 }
 
 .rbBrand {
+  max-width: 1100px;
+  margin: 0 auto;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -165,11 +167,14 @@ body {
   width: 34px;
   height: 34px;
   object-fit: contain;
+  display: block;
 }
 
 .rbBrandText {
   font-size: 22px;
-  font-weight: 800;
+  font-weight: 900;
   letter-spacing: -0.02em;
   color: #000;
+  line-height: 1;
 }
+
