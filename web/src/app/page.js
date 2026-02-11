@@ -67,58 +67,75 @@ export default function TryPage() {
     return COLOR_MAP[score] ?? "#9ca3af";
   }, [score]);
 
-  return (
-    <div className="page">
-      <div className="container">
-        <h1 className="h1">Try RankedBox</h1>
-        <p className="sub">
-          This is the public <strong>/try</strong> page. It uses a temporary
-          front-end-only score for now. Later, we’ll call your secure Python API.
-        </p>
+    return (
+    <main className="rb-container">
+      <h1 className="rb-title">Try RankedBox</h1>
+      <p className="rb-subtitle">
+        This is the public <strong>/try</strong> page. It uses a temporary
+        front-end-only score for now. Later, we’ll call your secure Python API.
+      </p>
 
-        <div className="card">
-          <div className="sectionTitle">Single Keyword Score</div>
-
-          <div className="grid2">
-            <div>
-              <label className="label">Search Volume (A)</label>
-              <input
-                className="input"
-                type="number"
-                min="0"
-                value={volume}
-                onChange={(e) => setVolume(parseInt(e.target.value || "0", 10))}
-              />
-            </div>
-
-            <div>
-              <label className="label">Keyword Difficulty (B)</label>
-              <input
-                className="input"
-                type="number"
-                min="0"
-                value={kd}
-                onChange={(e) => setKd(parseInt(e.target.value || "0", 10))}
-              />
-            </div>
-          </div>
-
-          <div className="btnRow">
-            <button
-              className="btn"
-              onClick={() => setScore(calcScore(Number(volume), Number(kd)))}
-            >
-              Calculate Score
-            </button>
-          </div>
-
-          {score !== null && (
-            <div className="scoreBar" style={{ background: barColor }}>
-              Score {score} — Tier: {tier}
-            </div>
-          )}
+      <div style={{ marginTop: 18 }} className="rb-card">
+        <div style={{ fontSize: 18, fontWeight: 900, marginBottom: 14 }}>
+          Single Keyword Score
         </div>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: 14,
+          }}
+        >
+          <div>
+            <label className="rb-label">Search Volume (A)</label>
+            <input
+              className="rb-input"
+              type="number"
+              min="0"
+              value={volume}
+              onChange={(e) => setVolume(parseInt(e.target.value || "0", 10))}
+            />
+          </div>
+
+          <div>
+            <label className="rb-label">Keyword Difficulty (B)</label>
+            <input
+              className="rb-input"
+              type="number"
+              min="0"
+              value={kd}
+              onChange={(e) => setKd(parseInt(e.target.value || "0", 10))}
+            />
+          </div>
+        </div>
+
+        <div style={{ marginTop: 14 }}>
+          <button
+            className="rb-btn"
+            onClick={() => setScore(calcScore(Number(volume), Number(kd)))}
+          >
+            Calculate Score
+          </button>
+        </div>
+
+        {score !== null && (
+          <div
+            style={{
+              marginTop: 16,
+              borderRadius: 14,
+              padding: 16,
+              textAlign: "center",
+              fontWeight: 900,
+              background: barColor,
+              color: "#0B0B0B", // keeps text readable on yellow/green
+              border: "1px solid rgba(0,0,0,0.10)",
+            }}
+          >
+            Score {score} — Tier: {tier}
+          </div>
+        )}
       </div>
-    </div>
+    </main>
   );
 }
