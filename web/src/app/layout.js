@@ -13,7 +13,7 @@ export default function RootLayout({ children }) {
           <div className="rbBrand">
             <img
               className="rbLogo"
-              src="/RankedBox Logo Icon.png"
+              src="/RankedBoxLogoIcon.png"
               alt="RankedBox"
             />
             <span className="rbBrandText">RankedBox</span>

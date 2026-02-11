@@ -148,3 +148,28 @@ body {
   opacity: 1;
   text-decoration: underline;
 }
+/* RankedBox top header */
+.rbTopbar {
+  background: #f2f2f2; /* light gray */
+  padding: 18px 24px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.rbBrand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.rbLogo {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+}
+
+.rbBrandText {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: #000;
+}
