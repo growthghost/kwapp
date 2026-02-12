@@ -2,7 +2,7 @@
 import "./globals.css";
 
 export const metadata = {
-  title: "RankedBox",
+  title: "RANKEDBOX",
   description: "Score keywords by Search Volume and Keyword Difficulty",
 };
 
@@ -21,7 +21,7 @@ export default function RootLayout({ children }) {
                 height={34}
                 style={{ width: 34, height: 34, objectFit: "contain", display: "block" }}
               />
-              <span className="rb-brand-name">RankedBox</span>
+              <span className="rb-brand-name">RANKEDBOX</span>
             </div>
 
             <nav className="rb-nav">
