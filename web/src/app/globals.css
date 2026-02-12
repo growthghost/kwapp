@@ -45,8 +45,9 @@ body {
 
 /* ===== Text ===== */
 .rb-title{
+  font-family: "Century Gothic", CenturyGothic, AppleGothic, "Segoe UI", Arial, sans-serif;
   font-size: 40px;
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: -0.02em;
 }
 
@@ -126,15 +127,20 @@ body {
 }
 
 .rb-brand-name{
-  font-size: 26px;
-  font-weight: 900;
-  letter-spacing: 0.02em;
+  font-family: "Century Gothic", CenturyGothic, AppleGothic, "Segoe UI", Arial, sans-serif;
+  font-size: 18px;
+  font-weight: 400;         /* not bold */
+  letter-spacing: 0.10em;   /* clean spacing for caps */
+  text-transform: uppercase;
 }
 
-.rb-nav{
-  display: flex;
-  align-items: center;
-  gap: 14px;
+.rb-nav a{
+  font-family: "Century Gothic", CenturyGothic, AppleGothic, "Segoe UI", Arial, sans-serif;
+  font-size: 13px;
+  font-weight: 400;     /* not bold */
+  color: #FFFFFF;
+  text-decoration: none;
+  opacity: 0.90;
 }
 
 .rb-nav a{
@@ -164,8 +170,8 @@ body {
 }
 
 .rbLogo {
-  width: 34px;
-  height: 34px;
+  width: 24px;
+  height: 24px;
   object-fit: contain;
   display: block;
 }
