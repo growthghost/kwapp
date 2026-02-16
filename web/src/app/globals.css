@@ -11,28 +11,29 @@
 
   --shadow: 0 10px 30px rgba(0,0,0,0.06);
 
-  --btn: #0B0B0B;        /* default button background */
-  --btnText: #FFFFFF;   /* default button text */
-  --btnHover: #E11D33;  /* hover background */
+  --btn: #0B0B0B;
+  --btnText: #FFFFFF;
+  --btnHover: #E11D33;
 }
 
-/* ===== Page Base ===== */
+/* ===== Base ===== */
 html, body {
   height: 100%;
 }
 
 body {
+  margin: 0;
   background: var(--bg);
   color: var(--ink);
   font-family: Arial, Helvetica, sans-serif;
 }
 
-/* ===== Layout Helpers ===== */
+/* ===== Shared Layout ===== */
 .rb-container{
   width: 100%;
   max-width: 1100px;
   margin: 0 auto;
-  padding: 28px 20px 60px;
+  padding: 34px 20px 80px;
 }
 
 .rb-card{
@@ -43,18 +44,24 @@ body {
   padding: 22px;
 }
 
-/* ===== Text ===== */
-.rb-title{
+/* ===== Titles / Headlines (Century Gothic) ===== */
+.rb-title,
+.rb-headline,
+.rb-sectionTitle {
   font-family: "Century Gothic", CenturyGothic, AppleGothic, "Segoe UI", Arial, sans-serif;
+}
+
+.rb-title{
   font-size: 40px;
   font-weight: 700;
   letter-spacing: -0.02em;
+  margin: 0;
 }
 
 .rb-subtitle{
   color: var(--muted);
   font-size: 16px;
-  margin-top: 6px;
+  margin: 10px 0 0;
 }
 
 /* ===== Inputs ===== */
@@ -95,7 +102,6 @@ body {
 
 .rb-btn:hover{
   background: var(--btnHover) !important;
-  color: var(--btnText) !important;
   transform: translateY(-1px);
 }
 
@@ -103,7 +109,7 @@ body {
   transform: translateY(0px);
 }
 
-/* ===== Header ===== */
+/* ===== Header (black bar) ===== */
 .rb-header{
   background: #0B0B0B;
   color: #FFFFFF;
@@ -114,7 +120,7 @@ body {
   width: 100%;
   max-width: 1100px;
   margin: 0 auto;
-  padding: 18px 20px;
+  padding: 14px 20px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -123,64 +129,42 @@ body {
 .rb-brand{
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+}
+
+.rb-logo{
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+  display: block;
 }
 
 .rb-brand-name{
   font-family: "Century Gothic", CenturyGothic, AppleGothic, "Segoe UI", Arial, sans-serif;
-  font-size: 18px;
-  font-weight: 400;         /* not bold */
-  letter-spacing: 0.10em;   /* clean spacing for caps */
+  font-size: 16px;
+  font-weight: 400;       /* NOT bold */
+  letter-spacing: 0.12em; /* spaced caps */
   text-transform: uppercase;
+  line-height: 1;
+}
+
+/* ===== Nav (smaller, NOT bold) ===== */
+.rb-nav{
+  display: flex;
+  align-items: center;
+  gap: 16px;
 }
 
 .rb-nav a{
   font-family: "Century Gothic", CenturyGothic, AppleGothic, "Segoe UI", Arial, sans-serif;
   font-size: 13px;
-  font-weight: 400;     /* not bold */
+  font-weight: 400;     /* NOT bold */
   color: #FFFFFF;
   text-decoration: none;
   opacity: 0.90;
-}
-
-.rb-nav a{
-  color: #FFFFFF;
-  text-decoration: none;
-  font-weight: 700;
-  opacity: 0.92;
 }
 
 .rb-nav a:hover{
   opacity: 1;
   text-decoration: underline;
 }
-/* ===== RankedBox Topbar ===== */
-.rbTopbar {
-  background: #f2f2f2;
-  padding: 14px 20px;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
-}
-
-.rbBrand {
-  max-width: 1100px;
-  margin: 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.rbLogo {
-  width: 24px;
-  height: 24px;
-  object-fit: contain;
-  display: block;
-}
-
-.rbBrandText {
-  font-size: 22px;
-  font-weight: 900;
-  letter-spacing: -0.02em;
-  color: #000;
-  line-height: 1;
-}
-
