@@ -13,7 +13,6 @@ const LABEL_MAP = {
   0: "Not rated",
 };
 
-// Used for the single-word color card (unchanged, since these represent tiers)
 const COLOR_MAP = {
   6: "#2ecc71",
   5: "#a3e635",
@@ -28,17 +27,10 @@ function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
 }
 
-/**
- * TEMP scoring logic for /try (front-end only).
- * We'll replace this with a secure API call later.
- *
- * For now: simple 0–6 score based on low KD + decent volume.
- */
 function calcScore(volume, kd) {
   const v = Number.isFinite(volume) ? volume : 0;
   const k = Number.isFinite(kd) ? kd : 100;
 
-  // basic heuristics
   let s = 0;
 
   if (v >= 10) s += 1;
@@ -67,75 +59,76 @@ export default function TryPage() {
     return COLOR_MAP[score] ?? "#9ca3af";
   }, [score]);
 
-    return (
-  <main className="rb-container">
-    <h1 className="rb-title">Try RankedBox</h1>
-    <p className="rb-subtitle">
-      This is the public <strong>/try</strong> page. We’ll put the single keyword
-      score tool here next.
-    </p>
+  return (
+    <main className="rb-container">
+      <h1 className="rb-title">Try RankedBox</h1>
 
-    <div style={{ marginTop: 18 }} className="rb-card">
-      <div style={{ fontSize: 18, fontWeight: 900, marginBottom: 14 }}>
-        Single Keyword Score
-      </div>
+      <p className="rb-subtitle">
+        This is the public <strong>/try</strong> page. We’ll put the single keyword
+        score tool here next.
+      </p>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          gap: 14,
-        }}
-      >
-        <div>
-          <label className="rb-label">Search Volume (A)</label>
-          <input
-            className="rb-input"
-            type="number"
-            min="0"
-            value={volume}
-            onChange={(e) => setVolume(parseInt(e.target.value || "0", 10))}
-          />
+      <div className="rb-card" style={{ marginTop: 18, maxWidth: 820 }}>
+        <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 14 }}>
+          Single Keyword Score
         </div>
 
-        <div>
-          <label className="rb-label">Keyword Difficulty (B)</label>
-          <input
-            className="rb-input"
-            type="number"
-            min="0"
-            value={kd}
-            onChange={(e) => setKd(parseInt(e.target.value || "0", 10))}
-          />
-        </div>
-      </div>
-
-      <div style={{ marginTop: 14 }}>
-        <button
-          className="rb-btn"
-          onClick={() => setScore(calcScore(Number(volume), Number(kd)))}
-        >
-          Calculate Score
-        </button>
-      </div>
-
-      {score !== null && (
         <div
           style={{
-            marginTop: 16,
-            borderRadius: 14,
-            padding: 16,
-            textAlign: "center",
-            fontWeight: 900,
-            background: barColor,
-            color: "#0B0B0B",
-            border: "1px solid rgba(0,0,0,0.10)",
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: 14,
           }}
         >
-          Score {score} — Tier: {tier}
+          <div>
+            <label className="rb-label">Search Volume (A)</label>
+            <input
+              className="rb-input"
+              type="number"
+              min="0"
+              value={volume}
+              onChange={(e) => setVolume(parseInt(e.target.value || "0", 10))}
+            />
+          </div>
+
+          <div>
+            <label className="rb-label">Keyword Difficulty (B)</label>
+            <input
+              className="rb-input"
+              type="number"
+              min="0"
+              value={kd}
+              onChange={(e) => setKd(parseInt(e.target.value || "0", 10))}
+            />
+          </div>
         </div>
-      )}
-    </div>
-  </main>
-);
+
+        <div style={{ marginTop: 14 }}>
+          <button
+            className="rb-btn"
+            onClick={() => setScore(calcScore(Number(volume), Number(kd)))}
+          >
+            Calculate Score
+          </button>
+        </div>
+
+        {score !== null && (
+          <div
+            style={{
+              marginTop: 16,
+              borderRadius: 14,
+              padding: 16,
+              textAlign: "center",
+              fontWeight: 700,
+              background: barColor,
+              color: "#0B0B0B",
+              border: "1px solid rgba(0,0,0,0.10)",
+            }}
+          >
+            Score {score} — Tier: {tier}
+          </div>
+        )}
+      </div>
+    </main>
+  );
 }
