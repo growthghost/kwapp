@@ -1,5 +1,6 @@
 // web/src/app/layout.js
 import "./globals.css";
+import Link from "next/link";
 
 export const metadata = {
   title: "RANKEDBOX",
@@ -12,10 +13,22 @@ export default function RootLayout({ children }) {
       <body>
         <header className="rb-header">
           <div className="rb-header-inner">
-            <div className="rb-brand">
-              <img className="rb-logo" src="/RankedBoxLogoIcon.png" alt="RankedBox" />
+            <Link href="/" className="rb-brand" aria-label="Go to home">
+              <img
+                className="rb-logo"
+                src="/RankedBoxLogoIcon.png"
+                alt="RankedBox"
+                width={34}
+                height={34}
+                style={{
+                  width: 34,
+                  height: 34,
+                  objectFit: "contain",
+                  display: "block",
+                }}
+              />
               <span className="rb-brand-name">RANKEDBOX</span>
-            </div>
+            </Link>
 
             <nav className="rb-nav">
               <a href="/try">Try</a>
