@@ -31,10 +31,10 @@ export default function RootLayout({ children }) {
             </Link>
 
             <nav className="rb-nav">
-              <a href="/try">Try</a>
-              <a href="/app">App</a>
-              <a href="/pricing">Pricing</a>
-              <a href="/login">Login</a>
+              <Link href="/try">Try</Link>
+              <Link href="/app">App</Link>
+              <Link href="/pricing">Pricing</Link>
+              <Link href="/login">Login</Link>
             </nav>
           </div>
         </header>
