@@ -13,14 +13,7 @@ export default function RootLayout({ children }) {
         <header className="rb-header">
           <div className="rb-header-inner">
             <div className="rb-brand">
-              <img
-                className="rb-logo"
-                src="/RankedBoxLogoIcon.png"
-                alt="RankedBox"
-                width={34}
-                height={34}
-                style={{ width: 34, height: 34, objectFit: "contain", display: "block" }}
-              />
+              <img className="rb-logo" src="/RankedBoxLogoIcon.png" alt="RankedBox" />
               <span className="rb-brand-name">RANKEDBOX</span>
             </div>
 
