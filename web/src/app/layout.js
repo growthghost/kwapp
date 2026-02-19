@@ -1,18 +1,14 @@
 // web/src/app/layout.js
 import "./globals.css";
 import Link from "next/link";
-import { cookies } from "next/headers";
+import HeaderNav from "./components/HeaderNav";
 
 export const metadata = {
   title: "RANKEDBOX",
   description: "Score keywords by Search Volume and Keyword Difficulty",
 };
 
-export default async function RootLayout({ children }) {
-  // Next 15/16: cookies() is async
-  const cookieStore = await cookies();
-  const isAuthed = cookieStore.get("rb_session")?.value === "1";
-
+export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <body>
@@ -23,11 +19,11 @@ export default async function RootLayout({ children }) {
                 className="rb-logo"
                 src="/RankedBoxLogoIcon.png"
                 alt="RankedBox"
-                width={34}
-                height={34}
+                width={24}
+                height={24}
                 style={{
-                  width: 34,
-                  height: 34,
+                  width: 24,
+                  height: 24,
                   objectFit: "contain",
                   display: "block",
                 }}
@@ -35,19 +31,7 @@ export default async function RootLayout({ children }) {
               <span className="rb-brand-name">RANKEDBOX</span>
             </Link>
 
-            <nav className="rb-nav">
-              <Link href="/try">Try</Link>
-              <Link href="/pricing">Pricing</Link>
-
-              {isAuthed ? (
-                <>
-                  <Link href="/app">App</Link>
-                  <Link href="/logout">Logout</Link>
-                </>
-              ) : (
-                <Link href="/login">Login</Link>
-              )}
-            </nav>
+            <HeaderNav />
           </div>
         </header>
 
