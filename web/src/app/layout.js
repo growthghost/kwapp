@@ -1,6 +1,7 @@
 // web/src/app/layout.js
 import "./globals.css";
 import Link from "next/link";
+import { cookies } from "next/headers";
 
 export const metadata = {
   title: "RANKEDBOX",
@@ -8,6 +9,9 @@ export const metadata = {
 };
 
 export default function RootLayout({ children }) {
+  // Server-side read of cookie so header can switch Login/Logout + App
+  const isAuthed = cookies().get("rb_session")?.value === "1";
+
   return (
     <html lang="en">
       <body>
@@ -32,9 +36,16 @@ export default function RootLayout({ children }) {
 
             <nav className="rb-nav">
               <Link href="/try">Try</Link>
-              <Link href="/app">App</Link>
               <Link href="/pricing">Pricing</Link>
-              <Link href="/login">Login</Link>
+
+              {isAuthed ? (
+                <>
+                  <Link href="/app">App</Link>
+                  <Link href="/logout">Logout</Link>
+                </>
+              ) : (
+                <Link href="/login">Login</Link>
+              )}
             </nav>
           </div>
         </header>
