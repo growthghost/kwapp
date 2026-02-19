@@ -8,9 +8,10 @@ export const metadata = {
   description: "Score keywords by Search Volume and Keyword Difficulty",
 };
 
-export default function RootLayout({ children }) {
-  // Server-side read of cookie so header can switch Login/Logout + App
-  const isAuthed = cookies().get("rb_session")?.value === "1";
+export default async function RootLayout({ children }) {
+  // Next 15/16: cookies() is async
+  const cookieStore = await cookies();
+  const isAuthed = cookieStore.get("rb_session")?.value === "1";
 
   return (
     <html lang="en">
