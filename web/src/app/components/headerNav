@@ -1,0 +1,45 @@
+"use client";
+
+import Link from "next/link";
+import { useEffect, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
+
+function hasSessionCookie() {
+  return document.cookie.split("; ").some((c) => c.startsWith("rb_session="));
+}
+
+export default function HeaderNav() {
+  const [isAuthed, setIsAuthed] = useState(false);
+  const pathname = usePathname();
+  const router = useRouter();
+
+  useEffect(() => {
+    setIsAuthed(hasSessionCookie());
+  }, [pathname]);
+
+  function handleLogout(e) {
+    e.preventDefault();
+    // delete cookie
+    document.cookie = "rb_session=; Max-Age=0; Path=/; SameSite=Lax";
+    setIsAuthed(false);
+    router.push("/login"); // you chose B
+  }
+
+  return (
+    <nav className="rb-nav">
+      <Link href="/try">Try</Link>
+
+      {isAuthed && <Link href="/app">App</Link>}
+
+      <Link href="/pricing">Pricing</Link>
+
+      {!isAuthed ? (
+        <Link href="/login">Login</Link>
+      ) : (
+        <a href="/logout" onClick={handleLogout}>
+          Logout
+        </a>
+      )}
+    </nav>
+  );
+}
