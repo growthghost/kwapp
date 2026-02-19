@@ -1,7 +1,7 @@
 // web/src/app/layout.js
 import "./globals.css";
 import Link from "next/link";
-import HeaderNav from "./components/HeaderNav";
+import HeaderNav from "./components/HeaderNav.js";
 
 export const metadata = {
   title: "RANKEDBOX",
