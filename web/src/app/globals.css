@@ -164,10 +164,12 @@ body {
 .rb-nav a{
   font-family: "Century Gothic", CenturyGothic, AppleGothic, "Segoe UI", Arial, sans-serif;
   font-size: 13px;
-  font-weight: 400;     /* NOT bold */
+  font-weight: 400;
   color: #FFFFFF;
   text-decoration: none;
   opacity: 0.90;
+  padding: 8px 8px;
+  border-radius: 10px;
 }
 
 .rb-nav a:hover{
