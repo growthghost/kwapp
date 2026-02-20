@@ -1,7 +1,7 @@
 // web/src/app/layout.js
 import "./globals.css";
 import Link from "next/link";
-import HeaderNav from "./components/HeaderNav.js";
+import HeaderNav from "./components/HeaderNav";
 
 export const metadata = {
   title: "RANKEDBOX",
@@ -21,12 +21,7 @@ export default function RootLayout({ children }) {
                 alt="RankedBox"
                 width={24}
                 height={24}
-                style={{
-                  width: 24,
-                  height: 24,
-                  objectFit: "contain",
-                  display: "block",
-                }}
+                style={{ width: 24, height: 24, objectFit: "contain", display: "block" }}
               />
               <span className="rb-brand-name">RANKEDBOX</span>
             </Link>
