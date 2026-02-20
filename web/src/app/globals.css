@@ -174,7 +174,8 @@ body {
 
 .rb-nav a:hover{
   opacity: 1;
-  text-decoration: underline;
+  text-decoration: none;
+  background: rgba(255,255,255,0.08);
 }
 
 /* Active nav link */
