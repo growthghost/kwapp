@@ -2,23 +2,20 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
 
 export default function LogoutPage() {
-  const router = useRouter();
-
   useEffect(() => {
-    // Clear the session cookie
+    // Clear cookie (must match name + Path)
     document.cookie = "rb_session=; Max-Age=0; Path=/; SameSite=Lax";
 
-    // Redirect to login (Option B)
-    router.replace("/login");
-  }, [router]);
+    // UX choice B: go to /login
+    window.location.href = "/login";
+  }, []);
 
   return (
     <main className="rb-container">
       <h1 className="rb-title">Logging out…</h1>
-      <p className="rb-subtitle">Redirecting you to the login page.</p>
+      <p className="rb-subtitle">Redirecting to login.</p>
     </main>
   );
 }
