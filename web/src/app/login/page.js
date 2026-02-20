@@ -13,15 +13,14 @@ export default function LoginPage() {
   const nextPath = searchParams.get("next") || "/app";
 
   function handleSignIn() {
-    // TEMP AUTH (Milestone A):
-    // Set a simple cookie to simulate "logged in"
-    const days = 21;
-    const maxAge = days * 24 * 60 * 60; // seconds
+  const days = 21;
+  const maxAge = days * 24 * 60 * 60;
 
-    document.cookie = `rb_session=1; Max-Age=${maxAge}; Path=/; SameSite=Lax`;
+  document.cookie = `rb_session=1; Max-Age=${maxAge}; Path=/; SameSite=Lax`;
 
-    router.push(nextPath);
-  }
+  // Hard navigation so middleware + header state always match
+  window.location.href = nextPath;
+}
 
   return (
     <main className="rb-container">
