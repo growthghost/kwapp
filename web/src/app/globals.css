@@ -186,3 +186,267 @@ body {
   padding: 8px 8px;
   border-radius: 10px;
 }
+/* ===== RankedBox: Bold / High-Contrast Home Styles ===== */
+:root{
+  --rb-red: #E11D33;
+  --rb-yellow: #FACC15;
+  --rb-black: #0B0B0B;
+}
+
+/* Hero section */
+.rb-hero{
+  background: var(--rb-black);
+  color: #fff;
+  border-radius: 22px;
+  padding: 44px 34px;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 18px 40px rgba(0,0,0,0.22);
+}
+
+.rb-hero::before{
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(900px 320px at 12% 15%, rgba(225,29,51,0.28), transparent 60%),
+    radial-gradient(650px 260px at 82% 10%, rgba(250,204,21,0.26), transparent 55%),
+    radial-gradient(720px 300px at 70% 85%, rgba(225,29,51,0.18), transparent 60%);
+  pointer-events: none;
+}
+
+.rb-heroInner{
+  position: relative;
+  max-width: 900px;
+}
+
+.rb-kicker{
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: "Century Gothic", CenturyGothic, AppleGothic, "Segoe UI", Arial, sans-serif;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-size: 12px;
+  opacity: 0.92;
+}
+
+.rb-kickerDot{
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--rb-yellow);
+  box-shadow: 0 0 0 4px rgba(250,204,21,0.22);
+}
+
+.rb-heroTitle{
+  font-family: "Century Gothic", CenturyGothic, AppleGothic, "Segoe UI", Arial, sans-serif;
+  font-size: 52px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  margin: 14px 0 0;
+  text-transform: uppercase;
+}
+
+.rb-heroSub{
+  margin-top: 14px;
+  color: rgba(255,255,255,0.82);
+  font-size: 18px;
+  line-height: 1.55;
+  max-width: 760px;
+}
+
+/* CTA buttons */
+.rb-ctaRow{
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 18px;
+}
+
+.rb-btnPrimary{
+  background: #fff;
+  color: #000;
+  border: 0;
+  border-radius: 12px;
+  padding: 12px 16px;
+  font-weight: 900;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  box-shadow: 0 12px 26px rgba(0,0,0,0.18);
+}
+
+.rb-btnPrimary:hover{
+  background: var(--rb-yellow);
+  color: #000;
+}
+
+.rb-btnSecondary{
+  background: transparent;
+  color: #fff;
+  border: 1px solid rgba(255,255,255,0.20);
+  border-radius: 12px;
+  padding: 12px 16px;
+  font-weight: 800;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.rb-btnSecondary:hover{
+  border-color: rgba(255,255,255,0.40);
+  background: rgba(255,255,255,0.06);
+}
+
+/* Accent chips */
+.rb-chipRow{
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 18px;
+}
+
+.rb-chip{
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 999px;
+  font-weight: 800;
+  font-size: 13px;
+  border: 1px solid rgba(255,255,255,0.16);
+  background: rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.9);
+}
+
+.rb-chipStripe{
+  width: 18px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--rb-red);
+  box-shadow: 0 0 0 4px rgba(225,29,51,0.22);
+}
+
+.rb-chipStripe.yellow{
+  background: var(--rb-yellow);
+  box-shadow: 0 0 0 4px rgba(250,204,21,0.22);
+}
+
+/* Section header */
+.rb-sectionHead{
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 24px;
+  margin-bottom: 12px;
+}
+
+.rb-h2{
+  font-family: "Century Gothic", CenturyGothic, AppleGothic, "Segoe UI", Arial, sans-serif;
+  font-size: 22px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.rb-h2Accent{
+  height: 6px;
+  width: 110px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--rb-red), var(--rb-yellow));
+}
+
+/* Feature cards */
+.rb-grid3{
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+}
+
+.rb-feature{
+  background: #fff;
+  border: 1px solid rgba(0,0,0,0.10);
+  border-radius: 18px;
+  padding: 18px;
+  box-shadow: 0 12px 26px rgba(0,0,0,0.10);
+  position: relative;
+  overflow: hidden;
+}
+
+.rb-feature::before{
+  content:"";
+  position:absolute;
+  top:0;
+  left:0;
+  right:0;
+  height: 6px;
+  background: var(--rb-red);
+}
+
+.rb-feature.yellow::before{
+  background: var(--rb-yellow);
+}
+
+.rb-featureTitle{
+  font-weight: 900;
+  margin: 2px 0 8px;
+  font-size: 16px;
+}
+
+.rb-featureText{
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+/* Dark “How it works” block */
+.rb-darkCard{
+  background: var(--rb-black);
+  color: #fff;
+  border-radius: 22px;
+  padding: 22px;
+  border: 1px solid rgba(255,255,255,0.10);
+  box-shadow: 0 18px 40px rgba(0,0,0,0.18);
+}
+
+.rb-steps{
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.rb-step{
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 16px;
+  padding: 16px;
+}
+
+.rb-stepNum{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  font-weight: 900;
+  background: var(--rb-red);
+  color: #fff;
+  margin-bottom: 8px;
+}
+
+.rb-stepNum.yellow{
+  background: var(--rb-yellow);
+  color: #000;
+}
+
+/* Responsive */
+@media (max-width: 900px){
+  .rb-hero{ padding: 34px 20px; }
+  .rb-heroTitle{ font-size: 38px; }
+  .rb-grid3{ grid-template-columns: 1fr; }
+  .rb-steps{ grid-template-columns: 1fr; }
+}
