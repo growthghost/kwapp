@@ -45,10 +45,11 @@ body{
   font-family: "Century Gothic", CenturyGothic, AppleGothic, "Segoe UI", Arial, sans-serif;
 }
 
+/* Hard + crisp headline */
 .rb-title{
-  font-size: 44px;
+  font-size: 46px;
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   margin: 0;
 }
@@ -73,7 +74,7 @@ body{
   background: #FFFFFF;
   color: var(--ink);
   border: 1px solid rgba(0,0,0,0.18);
-  border-radius: 12px;
+  border-radius: 12px; /* inputs can stay comfortable */
   padding: 12px 12px;
   outline: none;
 }
@@ -83,25 +84,27 @@ body{
   box-shadow: 0 0 0 4px rgba(0,0,0,0.06);
 }
 
-/* ===== Buttons ===== */
+/* ===== Buttons / CTAs (CRISP: no radius) ===== */
 .rb-btn{
   background: var(--btn) !important;
   color: var(--btnText) !important;
   border: none;
-  border-radius: 12px;
+  border-radius: 0; /* CRISP */
   padding: 12px 16px;
-  font-weight: 800;
+  font-weight: 900;
   cursor: pointer;
-  transition: background 140ms ease, transform 140ms ease;
+  transition: transform 120ms ease, background 120ms ease, box-shadow 120ms ease;
   text-decoration: none;
   display: inline-flex;
   align-items: center;
   gap: 10px;
+  box-shadow: 0 12px 24px rgba(0,0,0,0.18);
 }
 
 .rb-btn:hover{
   background: var(--btnHover) !important;
   transform: translateY(-1px);
+  box-shadow: 0 14px 28px rgba(0,0,0,0.22);
 }
 
 .rb-btn:active{ transform: translateY(0px); }
@@ -111,16 +114,18 @@ body{
   align-items: center;
   gap: 10px;
   padding: 12px 16px;
-  border-radius: 12px;
-  font-weight: 800;
+  border-radius: 0; /* CRISP */
+  font-weight: 900;
   text-decoration: none;
-  border: 1px solid rgba(0,0,0,0.16);
+  border: 1px solid rgba(0,0,0,0.20);
   color: var(--ink);
   background: transparent;
+  transition: transform 120ms ease, background 120ms ease, box-shadow 120ms ease;
 }
 
 .rb-btnSecondary:hover{
   background: rgba(0,0,0,0.04);
+  transform: translateY(-1px);
 }
 
 /* ===== Header (black bar) ===== */
@@ -179,9 +184,9 @@ body{
   font-weight: 400;
   color: #FFFFFF;
   text-decoration: none;
-  opacity: 0.88;
+  opacity: 0.90;
   padding: 8px 8px;
-  border-radius: 10px;
+  border-radius: 0; /* crisp */
   transition: opacity 140ms ease, background 140ms ease;
 }
 
@@ -207,7 +212,7 @@ body{
   width: 100%;
   max-width: 1100px;
   margin: 0 auto;
-  padding: 44px 20px;
+  padding: 42px 20px;
 }
 
 .rb-section--white{ background: #FFFFFF; }
@@ -222,32 +227,31 @@ body{
   opacity: 0.95;
 }
 
-/* ===== HERO: Blur Wash (NO FILM OVER TEXT) ===== */
+/* ===== HERO: Blur Wash (NO film, text full white) ===== */
 .rb-heroSection{
   position: relative;
-  isolation: isolate; /* creates a clean stacking context */
+  isolation: isolate; /* clean stacking context */
   background: #0b0b0b;
   color: #ffffff;
   overflow: hidden;
 }
 
-/* glow behind content */
 .rb-heroSection::before{
   content:"";
   position:absolute;
-  inset:-140px;
+  inset:-160px;
   background:
-    radial-gradient(760px 420px at 14% 22%, rgba(225,29,51,0.85), transparent 60%),
-    radial-gradient(720px 420px at 82% 18%, rgba(250,204,21,0.78), transparent 58%),
-    radial-gradient(720px 520px at 64% 86%, rgba(255,140,0,0.54), transparent 62%),
-    radial-gradient(900px 620px at 50% 55%, rgba(255,255,255,0.08), transparent 64%);
-  filter: blur(46px);
+    radial-gradient(860px 520px at 10% 18%, rgba(225,29,51,0.90), transparent 60%),
+    radial-gradient(820px 520px at 90% 16%, rgba(250,204,21,0.82), transparent 58%),
+    radial-gradient(820px 640px at 64% 92%, rgba(255,140,0,0.58), transparent 62%),
+    radial-gradient(1100px 780px at 50% 55%, rgba(255,255,255,0.08), transparent 64%);
+  filter: blur(52px);
   opacity: 1;
   pointer-events:none;
   z-index: 0;
 }
 
-/* IMPORTANT: remove the film overlay entirely */
+/* important: NO overlay film */
 .rb-heroSection::after{
   content: none;
 }
@@ -256,12 +260,12 @@ body{
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: 1.2fr 0.8fr;
-  gap: 18px;
-  align-items: center;
+  grid-template-columns: 1fr; /* remove preview column */
+  gap: 14px;
+  align-items: start;
 }
 
-/* 100% white copy (no opacity) */
+/* tighter top spacing */
 .rb-kicker{
   display: inline-flex;
   align-items: center;
@@ -269,7 +273,7 @@ body{
   letter-spacing: 0.14em;
   text-transform: uppercase;
   font-size: 12px;
-  margin-bottom: 10px;
+  margin-bottom: 6px;
   color: #ffffff;
 }
 
@@ -282,11 +286,11 @@ body{
 }
 
 .rb-heroSub{
-  margin-top: 14px;
-  color: #ffffff; /* full white */
+  margin-top: 10px;     /* tighter */
+  color: #ffffff;       /* full white */
   font-size: 18px;
   line-height: 1.55;
-  max-width: 720px;
+  max-width: 760px;
 }
 
 /* CTA row */
@@ -294,7 +298,7 @@ body{
   display:flex;
   gap:12px;
   flex-wrap:wrap;
-  margin-top: 18px;
+  margin-top: 14px; /* tighter */
 }
 
 .rb-ctaPrimary{
@@ -302,17 +306,20 @@ body{
   align-items:center;
   gap:10px;
   padding: 12px 16px;
-  border-radius: 12px;
+  border-radius: 0;       /* CRISP */
   text-decoration:none;
   font-weight: 900;
   background: #ffffff;
   color: #0b0b0b;
-  box-shadow: 0 12px 26px rgba(0,0,0,0.22);
+  box-shadow: 0 14px 30px rgba(0,0,0,0.28);
+  transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
 }
 
 .rb-ctaPrimary:hover{
   background: var(--rb-yellow);
   color: #0b0b0b;
+  transform: translateY(-1px);
+  box-shadow: 0 16px 34px rgba(0,0,0,0.32);
 }
 
 .rb-ctaSecondaryDark{
@@ -320,92 +327,53 @@ body{
   align-items:center;
   gap:10px;
   padding: 12px 16px;
-  border-radius: 12px;
+  border-radius: 0;       /* CRISP */
   text-decoration:none;
-  font-weight: 800;
+  font-weight: 900;
   background: rgba(255,255,255,0.06);
   color: #ffffff;
   border: 1px solid rgba(255,255,255,0.22);
+  transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
 }
 
 .rb-ctaSecondaryDark:hover{
   background: rgba(255,255,255,0.10);
   border-color: rgba(255,255,255,0.34);
+  transform: translateY(-1px);
 }
 
-/* chips (also full white) */
-.rb-chipRow{
-  display:flex;
-  gap:10px;
-  flex-wrap:wrap;
-  margin-top: 18px;
+/* Non-CTA meta line (NOT pills, NOT buttons) */
+.rb-metaRow{
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+  color: rgba(255,255,255,0.90);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
-.rb-chip{
-  display:inline-flex;
-  align-items:center;
-  gap:10px;
-  padding: 9px 12px;
-  border-radius: 999px;
-  font-weight: 800;
-  font-size: 13px;
-  background: rgba(255,255,255,0.08);
-  border: 1px solid rgba(255,255,255,0.18);
-  color: #ffffff;
-}
-
-/* preview */
-.rb-preview{
-  background: rgba(255,255,255,0.10);
-  border: 1px solid rgba(255,255,255,0.14);
-  border-radius: 18px;
-  padding: 16px;
-  backdrop-filter: blur(10px);
-  box-shadow: 0 18px 40px rgba(0,0,0,0.22);
-  position: relative;
-  z-index: 1;
-}
-
-.rb-previewTitle{
-  font-weight: 900;
-  margin-bottom: 10px;
-  color: #ffffff;
-}
-
-.rb-previewRow{
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+.rb-metaItem{
+  display: inline-flex;
+  align-items: center;
   gap: 10px;
 }
 
-.rb-previewLabel{
-  font-size: 12px;
-  font-weight: 800;
-  margin-bottom: 6px;
-  color: #ffffff;
+.rb-metaDot{
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--rb-red);
+  box-shadow: 0 0 0 3px rgba(225,29,51,0.20);
 }
 
-.rb-previewInput{
-  width: 100%;
-  padding: 10px 10px;
-  border-radius: 12px;
-  border: 1px solid rgba(255,255,255,0.16);
-  background: rgba(0,0,0,0.25);
-  color: #fff;
-  outline: none;
+.rb-metaDot.yellow{
+  background: var(--rb-yellow);
+  box-shadow: 0 0 0 3px rgba(250,204,21,0.20);
 }
 
-.rb-previewBar{
-  margin-top: 12px;
-  border-radius: 14px;
-  padding: 12px;
-  background: linear-gradient(90deg, rgba(225,29,51,0.85), rgba(250,204,21,0.85));
-  color: #000;
-  font-weight: 900;
-  text-align: center;
-}
-
-/* Bento tiles */
+/* ===== Bento tiles ===== */
 .rb-bento{
   display: grid;
   grid-template-columns: repeat(12, 1fr);
@@ -415,11 +383,11 @@ body{
 
 .rb-tile{
   grid-column: span 4;
-  background: rgba(255,255,255,0.82);
+  background: rgba(255,255,255,0.86);
   border: 1px solid rgba(0,0,0,0.06);
-  border-radius: 18px;
+  border-radius: 16px; /* tiles can be slightly refined */
   padding: 18px;
-  box-shadow: 0 12px 26px rgba(0,0,0,0.08);
+  box-shadow: 0 10px 22px rgba(0,0,0,0.08);
   backdrop-filter: blur(10px);
 }
 
@@ -453,12 +421,6 @@ body{
 }
 
 /* Responsive */
-@media (max-width: 980px){
-  .rb-heroContent{
-    grid-template-columns: 1fr;
-  }
-}
-
 @media (max-width: 900px){
   .rb-title{ font-size: 36px; }
   .rb-sectionInner{ padding: 34px 20px; }
