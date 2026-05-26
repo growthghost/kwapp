@@ -8,56 +8,44 @@ export default function HomePage() {
       <section className="rb-section rb-heroSection">
         <div className="rb-sectionInner">
           <div className="rb-heroContent">
-            <div>
-              <div className="rb-kicker">
-                <span className="rb-kickerDot" />
-                Keyword scoring + mapping for agencies
-              </div>
-
-              <h1 className="rb-title">RANKEDBOX</h1>
-
-              <p className="rb-heroSub">
-                Score keywords fast and move from “big list” to clear priorities.
-                Start with the free scorer. Upgrade when you’re ready for mapping.
-              </p>
-
-              <div className="rb-ctaRow">
-                <Link className="rb-ctaPrimary" href="/try">
-                  Try the free scorer <span aria-hidden="true">→</span>
-                </Link>
-
-                <Link className="rb-ctaSecondaryDark" href="/pricing">
-                  View pricing
-                </Link>
-
-                <Link className="rb-ctaSecondaryDark" href="/login">
-                  Sign in
-                </Link>
-              </div>
-
-              <div className="rb-chipRow" aria-label="Highlights">
-                <span className="rb-chip">Free tool</span>
-                <span className="rb-chip">Agency-friendly workflow</span>
-                <span className="rb-chip">Score → Map → Export</span>
-              </div>
+            <div className="rb-kicker">
+              <span className="rb-kickerDot" />
+              Keyword scoring + mapping for agencies
             </div>
 
-            {/* light “product preview” (glass) */}
-            <div className="rb-preview" aria-label="Product preview">
-              <div className="rb-previewTitle">Quick preview</div>
+            <h1 className="rb-title">RANKEDBOX</h1>
 
-              <div className="rb-previewRow">
-                <div>
-                  <div className="rb-previewLabel">Search Volume (A)</div>
-                  <input className="rb-previewInput" defaultValue="50" />
-                </div>
-                <div>
-                  <div className="rb-previewLabel">Keyword Difficulty (B)</div>
-                  <input className="rb-previewInput" defaultValue="21" />
-                </div>
-              </div>
+            <p className="rb-heroSub">
+              Score keywords fast and move from “big list” to clear priorities. Start with the free
+              scorer. Upgrade when you’re ready for mapping. Built for modern search—track keywords
+              and AI-driven discovery signals like mentions and citations as query behavior evolves.
+            </p>
 
-              <div className="rb-previewBar">Score 6 — Tier: Elite</div>
+            <div className="rb-ctaRow">
+              <Link className="rb-ctaPrimary" href="/try">
+                Try the free scorer <span aria-hidden="true">→</span>
+              </Link>
+
+              <Link className="rb-ctaSecondaryDark" href="/pricing">
+                View pricing
+              </Link>
+
+              <Link className="rb-ctaSecondaryDark" href="/login">
+                Sign in
+              </Link>
+            </div>
+
+            {/* Non-CTA meta info (not pills, not buttons) */}
+            <div className="rb-metaRow" aria-label="What you get">
+              <span className="rb-metaItem">
+                <span className="rb-metaDot" /> Scoring + tiers
+              </span>
+              <span className="rb-metaItem">
+                <span className="rb-metaDot yellow" /> Mapping workflow
+              </span>
+              <span className="rb-metaItem">
+                <span className="rb-metaDot" /> Mentions + citations
+              </span>
             </div>
           </div>
         </div>
@@ -71,41 +59,55 @@ export default function HomePage() {
             <div className="rb-divider" />
           </div>
 
-          {/* Bento tiles (light, less “boxy”) */}
+          {/* Bento tiles */}
           <div className="rb-bento">
             <div className="rb-tile rb-tile--wide">
               <div className="rb-tileTitle">Turn keyword lists into a plan</div>
               <p className="rb-tileText">
-                Stop arguing about “what to target.” Get a score and a tier that your team can align on.
+                Stop debating what to target. Get a consistent score and tier your team can align on.
               </p>
             </div>
 
             <div className="rb-tile">
               <div className="rb-tileTitle">Prioritize faster</div>
               <p className="rb-tileText">
-                Quickly filter out noise and focus on opportunities that match your strategy.
+                Filter noise, focus effort, and move from research to execution without delays.
               </p>
             </div>
 
             <div className="rb-tile">
-              <div className="rb-tileTitle">Cleaner handoff</div>
+              <div className="rb-tileTitle">Built for modern search</div>
               <p className="rb-tileText">
-                Outputs are easy to share with content planning and execution—no extra cleanup.
+                Beyond rankings, teams are tracking visibility in AI surfaces—mentions and citations included.
               </p>
             </div>
 
             <div className="rb-tile rb-tile--wide">
-              <div className="rb-tileTitle">Built for repeatability</div>
+              <div className="rb-tileTitle">Repeatable across clients</div>
               <p className="rb-tileText">
-                A workflow your team can run weekly so delivery stays consistent across clients.
+                A workflow your team can run weekly so delivery stays consistent and scalable.
               </p>
             </div>
 
             <div className="rb-tile rb-tile--full">
-              <div className="rb-tileTitle">Start free, upgrade when you’re ready</div>
+              <div className="rb-tileTitle">Start free, upgrade when ready</div>
               <p className="rb-tileText">
-                Use the public scorer now. Sign in for the full mapping experience when you want to move beyond scoring.
+                Use the free scorer now. Step into the full mapping workflow when you’re ready to ship.
               </p>
+
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 12 }}>
+                <Link className="rb-btn" href="/try">
+                  Try the free scorer
+                </Link>
+
+                <Link className="rb-btnSecondary" href="/pricing">
+                  See pricing
+                </Link>
+
+                <Link className="rb-btnSecondary" href="/login">
+                  Sign in
+                </Link>
+              </div>
             </div>
           </div>
         </div>
@@ -123,28 +125,28 @@ export default function HomePage() {
             <div className="rb-tile">
               <div className="rb-tileTitle">1) Score</div>
               <p className="rb-tileText">
-                Enter Search Volume + Keyword Difficulty and get a clean tier.
+                Enter Search Volume + Keyword Difficulty to get a clear tier.
               </p>
             </div>
 
             <div className="rb-tile">
               <div className="rb-tileTitle">2) Map</div>
               <p className="rb-tileText">
-                Map keywords to your URL set using a structured workflow.
+                Assign keywords to the right pages with a structured mapping workflow.
               </p>
             </div>
 
             <div className="rb-tile">
               <div className="rb-tileTitle">3) Export</div>
               <p className="rb-tileText">
-                Download outputs your team can use immediately for planning and execution.
+                Download outputs your team can use immediately in planning and execution.
               </p>
             </div>
 
             <div className="rb-tile rb-tile--full">
               <div className="rb-tileTitle">Try it now</div>
               <p className="rb-tileText">
-                Use the free scorer, then sign in when you’re ready to do more.
+                Start with the free scorer. Sign in when you want to go deeper.
               </p>
 
               <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 12 }}>
