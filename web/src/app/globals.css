@@ -195,7 +195,7 @@ body{
   background: rgba(255,255,255,0.14);
 }
 
-/* ===== Section System (full-bleed backgrounds with centered inner) ===== */
+/* ===== Section System ===== */
 .rb-section{
   position: relative;
   width: 100vw;
@@ -222,48 +222,46 @@ body{
   opacity: 0.95;
 }
 
-/* ===== HERO: Blur Wash (covers only hero section) ===== */
-/* FIXED: overlays are z-index:0 and content is z-index:1 so text is NOT dulled */
+/* ===== HERO: Blur Wash (NO FILM OVER TEXT) ===== */
 .rb-heroSection{
-  position: relative; /* IMPORTANT */
+  position: relative;
+  isolation: isolate; /* creates a clean stacking context */
   background: #0b0b0b;
   color: #ffffff;
   overflow: hidden;
 }
 
+/* glow behind content */
 .rb-heroSection::before{
   content:"";
   position:absolute;
   inset:-140px;
   background:
-    radial-gradient(760px 420px at 14% 22%, rgba(225,29,51,0.78), transparent 60%),
-    radial-gradient(720px 420px at 82% 18%, rgba(250,204,21,0.72), transparent 58%),
-    radial-gradient(720px 520px at 64% 86%, rgba(255,140,0,0.50), transparent 62%),
-    radial-gradient(900px 620px at 50% 55%, rgba(255,255,255,0.07), transparent 64%);
+    radial-gradient(760px 420px at 14% 22%, rgba(225,29,51,0.85), transparent 60%),
+    radial-gradient(720px 420px at 82% 18%, rgba(250,204,21,0.78), transparent 58%),
+    radial-gradient(720px 520px at 64% 86%, rgba(255,140,0,0.54), transparent 62%),
+    radial-gradient(900px 620px at 50% 55%, rgba(255,255,255,0.08), transparent 64%);
   filter: blur(46px);
-  opacity: 0.95;
+  opacity: 1;
   pointer-events:none;
-  z-index: 0; /* IMPORTANT */
+  z-index: 0;
 }
 
+/* IMPORTANT: remove the film overlay entirely */
 .rb-heroSection::after{
-  content:"";
-  position:absolute;
-  inset:0;
-  background: linear-gradient(180deg, rgba(0,0,0,0.10), rgba(0,0,0,0.55));
-  pointer-events:none;
-  z-index: 0; /* IMPORTANT */
+  content: none;
 }
 
 .rb-heroContent{
   position: relative;
-  z-index: 1; /* IMPORTANT */
+  z-index: 1;
   display: grid;
   grid-template-columns: 1.2fr 0.8fr;
   gap: 18px;
   align-items: center;
 }
 
+/* 100% white copy (no opacity) */
 .rb-kicker{
   display: inline-flex;
   align-items: center;
@@ -271,9 +269,8 @@ body{
   letter-spacing: 0.14em;
   text-transform: uppercase;
   font-size: 12px;
-  opacity: 1; /* 100% */
   margin-bottom: 10px;
-  color: #ffffff; /* 100% */
+  color: #ffffff;
 }
 
 .rb-kickerDot{
@@ -286,12 +283,13 @@ body{
 
 .rb-heroSub{
   margin-top: 14px;
-  color: #ffffff; /* 100% */
+  color: #ffffff; /* full white */
   font-size: 18px;
   line-height: 1.55;
   max-width: 720px;
 }
 
+/* CTA row */
 .rb-ctaRow{
   display:flex;
   gap:12px;
@@ -335,7 +333,7 @@ body{
   border-color: rgba(255,255,255,0.34);
 }
 
-/* Chips in hero */
+/* chips (also full white) */
 .rb-chipRow{
   display:flex;
   gap:10px;
@@ -353,10 +351,10 @@ body{
   font-size: 13px;
   background: rgba(255,255,255,0.08);
   border: 1px solid rgba(255,255,255,0.18);
-  color: #ffffff; /* 100% */
+  color: #ffffff;
 }
 
-/* Hero preview */
+/* preview */
 .rb-preview{
   background: rgba(255,255,255,0.10);
   border: 1px solid rgba(255,255,255,0.14);
@@ -365,13 +363,12 @@ body{
   backdrop-filter: blur(10px);
   box-shadow: 0 18px 40px rgba(0,0,0,0.22);
   position: relative;
-  z-index: 1; /* ensure above overlay */
+  z-index: 1;
 }
 
 .rb-previewTitle{
   font-weight: 900;
   margin-bottom: 10px;
-  opacity: 1;
   color: #ffffff;
 }
 
@@ -384,7 +381,6 @@ body{
 .rb-previewLabel{
   font-size: 12px;
   font-weight: 800;
-  opacity: 1;
   margin-bottom: 6px;
   color: #ffffff;
 }
