@@ -3,170 +3,172 @@ import Link from "next/link";
 
 export default function HomePage() {
   return (
-    <main className="rb-container">
-      {/* HERO (blur wash only in this section) */}
-      <section className="rb-section rb-heroSection">
-        <div className="rb-sectionInner">
-          <div className="rb-heroContent">
-            <div className="rb-kicker">
-              <span className="rb-kickerDot" />
-              Keyword scoring + mapping for agencies
+    <main className="rb-home">
+      {/* HERO */}
+      <section className="rb-home-hero">
+        <div className="rb-home-hero-inner">
+          <div className="rb-home-hero-copy">
+            <div className="rb-home-kicker">
+              <span className="rb-home-kicker-dot" />
+              <span>Keyword scoring + mapping for agencies</span>
             </div>
 
-            <h1 className="rb-title">RANKEDBOX</h1>
+            <h1 className="rb-home-title">RANKEDBOX</h1>
 
-            <p className="rb-heroSub">
-              Score keywords fast and move from “big list” to clear priorities. Start with the free
-              scorer. Upgrade when you’re ready for mapping. Built for modern search—track keywords
-              and AI-driven discovery signals like mentions and citations as query behavior evolves.
+            <div className="rb-home-rule" />
+
+            <p className="rb-home-subhead">
+              Stop guessing. Score and sort keywords into clear tiers your team
+              can act on. Use the same workflow to evaluate prompt visibility,
+              mentions, and citations so your strategy reflects how people
+              search now.
             </p>
 
-            <div className="rb-ctaRow">
-              <Link className="rb-ctaPrimary" href="/try">
-                Try the free scorer <span aria-hidden="true">→</span>
+            <div className="rb-home-cta-row">
+              <Link href="/try" className="rb-home-cta-primary">
+                Try the free scorer
               </Link>
 
-              <Link className="rb-ctaSecondaryDark" href="/pricing">
+              <Link href="/pricing" className="rb-home-cta-secondary">
                 View pricing
               </Link>
 
-              <Link className="rb-ctaSecondaryDark" href="/login">
+              <Link href="/login" className="rb-home-cta-secondary">
                 Sign in
               </Link>
             </div>
 
-            {/* Non-CTA meta info (not pills, not buttons) */}
-            <div className="rb-metaRow" aria-label="What you get">
-              <span className="rb-metaItem">
-                <span className="rb-metaDot" /> Scoring + tiers
-              </span>
-              <span className="rb-metaItem">
-                <span className="rb-metaDot yellow" /> Mapping workflow
-              </span>
-              <span className="rb-metaItem">
-                <span className="rb-metaDot" /> Mentions + citations
-              </span>
+            <div className="rb-home-meta">
+              Keyword scoring | Tiered prioritization | Prompt visibility |
+              Mentions and citations
             </div>
           </div>
         </div>
       </section>
 
-      {/* SECTION: Why (white) */}
-      <section className="rb-section rb-section--white">
-        <div className="rb-sectionInner">
-          <div className="rb-sectionTop">
-            <h2 className="rb-h2">Why RankedBox</h2>
-            <div className="rb-divider" />
+      {/* VALUE SECTION */}
+      <section className="rb-home-section-white">
+        <div className="rb-home-band">
+          <div className="rb-home-section-header">
+            <div className="rb-home-section-kicker">Why teams use RankedBox</div>
+            <h2 className="rb-home-section-title">
+              Built to turn research into a plan your team can actually use
+            </h2>
+            <p className="rb-home-section-copy">
+              RankedBox helps agencies move from raw keyword data to clear
+              decisions. It gives teams a faster way to score opportunities,
+              prioritize what matters, and connect search strategy to the way
+              visibility is evolving across AI-driven discovery.
+            </p>
           </div>
 
-          {/* Bento tiles */}
-          <div className="rb-bento">
-            <div className="rb-tile rb-tile--wide">
-              <div className="rb-tileTitle">Turn keyword lists into a plan</div>
-              <p className="rb-tileText">
-                Stop debating what to target. Get a consistent score and tier your team can align on.
+          <div className="rb-home-value-grid">
+            <div className="rb-home-value-item">
+              <h3 className="rb-home-value-title">Prioritize faster</h3>
+              <p className="rb-home-value-copy">
+                Turn long keyword lists into clear tiers so your team knows what
+                deserves attention first and what can wait.
               </p>
             </div>
 
-            <div className="rb-tile">
-              <div className="rb-tileTitle">Prioritize faster</div>
-              <p className="rb-tileText">
-                Filter noise, focus effort, and move from research to execution without delays.
+            <div className="rb-home-value-item">
+              <h3 className="rb-home-value-title">Plan for modern search</h3>
+              <p className="rb-home-value-copy">
+                Go beyond classic keyword metrics by bringing prompt visibility,
+                mentions, and citations into the same planning workflow.
               </p>
             </div>
 
-            <div className="rb-tile">
-              <div className="rb-tileTitle">Built for modern search</div>
-              <p className="rb-tileText">
-                Beyond rankings, teams are tracking visibility in AI surfaces—mentions and citations included.
+            <div className="rb-home-value-item">
+              <h3 className="rb-home-value-title">Create cleaner handoffs</h3>
+              <p className="rb-home-value-copy">
+                Export outputs your team can move directly into content
+                planning, page mapping, and execution without extra cleanup.
               </p>
-            </div>
-
-            <div className="rb-tile rb-tile--wide">
-              <div className="rb-tileTitle">Repeatable across clients</div>
-              <p className="rb-tileText">
-                A workflow your team can run weekly so delivery stays consistent and scalable.
-              </p>
-            </div>
-
-            <div className="rb-tile rb-tile--full">
-              <div className="rb-tileTitle">Start free, upgrade when ready</div>
-              <p className="rb-tileText">
-                Use the free scorer now. Step into the full mapping workflow when you’re ready to ship.
-              </p>
-
-              <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 12 }}>
-                <Link className="rb-btn" href="/try">
-                  Try the free scorer
-                </Link>
-
-                <Link className="rb-btnSecondary" href="/pricing">
-                  See pricing
-                </Link>
-
-                <Link className="rb-btnSecondary" href="/login">
-                  Sign in
-                </Link>
-              </div>
             </div>
           </div>
         </div>
       </section>
 
-      {/* SECTION: How it works (gray) */}
-      <section className="rb-section rb-section--gray">
-        <div className="rb-sectionInner">
-          <div className="rb-sectionTop">
-            <h2 className="rb-h2">How it works</h2>
-            <div className="rb-divider" />
+      {/* DETAIL SECTION */}
+      <section className="rb-home-section-soft">
+        <div className="rb-home-band rb-home-band-tight">
+          <div className="rb-home-section-header">
+            <div className="rb-home-section-kicker">What RankedBox helps you do</div>
+            <h2 className="rb-home-section-title">
+              One workflow for keyword decisions and AI discovery visibility
+            </h2>
           </div>
 
-          <div className="rb-bento">
-            <div className="rb-tile">
-              <div className="rb-tileTitle">1) Score</div>
-              <p className="rb-tileText">
-                Enter Search Volume + Keyword Difficulty to get a clear tier.
+          <div className="rb-home-detail-grid">
+            <div className="rb-home-detail-item">
+              <h3 className="rb-home-detail-item-title">
+                Score and tier opportunities
+              </h3>
+              <p className="rb-home-detail-item-copy">
+                Quickly evaluate search volume and keyword difficulty so teams
+                can separate high-value targets from noise.
               </p>
             </div>
 
-            <div className="rb-tile">
-              <div className="rb-tileTitle">2) Map</div>
-              <p className="rb-tileText">
-                Assign keywords to the right pages with a structured mapping workflow.
+            <div className="rb-home-detail-item">
+              <h3 className="rb-home-detail-item-title">
+                Align teams around what to target
+              </h3>
+              <p className="rb-home-detail-item-copy">
+                Give strategists, writers, and stakeholders a clearer view of
+                what matters most so execution stays focused.
               </p>
             </div>
 
-            <div className="rb-tile">
-              <div className="rb-tileTitle">3) Export</div>
-              <p className="rb-tileText">
-                Download outputs your team can use immediately in planning and execution.
+            <div className="rb-home-detail-item">
+              <h3 className="rb-home-detail-item-title">
+                Evaluate prompt visibility, mentions, and citations
+              </h3>
+              <p className="rb-home-detail-item-copy">
+                Build strategy around how discovery is changing by looking at
+                the signals that influence how brands appear in AI-assisted
+                search experiences.
               </p>
             </div>
 
-            <div className="rb-tile rb-tile--full">
-              <div className="rb-tileTitle">Try it now</div>
-              <p className="rb-tileText">
-                Start with the free scorer. Sign in when you want to go deeper.
+            <div className="rb-home-detail-item">
+              <h3 className="rb-home-detail-item-title">
+                Move from analysis to action
+              </h3>
+              <p className="rb-home-detail-item-copy">
+                Export cleaner outputs and use them to support prioritization,
+                mapping decisions, and a more repeatable workflow across client
+                accounts.
               </p>
-
-              <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 12 }}>
-                <Link className="rb-btn" href="/try">
-                  Try the free scorer
-                </Link>
-
-                <Link className="rb-btnSecondary" href="/pricing">
-                  See pricing
-                </Link>
-
-                <Link className="rb-btnSecondary" href="/login">
-                  Sign in
-                </Link>
-              </div>
             </div>
           </div>
+        </div>
+      </section>
 
-          <div style={{ marginTop: 26, color: "var(--muted)", fontSize: 13 }}>
-            © {new Date().getFullYear()} RankedBox
+      {/* CLOSING CTA */}
+      <section className="rb-home-cta-band">
+        <div className="rb-home-band">
+          <div className="rb-home-cta-block">
+            <h2 className="rb-home-cta-title">
+              Start with the free scorer. Build from there.
+            </h2>
+
+            <p className="rb-home-cta-copy">
+              Use the public scorer to evaluate opportunities fast. When you are
+              ready for a deeper workflow, sign in and move into the full
+              RankedBox experience.
+            </p>
+
+            <div className="rb-home-cta-actions">
+              <Link href="/try" className="rb-home-cta-primary">
+                Try the free scorer
+              </Link>
+
+              <Link href="/pricing" className="rb-home-cta-secondary" style={{ color: "#0b0b0b", borderColor: "rgba(0,0,0,0.14)", background: "transparent" }}>
+                View pricing
+              </Link>
+            </div>
           </div>
         </div>
       </section>
