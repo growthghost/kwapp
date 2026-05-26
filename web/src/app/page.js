@@ -10,7 +10,7 @@ export default function HomePage() {
           <div className="rb-home-hero-copy">
             <div className="rb-home-kicker">
               <span className="rb-home-kicker-dot" />
-              <span>Keyword scoring + mapping for agencies</span>
+              <span>Keyword & AI Prompt Scoring + Mapping for Agencies</span>
             </div>
 
             <h1 className="rb-home-title">RANKEDBOX</h1>
@@ -18,15 +18,14 @@ export default function HomePage() {
             <div className="rb-home-rule" />
 
             <p className="rb-home-subhead">
-              Stop guessing. Score and sort keywords into clear tiers your team
-              can act on. Use the same workflow to evaluate prompt visibility,
-              mentions, and citations so your strategy reflects how people
-              search now.
+              Get clarity fast. Score and sort keywords and AI queries into clear tiers 
+              using volume and difficulty, then map priorities to the right pages 
+              so your team can execute.
             </p>
 
             <div className="rb-home-cta-row">
               <Link href="/try" className="rb-home-cta-primary">
-                Try the free scorer
+                Try RANKEDBOX
               </Link>
 
               <Link href="/pricing" className="rb-home-cta-secondary">
@@ -39,7 +38,7 @@ export default function HomePage() {
             </div>
 
             <div className="rb-home-meta">
-              Keyword scoring | Tiered prioritization | Prompt visibility |
+              Keyword & Prompt Scoring | Tiered Prioritization | Prompt visibility |
               Mentions and citations
             </div>
           </div>
