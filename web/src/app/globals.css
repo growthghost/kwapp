@@ -22,7 +22,6 @@
 
 /* ===== Base ===== */
 html, body { height: 100%; }
-
 body{
   margin: 0;
   background: var(--bg);
@@ -35,28 +34,22 @@ body{
   width: 100%;
   max-width: 1100px;
   margin: 0 auto;
-  padding: 34px 20px 80px;
-}
-
-.rb-card{
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  box-shadow: var(--shadow);
-  padding: 22px;
+  padding: 0; /* sections manage vertical spacing */
 }
 
 /* ===== Titles / Headlines (Century Gothic only) ===== */
 .rb-title,
 .rb-sectionTitle,
-.rb-h2{
+.rb-h2,
+.rb-kicker{
   font-family: "Century Gothic", CenturyGothic, AppleGothic, "Segoe UI", Arial, sans-serif;
 }
 
 .rb-title{
-  font-size: 40px;
+  font-size: 44px;
   font-weight: 700;
-  letter-spacing: -0.02em;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   margin: 0;
 }
 
@@ -123,11 +116,11 @@ body{
   text-decoration: none;
   border: 1px solid rgba(0,0,0,0.16);
   color: var(--ink);
-  background: transparent;
+  background: rgba(255,255,255,0.70);
 }
 
 .rb-btnSecondary:hover{
-  background: rgba(0,0,0,0.04);
+  background: rgba(255,255,255,0.88);
 }
 
 /* ===== Header (black bar) ===== */
@@ -173,14 +166,13 @@ body{
   line-height: 1;
 }
 
-/* Nav base (active state is handled by rb-navlink classes) */
+/* Nav */
 .rb-nav{
   display: flex;
   align-items: center;
   gap: 16px;
 }
 
-/* Active link styling */
 .rb-navlink{
   font-family: "Century Gothic", CenturyGothic, AppleGothic, "Segoe UI", Arial, sans-serif;
   font-size: 13px;
@@ -203,59 +195,95 @@ body{
   background: rgba(255,255,255,0.14);
 }
 
-/* ===== Premium colorful background wash (Home) ===== */
-.rb-homeBg{
+/* ===== Section System (full-bleed backgrounds with centered inner) ===== */
+.rb-section{
   position: relative;
-  overflow: hidden;
-  border-radius: 22px;
-  padding: 44px 34px;
+  width: 100vw;
+  margin-left: calc(50% - 50vw);
+  margin-right: calc(50% - 50vw);
+}
+
+.rb-sectionInner{
+  width: 100%;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 44px 20px;
+}
+
+.rb-section--white{ background: #FFFFFF; }
+.rb-section--gray{ background: #F2F2F2; }
+
+/* Thin divider accent */
+.rb-divider{
+  height: 6px;
+  width: 120px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--rb-red), var(--rb-yellow));
+  opacity: 0.95;
+}
+
+/* ===== HERO: Blur Wash (covers only hero section) ===== */
+.rb-heroSection{
   background: #0b0b0b;
   color: #ffffff;
-  box-shadow: 0 18px 40px rgba(0,0,0,0.22);
+  overflow: hidden;
 }
 
-.rb-homeBg::before{
+.rb-heroSection::before{
   content:"";
   position:absolute;
-  inset:-120px;
+  inset:-140px;
   background:
-    radial-gradient(700px 380px at 18% 20%, rgba(225,29,51,0.70), transparent 60%),
-    radial-gradient(650px 360px at 80% 18%, rgba(250,204,21,0.65), transparent 58%),
-    radial-gradient(680px 420px at 62% 82%, rgba(255,140,0,0.45), transparent 60%),
-    radial-gradient(820px 520px at 50% 55%, rgba(255,255,255,0.06), transparent 62%);
-  filter: blur(38px);
+    radial-gradient(760px 420px at 14% 22%, rgba(225,29,51,0.78), transparent 60%),
+    radial-gradient(720px 420px at 82% 18%, rgba(250,204,21,0.72), transparent 58%),
+    radial-gradient(720px 520px at 64% 86%, rgba(255,140,0,0.50), transparent 62%),
+    radial-gradient(900px 620px at 50% 55%, rgba(255,255,255,0.07), transparent 64%);
+  filter: blur(46px);
   opacity: 0.95;
-  pointer-events: none;
-}
-
-.rb-homeBg::after{
-  content:"";
-  position:absolute;
-  inset:0;
-  background: linear-gradient(180deg, rgba(0,0,0,0.10), rgba(0,0,0,0.55));
   pointer-events:none;
 }
 
-.rb-homeInner{
-  position: relative;
-  max-width: 920px;
+.rb-heroSection::after{
+  content:"";
+  position:absolute;
+  inset:0;
+  background: linear-gradient(180deg, rgba(0,0,0,0.18), rgba(0,0,0,0.72));
+  pointer-events:none;
 }
 
-.rb-heroTitle{
-  font-family: "Century Gothic", CenturyGothic, AppleGothic, "Segoe UI", Arial, sans-serif;
-  font-size: 52px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
+.rb-heroContent{
+  position: relative;
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr;
+  gap: 18px;
+  align-items: center;
+}
+
+.rb-kicker{
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  margin: 0;
+  font-size: 12px;
+  opacity: 0.92;
+  margin-bottom: 10px;
+}
+
+.rb-kickerDot{
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--rb-yellow);
+  box-shadow: 0 0 0 4px rgba(250,204,21,0.22);
 }
 
 .rb-heroSub{
   margin-top: 14px;
-  color: rgba(255,255,255,0.84);
+  color: rgba(255,255,255,0.86);
   font-size: 18px;
   line-height: 1.55;
-  max-width: 780px;
+  max-width: 720px;
 }
 
 .rb-ctaRow{
@@ -275,7 +303,7 @@ body{
   font-weight: 900;
   background: #ffffff;
   color: #0b0b0b;
-  box-shadow: 0 12px 26px rgba(0,0,0,0.20);
+  box-shadow: 0 12px 26px rgba(0,0,0,0.22);
 }
 
 .rb-ctaPrimary:hover{
@@ -283,7 +311,7 @@ body{
   color: #0b0b0b;
 }
 
-.rb-ctaSecondary{
+.rb-ctaSecondaryDark{
   display:inline-flex;
   align-items:center;
   gap:10px;
@@ -293,14 +321,15 @@ body{
   font-weight: 800;
   background: rgba(255,255,255,0.06);
   color: #ffffff;
-  border: 1px solid rgba(255,255,255,0.20);
+  border: 1px solid rgba(255,255,255,0.22);
 }
 
-.rb-ctaSecondary:hover{
+.rb-ctaSecondaryDark:hover{
   background: rgba(255,255,255,0.10);
-  border-color: rgba(255,255,255,0.32);
+  border-color: rgba(255,255,255,0.34);
 }
 
+/* Chips in hero */
 .rb-chipRow{
   display:flex;
   gap:10px;
@@ -321,35 +350,112 @@ body{
   color: rgba(255,255,255,0.92);
 }
 
-/* Light subtle cards (below hero) */
-.rb-softGrid{
-  display:grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 14px;
+/* Hero preview (glass panel, not a “big box”) */
+.rb-preview{
+  background: rgba(255,255,255,0.10);
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 18px;
+  padding: 16px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 18px 40px rgba(0,0,0,0.22);
 }
 
-.rb-softCard{
-  background: rgba(255,255,255,0.78);
-  border: 1px solid rgba(0,0,0,0.08);
+.rb-previewTitle{
+  font-weight: 900;
+  margin-bottom: 10px;
+  opacity: 0.95;
+}
+
+.rb-previewRow{
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.rb-previewLabel{
+  font-size: 12px;
+  font-weight: 800;
+  opacity: 0.85;
+  margin-bottom: 6px;
+}
+
+.rb-previewInput{
+  width: 100%;
+  padding: 10px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.16);
+  background: rgba(0,0,0,0.25);
+  color: #fff;
+  outline: none;
+}
+
+.rb-previewBar{
+  margin-top: 12px;
+  border-radius: 14px;
+  padding: 12px;
+  background: linear-gradient(90deg, rgba(225,29,51,0.85), rgba(250,204,21,0.85));
+  color: #000;
+  font-weight: 900;
+  text-align: center;
+}
+
+/* ===== Premium “bento” tiles (light, minimal boxiness) ===== */
+.rb-bento{
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.rb-tile{
+  grid-column: span 4;
+  background: rgba(255,255,255,0.82);
+  border: 1px solid rgba(0,0,0,0.06);
   border-radius: 18px;
   padding: 18px;
   box-shadow: 0 12px 26px rgba(0,0,0,0.08);
-  backdrop-filter: blur(8px);
+  backdrop-filter: blur(10px);
 }
 
-.rb-softTitle{
+.rb-tile--wide{ grid-column: span 8; }
+.rb-tile--full{ grid-column: span 12; }
+
+.rb-tileTitle{
   font-size: 16px;
-  font-weight: 800;
+  font-weight: 900;
   margin: 0 0 8px 0;
 }
 
-.rb-softText{
+.rb-tileText{
   color: rgba(0,0,0,0.72);
   line-height: 1.55;
+  margin: 0;
+}
+
+/* ===== Section headings ===== */
+.rb-sectionTop{
+  display:flex;
+  align-items:flex-end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.rb-h2{
+  font-size: 22px;
+  font-weight: 700;
+  margin: 0;
+}
+
+/* ===== Responsive ===== */
+@media (max-width: 980px){
+  .rb-heroContent{
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 900px){
-  .rb-homeBg{ padding: 34px 20px; }
-  .rb-heroTitle{ font-size: 38px; }
-  .rb-softGrid{ grid-template-columns: 1fr; }
+  .rb-title{ font-size: 36px; }
+  .rb-sectionInner{ padding: 34px 20px; }
+  .rb-bento{ grid-template-columns: 1fr; }
+  .rb-tile, .rb-tile--wide, .rb-tile--full{ grid-column: span 12; }
 }
