@@ -4,137 +4,85 @@ import Link from "next/link";
 export default function HomePage() {
   return (
     <main className="rb-container">
-      {/* HERO */}
-      <section className="rb-hero">
-        <div className="rb-heroInner">
-          <div className="rb-kicker">
-            <span className="rb-kickerDot" />
-            Agency keyword scoring + mapping
-          </div>
-
+      {/* HERO (colorful blurred background) */}
+      <section className="rb-homeBg">
+        <div className="rb-homeInner">
           <h1 className="rb-heroTitle">RankedBox</h1>
 
           <p className="rb-heroSub">
-            Score keywords fast, then map them to the right pages.
-            Built for agencies who want speed, clarity, and repeatable decisions.
+            Score keywords quickly, then map them to the right pages. Built for agencies who want
+            cleaner decisions and faster execution.
           </p>
 
           <div className="rb-ctaRow">
-            <Link className="rb-btnPrimary" href="/try">
-              Try the free score tool <span aria-hidden="true">→</span>
+            <Link className="rb-ctaPrimary" href="/try">
+              Try the free scorer <span aria-hidden="true">→</span>
             </Link>
 
-            <Link className="rb-btnSecondary" href="/pricing">
+            <Link className="rb-ctaSecondary" href="/pricing">
               View pricing
             </Link>
 
-            <Link className="rb-btnSecondary" href="/login">
+            <Link className="rb-ctaSecondary" href="/login">
               Sign in
             </Link>
           </div>
 
           <div className="rb-chipRow" aria-label="Highlights">
-            <span className="rb-chip">
-              <span className="rb-chipStripe" /> Score + tier instantly
-            </span>
-            <span className="rb-chip">
-              <span className="rb-chipStripe yellow" /> Built for CSV workflows
-            </span>
-            <span className="rb-chip">
-              <span className="rb-chipStripe" /> Secret sauce stays server-side
-            </span>
+            <span className="rb-chip">Free scorer</span>
+            <span className="rb-chip">CSV-ready workflow</span>
+            <span className="rb-chip">Score → Map → Export</span>
           </div>
         </div>
       </section>
 
-      {/* BENEFITS */}
-      <div className="rb-sectionHead">
-        <h2 className="rb-h2">Why agencies use RankedBox</h2>
-        <div className="rb-h2Accent" />
+      {/* BENEFITS (light, subtle cards) */}
+      <div style={{ marginTop: 24, maxWidth: 980 }}>
+        <div className="rb-softGrid">
+          <div className="rb-softCard">
+            <div className="rb-softTitle">Stop guessing</div>
+            <div className="rb-softText">
+              Turn keyword lists into a clear score and tier so your team knows what to prioritize.
+            </div>
+          </div>
+
+          <div className="rb-softCard">
+            <div className="rb-softTitle">Move faster</div>
+            <div className="rb-softText">
+              Repeatable workflow your team can run weekly—without rebuilding spreadsheets from scratch.
+            </div>
+          </div>
+
+          <div className="rb-softCard">
+            <div className="rb-softTitle">Built for agencies</div>
+            <div className="rb-softText">
+              Outputs you can hand to content planning immediately—clean, consistent, and easy to ship.
+            </div>
+          </div>
+        </div>
       </div>
 
-      <section className="rb-grid3">
-        <div className="rb-feature">
-          <div className="rb-featureTitle">Stop guessing</div>
-          <div className="rb-featureText">
-            Turn messy keyword lists into a clear score + tier so you can decide
-            what’s worth targeting.
-          </div>
+      {/* CTA STRIP */}
+      <div className="rb-card" style={{ marginTop: 18, maxWidth: 980 }}>
+        <div className="rb-sectionTitle" style={{ fontSize: 18, fontWeight: 700, marginBottom: 10 }}>
+          Ready to try it?
         </div>
 
-        <div className="rb-feature yellow">
-          <div className="rb-featureTitle">Faster workflows</div>
-          <div className="rb-featureText">
-            Build a repeatable process your team can run every week without
-            reinventing the wheel.
-          </div>
+        <div style={{ color: "var(--muted)", lineHeight: 1.55 }}>
+          Use the free scorer now. Sign in when you’re ready to use the full mapping workflow.
         </div>
 
-        <div className="rb-feature">
-          <div className="rb-featureTitle">Built for agencies</div>
-          <div className="rb-featureText">
-            Designed for real client work: scoring now, mapping next, and
-            API-backed “secret sauce” later.
-          </div>
-        </div>
-      </section>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 14 }}>
+          <Link className="rb-btn" href="/try">
+            Try the free scorer
+          </Link>
 
-      {/* HOW IT WORKS (DARK) */}
-      <div className="rb-sectionHead">
-        <h2 className="rb-h2">How it works</h2>
-        <div className="rb-h2Accent" />
+          <Link className="rb-btnSecondary" href="/pricing">
+            See pricing
+          </Link>
+        </div>
       </div>
 
-      <section className="rb-darkCard">
-        <div style={{ opacity: 0.88 }}>
-          Start with the free scorer. Sign in for the mapping workflow.
-        </div>
-
-        <div className="rb-steps">
-          <div className="rb-step">
-            <div className="rb-stepNum">1</div>
-            <div style={{ fontWeight: 900, marginBottom: 6 }}>Score</div>
-            <div style={{ opacity: 0.86, lineHeight: 1.55 }}>
-              Enter Search Volume + Keyword Difficulty and get a clean tier.
-            </div>
-          </div>
-
-          <div className="rb-step">
-            <div className="rb-stepNum yellow">2</div>
-            <div style={{ fontWeight: 900, marginBottom: 6 }}>Map</div>
-            <div style={{ opacity: 0.86, lineHeight: 1.55 }}>
-              Once logged in, map keywords to your URL set (CSV workflow).
-            </div>
-          </div>
-
-          <div className="rb-step">
-            <div className="rb-stepNum">3</div>
-            <div style={{ fontWeight: 900, marginBottom: 6 }}>Export</div>
-            <div style={{ opacity: 0.86, lineHeight: 1.55 }}>
-              Download outputs your team can ship into content planning immediately.
-            </div>
-          </div>
-
-          <div className="rb-step">
-            <div className="rb-stepNum yellow">4</div>
-            <div style={{ fontWeight: 900, marginBottom: 6 }}>Scale</div>
-            <div style={{ opacity: 0.86, lineHeight: 1.55 }}>
-              Heavy logic stays server-side (API) so the product stays protected.
-            </div>
-          </div>
-        </div>
-
-        <div className="rb-ctaRow" style={{ marginTop: 16 }}>
-          <Link className="rb-btnPrimary" href="/try">
-            Try it now <span aria-hidden="true">→</span>
-          </Link>
-          <Link className="rb-btnSecondary" href="/login">
-            Sign in
-          </Link>
-        </div>
-      </section>
-
-      {/* FOOTER */}
       <div style={{ marginTop: 26, color: "var(--muted)", fontSize: 13 }}>
         © {new Date().getFullYear()} RankedBox
       </div>
