@@ -223,7 +223,9 @@ body{
 }
 
 /* ===== HERO: Blur Wash (covers only hero section) ===== */
+/* FIXED: overlays are z-index:0 and content is z-index:1 so text is NOT dulled */
 .rb-heroSection{
+  position: relative; /* IMPORTANT */
   background: #0b0b0b;
   color: #ffffff;
   overflow: hidden;
@@ -241,18 +243,21 @@ body{
   filter: blur(46px);
   opacity: 0.95;
   pointer-events:none;
+  z-index: 0; /* IMPORTANT */
 }
 
 .rb-heroSection::after{
   content:"";
   position:absolute;
   inset:0;
-  background: linear-gradient(180deg, rgba(0,0,0,0.18), rgba(0,0,0,0.72));
+  background: linear-gradient(180deg, rgba(0,0,0,0.10), rgba(0,0,0,0.55));
   pointer-events:none;
+  z-index: 0; /* IMPORTANT */
 }
 
 .rb-heroContent{
   position: relative;
+  z-index: 1; /* IMPORTANT */
   display: grid;
   grid-template-columns: 1.2fr 0.8fr;
   gap: 18px;
@@ -266,8 +271,9 @@ body{
   letter-spacing: 0.14em;
   text-transform: uppercase;
   font-size: 12px;
-  opacity: 0.98;
+  opacity: 1; /* 100% */
   margin-bottom: 10px;
+  color: #ffffff; /* 100% */
 }
 
 .rb-kickerDot{
@@ -280,7 +286,7 @@ body{
 
 .rb-heroSub{
   margin-top: 14px;
-  color: rgba(255,255,255,0.96);
+  color: #ffffff; /* 100% */
   font-size: 18px;
   line-height: 1.55;
   max-width: 720px;
@@ -345,9 +351,9 @@ body{
   border-radius: 999px;
   font-weight: 800;
   font-size: 13px;
-  background: rgba(255,255,255,0.06);
-  border: 1px solid rgba(255,255,255,0.16);
-  color: rgba(255,255,255,0.92);
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.18);
+  color: #ffffff; /* 100% */
 }
 
 /* Hero preview */
@@ -358,12 +364,15 @@ body{
   padding: 16px;
   backdrop-filter: blur(10px);
   box-shadow: 0 18px 40px rgba(0,0,0,0.22);
+  position: relative;
+  z-index: 1; /* ensure above overlay */
 }
 
 .rb-previewTitle{
   font-weight: 900;
   margin-bottom: 10px;
-  opacity: 0.95;
+  opacity: 1;
+  color: #ffffff;
 }
 
 .rb-previewRow{
@@ -375,8 +384,9 @@ body{
 .rb-previewLabel{
   font-size: 12px;
   font-weight: 800;
-  opacity: 0.85;
+  opacity: 1;
   margin-bottom: 6px;
+  color: #ffffff;
 }
 
 .rb-previewInput{
