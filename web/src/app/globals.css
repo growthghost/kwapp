@@ -8,20 +8,22 @@
 
   --card: #FFFFFF;
   --border: rgba(0,0,0,0.10);
-
   --shadow: 0 10px 30px rgba(0,0,0,0.06);
 
   --btn: #0B0B0B;
   --btnText: #FFFFFF;
   --btnHover: #E11D33;
+
+  /* Brand accents */
+  --rb-red: #E11D33;
+  --rb-yellow: #FACC15;
+  --rb-black: #0B0B0B;
 }
 
 /* ===== Base ===== */
-html, body {
-  height: 100%;
-}
+html, body { height: 100%; }
 
-body {
+body{
   margin: 0;
   background: var(--bg);
   color: var(--ink);
@@ -44,10 +46,10 @@ body {
   padding: 22px;
 }
 
-/* ===== Titles / Headlines (Century Gothic) ===== */
+/* ===== Titles / Headlines (Century Gothic only) ===== */
 .rb-title,
-.rb-headline,
-.rb-sectionTitle {
+.rb-sectionTitle,
+.rb-h2{
   font-family: "Century Gothic", CenturyGothic, AppleGothic, "Segoe UI", Arial, sans-serif;
 }
 
@@ -98,6 +100,10 @@ body {
   font-weight: 800;
   cursor: pointer;
   transition: background 140ms ease, transform 140ms ease;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .rb-btn:hover{
@@ -105,8 +111,23 @@ body {
   transform: translateY(-1px);
 }
 
-.rb-btn:active{
-  transform: translateY(0px);
+.rb-btn:active{ transform: translateY(0px); }
+
+.rb-btnSecondary{
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  font-weight: 800;
+  text-decoration: none;
+  border: 1px solid rgba(0,0,0,0.16);
+  color: var(--ink);
+  background: transparent;
+}
+
+.rb-btnSecondary:hover{
+  background: rgba(0,0,0,0.04);
 }
 
 /* ===== Header (black bar) ===== */
@@ -130,13 +151,11 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
+  text-decoration: none;
+  color: inherit;
+}
 
-  text-decoration: none; /* because it's now a <Link> */
-  color: inherit;        /* keep white header text */
-}
-.rb-brand:hover{
-  opacity: 0.95;
-}
+.rb-brand:hover{ opacity: 0.95; }
 
 .rb-logo{
   width: 22px;
@@ -148,305 +167,189 @@ body {
 .rb-brand-name{
   font-family: "Century Gothic", CenturyGothic, AppleGothic, "Segoe UI", Arial, sans-serif;
   font-size: 16px;
-  font-weight: 400;       /* NOT bold */
-  letter-spacing: 0.12em; /* spaced caps */
+  font-weight: 400;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   line-height: 1;
 }
 
-/* ===== Nav (smaller, NOT bold) ===== */
+/* Nav base (active state is handled by rb-navlink classes) */
 .rb-nav{
   display: flex;
   align-items: center;
   gap: 16px;
 }
 
-.rb-nav a{
+/* Active link styling */
+.rb-navlink{
   font-family: "Century Gothic", CenturyGothic, AppleGothic, "Segoe UI", Arial, sans-serif;
   font-size: 13px;
   font-weight: 400;
   color: #FFFFFF;
   text-decoration: none;
-  opacity: 0.90;
+  opacity: 0.88;
   padding: 8px 8px;
   border-radius: 10px;
+  transition: opacity 140ms ease, background 140ms ease;
 }
 
-.rb-nav a:hover{
+.rb-navlink:hover{
   opacity: 1;
-  text-decoration: none;
   background: rgba(255,255,255,0.08);
 }
 
-/* Active nav link */
-.rb-nav a.is-active{
+.rb-navlink.is-active{
   opacity: 1;
-  text-decoration: none;              /* override underline */
   background: rgba(255,255,255,0.14);
-  padding: 8px 8px;
-  border-radius: 10px;
-}
-/* ===== RankedBox: Bold / High-Contrast Home Styles ===== */
-:root{
-  --rb-red: #E11D33;
-  --rb-yellow: #FACC15;
-  --rb-black: #0B0B0B;
 }
 
-/* Hero section */
-.rb-hero{
-  background: var(--rb-black);
-  color: #fff;
-  border-radius: 22px;
-  padding: 44px 34px;
+/* ===== Premium colorful background wash (Home) ===== */
+.rb-homeBg{
   position: relative;
   overflow: hidden;
+  border-radius: 22px;
+  padding: 44px 34px;
+  background: #0b0b0b;
+  color: #ffffff;
   box-shadow: 0 18px 40px rgba(0,0,0,0.22);
 }
 
-.rb-hero::before{
-  content: "";
-  position: absolute;
-  inset: 0;
+.rb-homeBg::before{
+  content:"";
+  position:absolute;
+  inset:-120px;
   background:
-    radial-gradient(900px 320px at 12% 15%, rgba(225,29,51,0.28), transparent 60%),
-    radial-gradient(650px 260px at 82% 10%, rgba(250,204,21,0.26), transparent 55%),
-    radial-gradient(720px 300px at 70% 85%, rgba(225,29,51,0.18), transparent 60%);
+    radial-gradient(700px 380px at 18% 20%, rgba(225,29,51,0.70), transparent 60%),
+    radial-gradient(650px 360px at 80% 18%, rgba(250,204,21,0.65), transparent 58%),
+    radial-gradient(680px 420px at 62% 82%, rgba(255,140,0,0.45), transparent 60%),
+    radial-gradient(820px 520px at 50% 55%, rgba(255,255,255,0.06), transparent 62%);
+  filter: blur(38px);
+  opacity: 0.95;
   pointer-events: none;
 }
 
-.rb-heroInner{
+.rb-homeBg::after{
+  content:"";
+  position:absolute;
+  inset:0;
+  background: linear-gradient(180deg, rgba(0,0,0,0.10), rgba(0,0,0,0.55));
+  pointer-events:none;
+}
+
+.rb-homeInner{
   position: relative;
-  max-width: 900px;
-}
-
-.rb-kicker{
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  font-family: "Century Gothic", CenturyGothic, AppleGothic, "Segoe UI", Arial, sans-serif;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  font-size: 12px;
-  opacity: 0.92;
-}
-
-.rb-kickerDot{
-  width: 10px;
-  height: 10px;
-  border-radius: 999px;
-  background: var(--rb-yellow);
-  box-shadow: 0 0 0 4px rgba(250,204,21,0.22);
+  max-width: 920px;
 }
 
 .rb-heroTitle{
   font-family: "Century Gothic", CenturyGothic, AppleGothic, "Segoe UI", Arial, sans-serif;
   font-size: 52px;
   font-weight: 700;
-  letter-spacing: 0.02em;
-  margin: 14px 0 0;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
+  margin: 0;
 }
 
 .rb-heroSub{
   margin-top: 14px;
-  color: rgba(255,255,255,0.82);
+  color: rgba(255,255,255,0.84);
   font-size: 18px;
   line-height: 1.55;
-  max-width: 760px;
+  max-width: 780px;
 }
 
-/* CTA buttons */
 .rb-ctaRow{
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
+  display:flex;
+  gap:12px;
+  flex-wrap:wrap;
   margin-top: 18px;
 }
 
-.rb-btnPrimary{
-  background: #fff;
-  color: #000;
-  border: 0;
-  border-radius: 12px;
+.rb-ctaPrimary{
+  display:inline-flex;
+  align-items:center;
+  gap:10px;
   padding: 12px 16px;
+  border-radius: 12px;
+  text-decoration:none;
   font-weight: 900;
-  text-decoration: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  box-shadow: 0 12px 26px rgba(0,0,0,0.18);
+  background: #ffffff;
+  color: #0b0b0b;
+  box-shadow: 0 12px 26px rgba(0,0,0,0.20);
 }
 
-.rb-btnPrimary:hover{
+.rb-ctaPrimary:hover{
   background: var(--rb-yellow);
-  color: #000;
+  color: #0b0b0b;
 }
 
-.rb-btnSecondary{
-  background: transparent;
-  color: #fff;
-  border: 1px solid rgba(255,255,255,0.20);
-  border-radius: 12px;
+.rb-ctaSecondary{
+  display:inline-flex;
+  align-items:center;
+  gap:10px;
   padding: 12px 16px;
+  border-radius: 12px;
+  text-decoration:none;
   font-weight: 800;
-  text-decoration: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.rb-btnSecondary:hover{
-  border-color: rgba(255,255,255,0.40);
   background: rgba(255,255,255,0.06);
+  color: #ffffff;
+  border: 1px solid rgba(255,255,255,0.20);
 }
 
-/* Accent chips */
+.rb-ctaSecondary:hover{
+  background: rgba(255,255,255,0.10);
+  border-color: rgba(255,255,255,0.32);
+}
+
 .rb-chipRow{
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
   margin-top: 18px;
 }
 
 .rb-chip{
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
+  display:inline-flex;
+  align-items:center;
+  gap:10px;
   padding: 9px 12px;
   border-radius: 999px;
   font-weight: 800;
   font-size: 13px;
-  border: 1px solid rgba(255,255,255,0.16);
   background: rgba(255,255,255,0.06);
-  color: rgba(255,255,255,0.9);
+  border: 1px solid rgba(255,255,255,0.16);
+  color: rgba(255,255,255,0.92);
 }
 
-.rb-chipStripe{
-  width: 18px;
-  height: 10px;
-  border-radius: 999px;
-  background: var(--rb-red);
-  box-shadow: 0 0 0 4px rgba(225,29,51,0.22);
-}
-
-.rb-chipStripe.yellow{
-  background: var(--rb-yellow);
-  box-shadow: 0 0 0 4px rgba(250,204,21,0.22);
-}
-
-/* Section header */
-.rb-sectionHead{
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 16px;
-  margin-top: 24px;
-  margin-bottom: 12px;
-}
-
-.rb-h2{
-  font-family: "Century Gothic", CenturyGothic, AppleGothic, "Segoe UI", Arial, sans-serif;
-  font-size: 22px;
-  font-weight: 700;
-  margin: 0;
-}
-
-.rb-h2Accent{
-  height: 6px;
-  width: 110px;
-  border-radius: 999px;
-  background: linear-gradient(90deg, var(--rb-red), var(--rb-yellow));
-}
-
-/* Feature cards */
-.rb-grid3{
-  display: grid;
+/* Light subtle cards (below hero) */
+.rb-softGrid{
+  display:grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 14px;
 }
 
-.rb-feature{
-  background: #fff;
-  border: 1px solid rgba(0,0,0,0.10);
+.rb-softCard{
+  background: rgba(255,255,255,0.78);
+  border: 1px solid rgba(0,0,0,0.08);
   border-radius: 18px;
   padding: 18px;
-  box-shadow: 0 12px 26px rgba(0,0,0,0.10);
-  position: relative;
-  overflow: hidden;
+  box-shadow: 0 12px 26px rgba(0,0,0,0.08);
+  backdrop-filter: blur(8px);
 }
 
-.rb-feature::before{
-  content:"";
-  position:absolute;
-  top:0;
-  left:0;
-  right:0;
-  height: 6px;
-  background: var(--rb-red);
-}
-
-.rb-feature.yellow::before{
-  background: var(--rb-yellow);
-}
-
-.rb-featureTitle{
-  font-weight: 900;
-  margin: 2px 0 8px;
+.rb-softTitle{
   font-size: 16px;
+  font-weight: 800;
+  margin: 0 0 8px 0;
 }
 
-.rb-featureText{
-  color: var(--muted);
+.rb-softText{
+  color: rgba(0,0,0,0.72);
   line-height: 1.55;
 }
 
-/* Dark “How it works” block */
-.rb-darkCard{
-  background: var(--rb-black);
-  color: #fff;
-  border-radius: 22px;
-  padding: 22px;
-  border: 1px solid rgba(255,255,255,0.10);
-  box-shadow: 0 18px 40px rgba(0,0,0,0.18);
-}
-
-.rb-steps{
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14px;
-  margin-top: 14px;
-}
-
-.rb-step{
-  background: rgba(255,255,255,0.06);
-  border: 1px solid rgba(255,255,255,0.10);
-  border-radius: 16px;
-  padding: 16px;
-}
-
-.rb-stepNum{
-  display:inline-flex;
-  align-items:center;
-  justify-content:center;
-  width: 30px;
-  height: 30px;
-  border-radius: 10px;
-  font-weight: 900;
-  background: var(--rb-red);
-  color: #fff;
-  margin-bottom: 8px;
-}
-
-.rb-stepNum.yellow{
-  background: var(--rb-yellow);
-  color: #000;
-}
-
-/* Responsive */
 @media (max-width: 900px){
-  .rb-hero{ padding: 34px 20px; }
+  .rb-homeBg{ padding: 34px 20px; }
   .rb-heroTitle{ font-size: 38px; }
-  .rb-grid3{ grid-template-columns: 1fr; }
-  .rb-steps{ grid-template-columns: 1fr; }
+  .rb-softGrid{ grid-template-columns: 1fr; }
 }
