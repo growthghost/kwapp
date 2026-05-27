@@ -22,12 +22,7 @@ function IconGauge({ size = 14 }) {
         strokeWidth="2"
         opacity="0.9"
       />
-      <path
-        d="M12 14l5-5"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-      />
+      <path d="M12 14l5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
       <circle cx="12" cy="14" r="2" fill="currentColor" />
     </svg>
   );
@@ -55,25 +50,9 @@ function IconLink({ size = 14 }) {
 function IconExport({ size = 14 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M12 3v10"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-      />
-      <path
-        d="M8 7l4-4 4 4"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M5 14v5h14v-5"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-      />
+      <path d="M12 3v10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <path d="M8 7l4-4 4 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M5 14v5h14v-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
     </svg>
   );
 }
@@ -108,25 +87,18 @@ export default function HomePage() {
             </div>
 
             <h1 className="rb-heroTitle">RANKEDBOX</h1>
-
             <div className="rb-heroRule" />
 
             <p className="rb-heroSub">
-              Built to turn research into a plan your team can actually use. Score opportunities,
-              prioritize what matters, and connect search strategy to the way visibility is evolving
-              across AI-driven discovery.
+              RankedBox helps agencies move from raw keyword data to clear decisions. It gives teams a
+              faster way to score opportunities, prioritize what matters, and connect search strategy
+              to the way visibility is evolving across AI-driven discovery.
             </p>
 
             <div className="rb-heroCtas">
-              <Link href="/try" className="rb-btnPrimary">
-                Try the free scorer
-              </Link>
-              <Link href="/pricing" className="rb-btnSecondary">
-                View pricing
-              </Link>
-              <Link href="/login" className="rb-btnSecondary">
-                Sign in
-              </Link>
+              <Link href="/try" className="rb-btnPrimary">Try the free scorer</Link>
+              <Link href="/pricing" className="rb-btnSecondary">View pricing</Link>
+              <Link href="/login" className="rb-btnSecondary">Sign in</Link>
             </div>
 
             <div className="rb-heroMeta">
@@ -134,13 +106,13 @@ export default function HomePage() {
             </div>
           </div>
 
-          {/* Right: Neon dashboard mock (visual selling) */}
+          {/* Right: Neon dashboard mock */}
           <div className="rb-heroVisual" aria-label="Product preview visual">
             <div className="rb-uiFrame">
               <div className="rb-uiShell">
                 <div className="rb-uiTopbar">
                   <div className="rb-uiBrand">
-                    <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+                    <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
                       <span style={{ width: 8, height: 8, background: "linear-gradient(90deg, var(--red), var(--yellow))" }} />
                       <span>RANKEDBOX</span>
                     </span>
@@ -155,23 +127,16 @@ export default function HomePage() {
                   </div>
 
                   <div className="rb-uiActions">
-                    <div className="rb-uiBtn">
-                      <IconExport />
-                      <span>Export Report</span>
-                    </div>
-                    <div className="rb-uiBtn">
-                      <IconFilter />
-                      <span>Filters</span>
-                    </div>
+                    <div className="rb-uiBtn"><IconExport /><span>Export Report</span></div>
+                    <div className="rb-uiBtn"><IconFilter /><span>Filters</span></div>
                   </div>
                 </div>
 
                 <div className="rb-uiBody">
-                  {/* Metric cards */}
                   <div className="rb-uiCards">
                     <div className="rb-uiCard">
                       <div className="rb-uiCardLabel">
-                        <span style={{ color: "rgba(255,255,255,0.78)" }}><IconGauge /></span>
+                        <span style={{ color: "rgba(255,255,255,0.82)" }}><IconGauge /></span>
                         <span>Keywords scored</span>
                       </div>
                       <div className="rb-uiCardValue">1,582</div>
@@ -180,7 +145,7 @@ export default function HomePage() {
 
                     <div className="rb-uiCard">
                       <div className="rb-uiCardLabel">
-                        <span style={{ color: "rgba(255,255,255,0.78)" }}><IconStar /></span>
+                        <span style={{ color: "rgba(255,255,255,0.82)" }}><IconStar /></span>
                         <span>High priority</span>
                       </div>
                       <div className="rb-uiCardValue">312</div>
@@ -189,7 +154,7 @@ export default function HomePage() {
 
                     <div className="rb-uiCard">
                       <div className="rb-uiCardLabel">
-                        <span style={{ color: "rgba(255,255,255,0.78)" }}><IconGauge /></span>
+                        <span style={{ color: "rgba(255,255,255,0.82)" }}><IconGauge /></span>
                         <span>Avg. opportunity</span>
                       </div>
                       <div className="rb-uiCardValue">78</div>
@@ -198,7 +163,7 @@ export default function HomePage() {
 
                     <div className="rb-uiCard">
                       <div className="rb-uiCardLabel">
-                        <span style={{ color: "rgba(255,255,255,0.78)" }}><IconLink /></span>
+                        <span style={{ color: "rgba(255,255,255,0.82)" }}><IconLink /></span>
                         <span>Mapped</span>
                       </div>
                       <div className="rb-uiCardValue">86%</div>
@@ -206,7 +171,6 @@ export default function HomePage() {
                     </div>
                   </div>
 
-                  {/* Table */}
                   <div className="rb-uiTable">
                     <div className="rb-uiTableHeader">
                       <div>Keyword / Query</div>
@@ -261,48 +225,37 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* SECTION 1 (WHITE): Why teams use RankedBox */}
+      {/* SECTION 1 */}
       <section className="rb-sectionWhite">
         <div className="rb-band">
           <div className="rb-sectionHeader">
             <div className="rb-kicker">Why teams use RankedBox</div>
             <h2 className="rb-h2">Built to turn research into a plan your team can actually use</h2>
             <p className="rb-p">
-              RankedBox helps agencies move from raw keyword data to clear decisions.
-              It gives teams a faster way to score opportunities, prioritize what matters,
-              and connect search strategy to the way visibility is evolving across AI-driven discovery.
+              RankedBox helps agencies move from raw keyword data to clear decisions. It gives teams a faster
+              way to score opportunities, prioritize what matters, and connect search strategy to the way
+              visibility is evolving across AI-driven discovery.
             </p>
           </div>
 
           <div className="rb-3col">
             <div>
               <h3>Prioritize faster</h3>
-              <p>
-                Turn long keyword lists into clear tiers so your team knows what deserves attention first
-                and what can wait.
-              </p>
+              <p>Turn long keyword lists into clear tiers so your team knows what deserves attention first and what can wait.</p>
             </div>
-
             <div>
               <h3>Plan for modern search</h3>
-              <p>
-                Go beyond classic keyword metrics by bringing prompt visibility, mentions, and citations
-                into the same planning workflow.
-              </p>
+              <p>Go beyond classic keyword metrics by bringing prompt visibility, mentions, and citations into the same planning workflow.</p>
             </div>
-
             <div>
               <h3>Create cleaner handoffs</h3>
-              <p>
-                Export outputs your team can move directly into content planning, page mapping,
-                and execution without extra cleanup.
-              </p>
+              <p>Export outputs your team can move directly into content planning, page mapping, and execution without extra cleanup.</p>
             </div>
           </div>
         </div>
       </section>
 
-      {/* SECTION 2 (SOFT): What RankedBox helps you do */}
+      {/* SECTION 2 */}
       <section className="rb-sectionSoft">
         <div className="rb-band tight">
           <div className="rb-sectionHeader">
@@ -313,40 +266,25 @@ export default function HomePage() {
           <div className="rb-2colLines">
             <div className="rb-lineItem">
               <h3>Score and tier opportunities</h3>
-              <p>
-                Quickly evaluate search volume and keyword difficulty so teams can separate high-value
-                targets from noise.
-              </p>
+              <p>Quickly evaluate search volume and keyword difficulty so teams can separate high-value targets from noise.</p>
             </div>
-
             <div className="rb-lineItem">
               <h3>Align teams around what to target</h3>
-              <p>
-                Give strategists, writers, and stakeholders a clearer view of what matters most so
-                execution stays focused.
-              </p>
+              <p>Give strategists, writers, and stakeholders a clearer view of what matters most so execution stays focused.</p>
             </div>
-
             <div className="rb-lineItem">
               <h3>Evaluate prompt visibility, mentions, and citations</h3>
-              <p>
-                Build strategy around how discovery is changing by looking at the signals that influence
-                how brands appear in AI-assisted search experiences.
-              </p>
+              <p>Build strategy around how discovery is changing by looking at the signals that influence how brands appear in AI-assisted search experiences.</p>
             </div>
-
             <div className="rb-lineItem">
               <h3>Move from analysis to action</h3>
-              <p>
-                Export cleaner outputs and use them to support prioritization, mapping decisions, and
-                a more repeatable workflow across client accounts.
-              </p>
+              <p>Export cleaner outputs and use them to support prioritization, mapping decisions, and a more repeatable workflow across client accounts.</p>
             </div>
           </div>
         </div>
       </section>
 
-      {/* FINAL CTA (WHITE) */}
+      {/* FINAL CTA */}
       <section className="rb-sectionWhite">
         <div className="rb-band">
           <h2 className="rb-finalTitle">Start with the free scorer. Build from there.</h2>
