@@ -18,9 +18,9 @@
   --red: #b10021;
   --yellow: #d2a113;
 
-  --green: #2ecc71;
-  --orange: #fb923c;
-  --danger: #ef4444;
+  --green: #2ecc71;   /* Elite */
+  --orange: #fb923c;  /* Fair */
+  --danger: #ef4444;  /* Low */
 
   --shadowSoft: 0 18px 48px rgba(0, 0, 0, 0.08);
   --shadowHero: 0 24px 64px rgba(0, 0, 0, 0.34);
@@ -42,7 +42,7 @@ body {
 a { color: inherit; }
 
 /* =========================
-   HEADER
+   HEADER (already used by layout.js)
 ========================= */
 .rb-header {
   background: var(--header);
@@ -148,10 +148,11 @@ a { color: inherit; }
 }
 
 /* =========================
-   CTA BUTTONS (CRISP)
+   CTA BUTTONS (CRISP, 0 RADIUS)
 ========================= */
 .rb-btnPrimary,
-.rb-btnSecondary {
+.rb-btnSecondary,
+.rb-btnLight {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -188,22 +189,11 @@ a { color: inherit; }
   background: rgba(255,255,255,0.09);
 }
 
-/* Light-section button */
 .rb-btnLight {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 56px;
-  padding: 0 22px;
-  border-radius: 0;
-  text-decoration: none;
-  font-size: 16px;
-  line-height: 1;
   font-weight: 700;
   border: 1px solid rgba(0,0,0,0.14);
   color: var(--ink);
   background: transparent;
-  transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
 }
 .rb-btnLight:hover {
   transform: translateY(-1px);
@@ -212,7 +202,7 @@ a { color: inherit; }
 }
 
 /* =========================
-   HERO (NEON / DASHBOARD-LIKE)
+   HERO (NEON / DASHBOARD)
 ========================= */
 .rb-hero {
   position: relative;
@@ -221,7 +211,7 @@ a { color: inherit; }
   border-bottom: 1px solid rgba(255,255,255,0.08);
 }
 
-/* Big glow blobs */
+/* big glow blobs */
 .rb-hero::before {
   content: "";
   position: absolute;
@@ -235,7 +225,6 @@ a { color: inherit; }
   filter: blur(34px);
   pointer-events: none;
 }
-
 .rb-hero::after {
   content: "";
   position: absolute;
@@ -250,7 +239,7 @@ a { color: inherit; }
   pointer-events: none;
 }
 
-/* Neon swoops layer */
+/* neon swoops */
 .rb-heroSwoops {
   position: absolute;
   inset: 0;
@@ -260,31 +249,29 @@ a { color: inherit; }
 .rb-heroSwoops::before {
   content: "";
   position: absolute;
-  left: -120px;
-  bottom: -140px;
-  width: 880px;
-  height: 520px;
+  left: -140px;
+  bottom: -180px;
+  width: 980px;
+  height: 620px;
   transform: rotate(-6deg);
   background:
-    radial-gradient(closest-side, rgba(177,0,33,0.00) 0%, rgba(177,0,33,0.00) 55%, rgba(177,0,33,0.35) 62%, rgba(177,0,33,0.00) 72%) ,
-    radial-gradient(closest-side, rgba(210,161,19,0.00) 0%, rgba(210,161,19,0.00) 58%, rgba(210,161,19,0.24) 66%, rgba(210,161,19,0.00) 76%);
-  filter: blur(0px);
+    radial-gradient(closest-side, rgba(177,0,33,0.00) 0%, rgba(177,0,33,0.00) 52%, rgba(177,0,33,0.40) 60%, rgba(177,0,33,0.00) 72%),
+    radial-gradient(closest-side, rgba(210,161,19,0.00) 0%, rgba(210,161,19,0.00) 56%, rgba(210,161,19,0.26) 64%, rgba(210,161,19,0.00) 76%);
 }
 .rb-heroSwoops::after {
   content: "";
   position: absolute;
-  right: -120px;
-  bottom: -160px;
-  width: 780px;
-  height: 520px;
+  right: -180px;
+  bottom: -200px;
+  width: 980px;
+  height: 640px;
   transform: rotate(8deg);
   background:
-    radial-gradient(closest-side, rgba(210,161,19,0.00) 0%, rgba(210,161,19,0.00) 52%, rgba(210,161,19,0.28) 60%, rgba(210,161,19,0.00) 72%),
+    radial-gradient(closest-side, rgba(210,161,19,0.00) 0%, rgba(210,161,19,0.00) 50%, rgba(210,161,19,0.32) 58%, rgba(210,161,19,0.00) 72%),
     radial-gradient(closest-side, rgba(177,0,33,0.00) 0%, rgba(177,0,33,0.00) 58%, rgba(177,0,33,0.18) 66%, rgba(177,0,33,0.00) 76%);
-  filter: blur(0px);
 }
 
-/* Inner layout */
+/* layout */
 .rb-heroInner {
   position: relative;
   z-index: 2;
@@ -304,18 +291,18 @@ a { color: inherit; }
   max-width: 760px;
 }
 
-/* Concentrated glow behind headline area */
+/* glow behind headline area only */
 .rb-heroCopy::before {
   content: "";
   position: absolute;
-  left: -80px;
-  top: -56px;
-  width: 560px;
-  height: 440px;
+  left: -90px;
+  top: -64px;
+  width: 620px;
+  height: 460px;
   border-radius: 999px;
   background:
-    radial-gradient(circle, rgba(177,0,33,0.54) 0%, rgba(177,0,33,0.20) 42%, rgba(177,0,33,0.00) 74%);
-  filter: blur(58px);
+    radial-gradient(circle, rgba(177,0,33,0.62) 0%, rgba(177,0,33,0.22) 44%, rgba(177,0,33,0.00) 76%);
+  filter: blur(60px);
   z-index: -1;
   pointer-events: none;
 }
@@ -386,35 +373,35 @@ a { color: inherit; }
 ========================= */
 .rb-heroVisual { position: relative; z-index: 3; }
 
-/* Neon frame wrapper */
+/* ✅ THIS WAS MISSING FOR YOU */
 .rb-uiFrame {
   position: relative;
   padding: 1px;
   border-radius: 18px;
-  background: linear-gradient(135deg, rgba(177,0,33,0.85), rgba(210,161,19,0.75));
+  background: linear-gradient(135deg, rgba(177,0,33,0.90), rgba(210,161,19,0.80));
   box-shadow:
     0 0 0 1px rgba(255,255,255,0.06),
     0 18px 56px rgba(0,0,0,0.55),
-    0 0 48px rgba(177,0,33,0.25),
-    0 0 48px rgba(210,161,19,0.18);
+    0 0 58px rgba(177,0,33,0.30),
+    0 0 54px rgba(210,161,19,0.22);
 }
 
 .rb-uiShell {
   position: relative;
   border-radius: 18px;
-  background: rgba(10,10,10,0.82);
+  background: rgba(12,12,12,0.92); /* brighter + less washed out */
   border: 1px solid rgba(255,255,255,0.10);
   overflow: hidden;
 }
 
-/* subtle inner vignette */
+/* inner vignette */
 .rb-uiShell::before {
   content: "";
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(800px 380px at 30% 18%, rgba(177,0,33,0.20) 0%, rgba(0,0,0,0.00) 55%),
-    radial-gradient(760px 420px at 84% 14%, rgba(210,161,19,0.18) 0%, rgba(0,0,0,0.00) 58%);
+    radial-gradient(800px 380px at 30% 18%, rgba(177,0,33,0.18) 0%, rgba(0,0,0,0.00) 55%),
+    radial-gradient(760px 420px at 84% 14%, rgba(210,161,19,0.16) 0%, rgba(0,0,0,0.00) 58%);
   pointer-events: none;
 }
 
@@ -431,7 +418,7 @@ a { color: inherit; }
   display: inline-flex;
   align-items: center;
   gap: 10px;
-  color: rgba(255,255,255,0.92);
+  color: rgba(255,255,255,0.94);
   font-family: "Century Gothic", CenturyGothic, AppleGothic, "Segoe UI", Arial, sans-serif;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -443,9 +430,9 @@ a { color: inherit; }
   display: flex;
   gap: 16px;
   font-size: 12px;
-  color: rgba(255,255,255,0.78);
+  color: rgba(255,255,255,0.82); /* brighter */
 }
-.rb-uiNav span { opacity: 0.86; }
+.rb-uiNav span { opacity: 0.9; }
 .rb-uiNav span.active {
   opacity: 1;
   color: #fff;
@@ -472,9 +459,9 @@ a { color: inherit; }
   align-items: center;
   gap: 8px;
   padding: 8px 10px;
-  border: 1px solid rgba(255,255,255,0.16);
-  background: rgba(255,255,255,0.06);
-  color: rgba(255,255,255,0.92);
+  border: 1px solid rgba(255,255,255,0.18);
+  background: rgba(255,255,255,0.07);
+  color: rgba(255,255,255,0.94);
   font-size: 12px;
   border-radius: 10px;
   user-select: none;
@@ -503,7 +490,7 @@ a { color: inherit; }
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.12em;
-  color: rgba(255,255,255,0.70);
+  color: rgba(255,255,255,0.76);
   margin-bottom: 8px;
   font-weight: 400;
   display: flex;
@@ -520,7 +507,7 @@ a { color: inherit; }
 .rb-uiCardNote {
   margin-top: 6px;
   font-size: 12px;
-  color: rgba(255,255,255,0.70);
+  color: rgba(255,255,255,0.74);
 }
 
 .rb-uiTable {
@@ -543,13 +530,13 @@ a { color: inherit; }
   font-size: 11px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: rgba(255,255,255,0.66);
+  color: rgba(255,255,255,0.72);
   border-bottom: 1px solid rgba(255,255,255,0.10);
   font-weight: 400;
 }
 
 .rb-uiTableRow {
-  color: rgba(255,255,255,0.92);
+  color: rgba(255,255,255,0.94);
   border-bottom: 1px solid rgba(255,255,255,0.06);
   font-size: 13px;
   font-weight: 400;
@@ -578,21 +565,21 @@ a { color: inherit; }
   border-radius: 999px;
   font-size: 12px;
   font-weight: 700;
-  border: 1px solid rgba(255,255,255,0.16);
+  border: 1px solid rgba(255,255,255,0.14);
   color: #ffffff;
   background: rgba(255,255,255,0.08);
 }
 .rb-tierBadge.elite {
-  background: rgba(46,204,113,0.16);
-  border-color: rgba(46,204,113,0.32);
+  background: rgba(46,204,113,0.18);
+  border-color: rgba(46,204,113,0.36);
 }
 .rb-tierBadge.fair {
-  background: rgba(251,146,60,0.16);
-  border-color: rgba(251,146,60,0.34);
+  background: rgba(251,146,60,0.18);
+  border-color: rgba(251,146,60,0.38);
 }
 .rb-tierBadge.low {
-  background: rgba(239,68,68,0.16);
-  border-color: rgba(239,68,68,0.34);
+  background: rgba(239,68,68,0.18);
+  border-color: rgba(239,68,68,0.38);
 }
 
 .rb-uiFooter {
@@ -719,5 +706,5 @@ a { color: inherit; }
   .rb-btnPrimary, .rb-btnSecondary, .rb-btnLight { width: 100%; }
   .rb-finalTitle { font-size: 34px; }
 
-  .rb-uiNav { display: none; } /* keep UI mock clean on small screens */
+  .rb-uiNav { display: none; }
 }
