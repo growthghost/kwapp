@@ -14,8 +14,13 @@
   --border: rgba(0, 0, 0, 0.10);
 
   --header: #050505;
+
   --red: #b10021;
   --yellow: #d2a113;
+
+  --green: #2ecc71;
+  --orange: #fb923c;
+  --danger: #ef4444;
 
   --shadowSoft: 0 18px 48px rgba(0, 0, 0, 0.08);
   --shadowHero: 0 24px 64px rgba(0, 0, 0, 0.34);
@@ -98,12 +103,7 @@ a { color: inherit; }
 /* =========================
    GLOBAL LAYOUT
 ========================= */
-.rb-container {
-  width: 100%;
-  max-width: 1180px;
-  margin: 0 auto;
-  padding: 0;
-}
+.rb-container { width: 100%; max-width: 1180px; margin: 0 auto; padding: 0; }
 
 .rb-band {
   width: 100%;
@@ -111,18 +111,12 @@ a { color: inherit; }
   margin: 0 auto;
   padding: 64px 28px;
 }
-.rb-band.tight {
-  padding-top: 52px;
-  padding-bottom: 52px;
-}
+.rb-band.tight { padding-top: 52px; padding-bottom: 52px; }
 
 .rb-sectionWhite { background: var(--surface); }
 .rb-sectionSoft  { background: var(--surfaceSoft); }
 
-.rb-sectionHeader {
-  max-width: 860px;
-  margin-bottom: 34px;
-}
+.rb-sectionHeader { max-width: 860px; margin-bottom: 34px; }
 
 .rb-kicker {
   font-family: "Century Gothic", CenturyGothic, AppleGothic, "Segoe UI", Arial, sans-serif;
@@ -183,18 +177,18 @@ a { color: inherit; }
 }
 
 .rb-btnSecondary {
-  background: rgba(255,255,255,0.04);
+  background: rgba(255,255,255,0.05);
   color: #ffffff;
   border: 1px solid rgba(255,255,255,0.22);
   font-weight: 700;
 }
 .rb-btnSecondary:hover {
   transform: translateY(-1px);
-  border-color: rgba(255,255,255,0.42);
-  background: rgba(255,255,255,0.08);
+  border-color: rgba(255,255,255,0.46);
+  background: rgba(255,255,255,0.09);
 }
 
-/* Light-section secondary button */
+/* Light-section button */
 .rb-btnLight {
   display: inline-flex;
   align-items: center;
@@ -218,7 +212,7 @@ a { color: inherit; }
 }
 
 /* =========================
-   HERO (DASHBOARD-LIKE)
+   HERO (NEON / DASHBOARD-LIKE)
 ========================= */
 .rb-hero {
   position: relative;
@@ -227,6 +221,7 @@ a { color: inherit; }
   border-bottom: 1px solid rgba(255,255,255,0.08);
 }
 
+/* Big glow blobs */
 .rb-hero::before {
   content: "";
   position: absolute;
@@ -255,6 +250,41 @@ a { color: inherit; }
   pointer-events: none;
 }
 
+/* Neon swoops layer */
+.rb-heroSwoops {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 1;
+}
+.rb-heroSwoops::before {
+  content: "";
+  position: absolute;
+  left: -120px;
+  bottom: -140px;
+  width: 880px;
+  height: 520px;
+  transform: rotate(-6deg);
+  background:
+    radial-gradient(closest-side, rgba(177,0,33,0.00) 0%, rgba(177,0,33,0.00) 55%, rgba(177,0,33,0.35) 62%, rgba(177,0,33,0.00) 72%) ,
+    radial-gradient(closest-side, rgba(210,161,19,0.00) 0%, rgba(210,161,19,0.00) 58%, rgba(210,161,19,0.24) 66%, rgba(210,161,19,0.00) 76%);
+  filter: blur(0px);
+}
+.rb-heroSwoops::after {
+  content: "";
+  position: absolute;
+  right: -120px;
+  bottom: -160px;
+  width: 780px;
+  height: 520px;
+  transform: rotate(8deg);
+  background:
+    radial-gradient(closest-side, rgba(210,161,19,0.00) 0%, rgba(210,161,19,0.00) 52%, rgba(210,161,19,0.28) 60%, rgba(210,161,19,0.00) 72%),
+    radial-gradient(closest-side, rgba(177,0,33,0.00) 0%, rgba(177,0,33,0.00) 58%, rgba(177,0,33,0.18) 66%, rgba(177,0,33,0.00) 76%);
+  filter: blur(0px);
+}
+
+/* Inner layout */
 .rb-heroInner {
   position: relative;
   z-index: 2;
@@ -274,7 +304,7 @@ a { color: inherit; }
   max-width: 760px;
 }
 
-/* Concentrated glow behind headline area only */
+/* Concentrated glow behind headline area */
 .rb-heroCopy::before {
   content: "";
   position: absolute;
@@ -284,7 +314,7 @@ a { color: inherit; }
   height: 440px;
   border-radius: 999px;
   background:
-    radial-gradient(circle, rgba(177,0,33,0.52) 0%, rgba(177,0,33,0.20) 42%, rgba(177,0,33,0.00) 74%);
+    radial-gradient(circle, rgba(177,0,33,0.54) 0%, rgba(177,0,33,0.20) 42%, rgba(177,0,33,0.00) 74%);
   filter: blur(58px);
   z-index: -1;
   pointer-events: none;
@@ -352,24 +382,44 @@ a { color: inherit; }
 }
 
 /* =========================
-   HERO VISUAL (UI MOCK)
+   HERO VISUAL (NEON DASH)
 ========================= */
-.rb-heroVisual {
+.rb-heroVisual { position: relative; z-index: 3; }
+
+/* Neon frame wrapper */
+.rb-uiFrame {
   position: relative;
-  z-index: 3;
+  padding: 1px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(177,0,33,0.85), rgba(210,161,19,0.75));
+  box-shadow:
+    0 0 0 1px rgba(255,255,255,0.06),
+    0 18px 56px rgba(0,0,0,0.55),
+    0 0 48px rgba(177,0,33,0.25),
+    0 0 48px rgba(210,161,19,0.18);
 }
 
 .rb-uiShell {
   position: relative;
   border-radius: 18px;
-  background: rgba(255,255,255,0.06);
-  border: 1px solid rgba(255,255,255,0.14);
-  box-shadow: var(--shadowHero);
-  backdrop-filter: blur(10px);
+  background: rgba(10,10,10,0.82);
+  border: 1px solid rgba(255,255,255,0.10);
   overflow: hidden;
 }
 
+/* subtle inner vignette */
+.rb-uiShell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(800px 380px at 30% 18%, rgba(177,0,33,0.20) 0%, rgba(0,0,0,0.00) 55%),
+    radial-gradient(760px 420px at 84% 14%, rgba(210,161,19,0.18) 0%, rgba(0,0,0,0.00) 58%);
+  pointer-events: none;
+}
+
 .rb-uiTopbar {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -377,73 +427,103 @@ a { color: inherit; }
   border-bottom: 1px solid rgba(255,255,255,0.10);
 }
 
-.rb-uiDots {
+.rb-uiBrand {
   display: inline-flex;
-  gap: 8px;
-}
-.rb-uiDot {
-  width: 10px;
-  height: 10px;
-  border-radius: 999px;
-  background: rgba(255,255,255,0.22);
-}
-.rb-uiDot.red { background: rgba(177,0,33,0.75); }
-.rb-uiDot.yellow { background: rgba(210,161,19,0.75); }
-
-.rb-uiTitle {
+  align-items: center;
+  gap: 10px;
+  color: rgba(255,255,255,0.92);
   font-family: "Century Gothic", CenturyGothic, AppleGothic, "Segoe UI", Arial, sans-serif;
-  font-size: 12px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: rgba(255,255,255,0.86);
+  font-size: 12px;
   font-weight: 400;
 }
 
+.rb-uiNav {
+  display: flex;
+  gap: 16px;
+  font-size: 12px;
+  color: rgba(255,255,255,0.78);
+}
+.rb-uiNav span { opacity: 0.86; }
+.rb-uiNav span.active {
+  opacity: 1;
+  color: #fff;
+  position: relative;
+}
+.rb-uiNav span.active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -10px;
+  height: 2px;
+  background: linear-gradient(90deg, var(--red), var(--yellow));
+}
+
+.rb-uiActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.rb-uiBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255,255,255,0.16);
+  background: rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.92);
+  font-size: 12px;
+  border-radius: 10px;
+  user-select: none;
+}
+
 .rb-uiBody {
+  position: relative;
   padding: 16px;
 }
 
-.rb-uiMetricRow {
+.rb-uiCards {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-  margin-bottom: 14px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
 }
 
-.rb-uiMetric {
+.rb-uiCard {
   padding: 12px;
   border: 1px solid rgba(255,255,255,0.10);
-  background: rgba(0,0,0,0.22);
+  background: rgba(0,0,0,0.24);
   border-radius: 14px;
 }
 
-.rb-uiMetricLabel {
+.rb-uiCardLabel {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.12em;
   color: rgba(255,255,255,0.70);
   margin-bottom: 8px;
   font-weight: 400;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
-.rb-uiMetricValue {
+.rb-uiCardValue {
   font-size: 20px;
   color: #ffffff;
   font-weight: 700;
 }
 
-.rb-uiBar {
-  margin-top: 14px;
-  border-radius: 14px;
-  padding: 12px;
-  background: linear-gradient(90deg, rgba(177,0,33,0.90), rgba(210,161,19,0.90));
-  color: #0b0b0b;
-  font-weight: 700;
-  text-align: center;
+.rb-uiCardNote {
+  margin-top: 6px;
+  font-size: 12px;
+  color: rgba(255,255,255,0.70);
 }
 
 .rb-uiTable {
-  margin-top: 14px;
   border: 1px solid rgba(255,255,255,0.10);
   background: rgba(0,0,0,0.18);
   border-radius: 14px;
@@ -453,7 +533,7 @@ a { color: inherit; }
 .rb-uiTableHeader,
 .rb-uiTableRow {
   display: grid;
-  grid-template-columns: 1.2fr 0.5fr 0.5fr 0.6fr;
+  grid-template-columns: 1.2fr 0.55fr 0.55fr 0.8fr 1fr;
   gap: 10px;
   padding: 10px 12px;
   align-items: center;
@@ -463,7 +543,7 @@ a { color: inherit; }
   font-size: 11px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: rgba(255,255,255,0.68);
+  color: rgba(255,255,255,0.66);
   border-bottom: 1px solid rgba(255,255,255,0.10);
   font-weight: 400;
 }
@@ -474,33 +554,58 @@ a { color: inherit; }
   font-size: 13px;
   font-weight: 400;
 }
-
 .rb-uiTableRow:last-child { border-bottom: none; }
 
-.rb-badge {
+.rb-uiScoreBar {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.12);
+  overflow: hidden;
+}
+.rb-uiScoreBar > span {
+  display: block;
+  height: 100%;
+  width: 60%;
+  background: linear-gradient(90deg, var(--red), var(--yellow));
+}
+
+/* Tier badges (app-like colors) */
+.rb-tierBadge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 4px 8px;
+  padding: 4px 10px;
   border-radius: 999px;
   font-size: 12px;
   font-weight: 700;
-  background: rgba(255,255,255,0.10);
-  border: 1px solid rgba(255,255,255,0.12);
+  border: 1px solid rgba(255,255,255,0.16);
   color: #ffffff;
+  background: rgba(255,255,255,0.08);
+}
+.rb-tierBadge.elite {
+  background: rgba(46,204,113,0.16);
+  border-color: rgba(46,204,113,0.32);
+}
+.rb-tierBadge.fair {
+  background: rgba(251,146,60,0.16);
+  border-color: rgba(251,146,60,0.34);
+}
+.rb-tierBadge.low {
+  background: rgba(239,68,68,0.16);
+  border-color: rgba(239,68,68,0.34);
 }
 
-.rb-badge.elite {
-  background: rgba(210,161,19,0.16);
-  border-color: rgba(210,161,19,0.30);
-}
-.rb-badge.good {
-  background: rgba(255,255,255,0.10);
-  border-color: rgba(255,255,255,0.16);
-}
-.rb-badge.fair {
-  background: rgba(177,0,33,0.14);
-  border-color: rgba(177,0,33,0.28);
+.rb-uiFooter {
+  margin-top: 12px;
+  border-radius: 14px;
+  padding: 12px;
+  background: linear-gradient(90deg, rgba(177,0,33,0.88), rgba(210,161,19,0.86));
+  color: #0b0b0b;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 /* =========================
@@ -582,6 +687,10 @@ a { color: inherit; }
 /* =========================
    RESPONSIVE
 ========================= */
+@media (max-width: 1200px) {
+  .rb-uiCards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
 @media (max-width: 1100px) {
   .rb-heroInner {
     grid-template-columns: 1fr;
@@ -609,4 +718,6 @@ a { color: inherit; }
   .rb-heroCtas, .rb-finalActions { flex-direction: column; align-items: stretch; }
   .rb-btnPrimary, .rb-btnSecondary, .rb-btnLight { width: 100%; }
   .rb-finalTitle { font-size: 34px; }
+
+  .rb-uiNav { display: none; } /* keep UI mock clean on small screens */
 }
