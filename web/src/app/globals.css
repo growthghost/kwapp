@@ -285,6 +285,7 @@ img{
   position: relative;
   z-index: 2;
   max-width: 600px;
+  margin-top: -28px; /* lifts the left copy away from the bottom swoop */
 }
 
 .rb-home-eyebrow{
