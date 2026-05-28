@@ -932,85 +932,104 @@ img{
   }
 }
 /* =========================
-   HOME — SECTION 2 (Visual upgrade)
-   - Keeps copy the same
-   - Adds icon cards + subtle red→gold glow
+   HOME — SECTION 2 (Red band, no cards)
+   Premium deep-red background + glow
+   Rows + dividers (not box cards)
 ========================= */
-.rb-home-s2{
+.rb-home-s2red{
   position: relative;
+  background: #2a070d; /* deep premium red */
+  color: #ffffff;
+  padding: 64px 0;
+  overflow: hidden;
 }
 
-.rb-home-s2::before{
+/* red→gold ambient glow */
+.rb-home-s2red::before{
   content:"";
   position:absolute;
-  inset:-28px -10px -28px -10px;
+  inset:-20%;
   background:
-    radial-gradient(620px 240px at 12% 0%, rgba(225,29,51,0.10), rgba(0,0,0,0) 60%),
-    radial-gradient(560px 240px at 86% 12%, rgba(245,158,11,0.10), rgba(0,0,0,0) 60%);
+    radial-gradient(60% 60% at 12% 20%, rgba(225,29,51,0.55) 0%, rgba(225,29,51,0.10) 45%, rgba(0,0,0,0) 70%),
+    radial-gradient(55% 55% at 92% 25%, rgba(245,158,11,0.45) 0%, rgba(245,158,11,0.10) 45%, rgba(0,0,0,0) 70%),
+    radial-gradient(70% 70% at 50% 110%, rgba(245,158,11,0.18) 0%, rgba(0,0,0,0) 65%);
+  filter: blur(18px);
+  opacity: 1;
   pointer-events:none;
 }
 
-.rb-home-s2 > .rb-home-inner{
+.rb-home-s2red > .rb-home-inner{
   position: relative;
   z-index: 1;
 }
 
-.rb-home-s2-grid{
+/* kicker + headline on dark */
+.rb-home-s2red .rb-home-kicker{
+  color: rgba(255,255,255,0.75);
+}
+
+.rb-home-s2red .rb-home-h2{
+  color: #ffffff;
+}
+
+/* thin gradient rule under headline */
+.rb-home-s2red-rule{
+  width: 140px;
+  height: 3px;
+  background: linear-gradient(90deg, #E11D33, #F59E0B);
+  margin-top: 14px;
+}
+
+/* rows instead of cards */
+.rb-home-s2red-rows{
   margin-top: 26px;
+  border-top: 1px solid rgba(255,255,255,0.14);
+}
+
+.rb-home-s2red-row{
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
+  grid-template-columns: 44px 1fr;
+  gap: 14px;
+  padding: 18px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.14);
 }
 
-@media (max-width: 860px){
-  .rb-home-s2-grid{ grid-template-columns: 1fr; }
+.rb-home-s2red-icon{
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255,255,255,0.18);
+  background: rgba(0,0,0,0.18);
 }
 
-.rb-home-s2-card{
-  background: rgba(255,255,255,0.86);
-  border: 1px solid rgba(0,0,0,0.08);
-  box-shadow: 0 12px 28px rgba(0,0,0,0.10);
-  padding: 18px 18px 16px;
-}
-
-.rb-home-s2-top{
-  display:flex;
-  align-items:center;
-  gap:12px;
-}
-
-.rb-home-s2-icon{
-  width: 40px;
-  height: 40px;
-  display:grid;
-  place-items:center;
-  background: rgba(0,0,0,0.04);
-  border: 1px solid rgba(0,0,0,0.08);
-}
-
-.rb-home-s2-icon svg{
+.rb-home-s2red-icon svg{
   width: 20px;
   height: 20px;
-  color: var(--ink);
+  color: #ffffff;
 }
 
-.rb-home-s2-title{
+.rb-home-s2red-title{
   font-size: 16px;
-  font-weight: 800;
-  color: var(--ink);
-  line-height: 1.3;
+  font-weight: 700;
+  color: #ffffff;
+  margin: 0;
 }
 
-.rb-home-s2-accent{
-  width: 44px;
-  height: 3px;
-  margin-top: 10px;
-  background: linear-gradient(90deg, #E11D33, #F59E0B);
-}
-
-.rb-home-s2-copy{
-  margin-top: 10px;
-  color: var(--muted);
+.rb-home-s2red-copy{
+  margin-top: 6px;
+  color: rgba(255,255,255,0.82);
   font-size: 14px;
-  line-height: 1.65;
+  line-height: 1.7;
+}
+
+/* responsive */
+@media (max-width: 860px){
+  .rb-home-s2red-row{
+    grid-template-columns: 40px 1fr;
+  }
+  .rb-home-s2red-icon{
+    width: 40px;
+    height: 40px;
+  }
 }
