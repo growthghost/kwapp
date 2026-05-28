@@ -18,9 +18,9 @@ export default function HomePage() {
               </div>
 
               <h1 className="rb-home-title">
-                Turn keywords and AI search queries
+                Turn keywords and AI search prompts into
                 <br />
-                into mapped priorities in <span className="rb-home-title-accent">minutes.</span>
+                mapped priorities in <span className="rb-home-title-accent">minutes.</span>
               </h1>
 
               <div className="rb-home-title-rule" />
