@@ -309,9 +309,9 @@ img{
 .rb-home-title{
   margin: 0;
   font-family: "Century Gothic", CenturyGothic, AppleGothic, "Segoe UI", Arial, sans-serif;
-  font-size: 76px;
+  font-size: 50px;
   line-height: 0.94;
-  letter-spacing: -0.055em;
+  letter-spacing: -0.035em;
   font-weight: 700;
   color: #ffffff;
   max-width: 560px;
