@@ -931,105 +931,67 @@ img{
     font-size: 32px;
   }
 }
-/* =========================
-   HOME — SECTION 2 (Red band, no cards)
-   Premium deep-red background + glow
-   Rows + dividers (not box cards)
-========================= */
-.rb-home-s2red{
-  position: relative;
-  background: #2a070d; /* deep premium red */
+/* ===== Section 2 add-ons: step labels + hover/focus ===== */
+
+.rb-home-s2red-titleline{
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.rb-home-step{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  min-width: 38px;
+  padding: 0 10px;
+  border: 1px solid rgba(255,255,255,0.22);
+  background: rgba(0,0,0,0.22);
   color: #ffffff;
-  padding: 64px 0;
-  overflow: hidden;
-}
-
-/* red→gold ambient glow */
-.rb-home-s2red::before{
-  content:"";
-  position:absolute;
-  inset:-20%;
-  background:
-    radial-gradient(60% 60% at 12% 20%, rgba(225,29,51,0.55) 0%, rgba(225,29,51,0.10) 45%, rgba(0,0,0,0) 70%),
-    radial-gradient(55% 55% at 92% 25%, rgba(245,158,11,0.45) 0%, rgba(245,158,11,0.10) 45%, rgba(0,0,0,0) 70%),
-    radial-gradient(70% 70% at 50% 110%, rgba(245,158,11,0.18) 0%, rgba(0,0,0,0) 65%);
-  filter: blur(18px);
-  opacity: 1;
-  pointer-events:none;
-}
-
-.rb-home-s2red > .rb-home-inner{
-  position: relative;
-  z-index: 1;
-}
-
-/* kicker + headline on dark */
-.rb-home-s2red .rb-home-kicker{
-  color: rgba(255,255,255,0.75);
-}
-
-.rb-home-s2red .rb-home-h2{
-  color: #ffffff;
-}
-
-/* thin gradient rule under headline */
-.rb-home-s2red-rule{
-  width: 140px;
-  height: 3px;
-  background: linear-gradient(90deg, #E11D33, #F59E0B);
-  margin-top: 14px;
-}
-
-/* rows instead of cards */
-.rb-home-s2red-rows{
-  margin-top: 26px;
-  border-top: 1px solid rgba(255,255,255,0.14);
-}
-
-.rb-home-s2red-row{
-  display: grid;
-  grid-template-columns: 44px 1fr;
-  gap: 14px;
-  padding: 18px 0;
-  border-bottom: 1px solid rgba(255,255,255,0.14);
-}
-
-.rb-home-s2red-icon{
-  width: 44px;
-  height: 44px;
-  display: grid;
-  place-items: center;
-  border: 1px solid rgba(255,255,255,0.18);
-  background: rgba(0,0,0,0.18);
-}
-
-.rb-home-s2red-icon svg{
-  width: 20px;
-  height: 20px;
-  color: #ffffff;
-}
-
-.rb-home-s2red-title{
-  font-size: 16px;
+  font-size: 12px;
+  letter-spacing: 0.12em;
   font-weight: 700;
-  color: #ffffff;
-  margin: 0;
 }
 
-.rb-home-s2red-copy{
-  margin-top: 6px;
-  color: rgba(255,255,255,0.82);
-  font-size: 14px;
-  line-height: 1.7;
+.rb-home-step.isGradient{
+  border-color: rgba(255,255,255,0.12);
+  background: linear-gradient(90deg, rgba(225,29,51,0.60), rgba(245,158,11,0.55));
+  color: #0b0b0b;
 }
 
-/* responsive */
-@media (max-width: 860px){
-  .rb-home-s2red-row{
-    grid-template-columns: 40px 1fr;
-  }
-  .rb-home-s2red-icon{
-    width: 40px;
-    height: 40px;
-  }
+/* Hover/focus: glow + border contrast (alive, not cluttered) */
+.rb-home-s2red-row{
+  position: relative;
+  transition: transform 140ms ease, background 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
+  background: rgba(0,0,0,0.08);
+}
+
+.rb-home-s2red-row:hover,
+.rb-home-s2red-row:focus-visible{
+  background: rgba(0,0,0,0.14);
+  box-shadow:
+    0 0 0 1px rgba(255,255,255,0.18),
+    0 10px 34px rgba(0,0,0,0.28),
+    0 0 30px rgba(225,29,51,0.14),
+    0 0 28px rgba(245,158,11,0.12);
+  transform: translateY(-1px);
+  outline: none;
+}
+
+/* Keyboard focus ring */
+.rb-home-s2red-row:focus-visible{
+  box-shadow:
+    0 0 0 2px rgba(245,158,11,0.35),
+    0 0 0 1px rgba(255,255,255,0.18),
+    0 10px 34px rgba(0,0,0,0.28),
+    0 0 30px rgba(225,29,51,0.14),
+    0 0 28px rgba(245,158,11,0.12);
+}
+
+/* Icon box pops slightly more on hover/focus */
+.rb-home-s2red-row:hover .rb-home-s2red-icon,
+.rb-home-s2red-row:focus-visible .rb-home-s2red-icon{
+  border-color: rgba(255,255,255,0.26);
+  background: rgba(0,0,0,0.24);
 }
