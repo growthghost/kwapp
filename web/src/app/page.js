@@ -14,21 +14,22 @@ export default function HomePage() {
             <div className="rb-home-copy">
               <div className="rb-home-eyebrow">
                 <span className="rb-home-eyebrow-dot" />
-                <span>SCORE.TIER.MAP.STRATEGY.</span>
+                <span>SCORE. TIER. MAP.</span>
               </div>
 
               <h1 className="rb-home-title">
-                Turn scoring
+                Turn keywords and AI search queries
                 <br />
-                into <span className="rb-home-title-accent">strategy.</span>
+                into mapped priorities in <span className="rb-home-title-accent">minutes.</span>
               </h1>
 
               <div className="rb-home-title-rule" />
 
               <p className="rb-home-subtitle">
                 Score keywords and AI search queries into clear tiers,
-                prioritize what matters, and map the right opportunities to the
-                right pages.
+                prioritize what matters, map the right opportunities to the
+                right pages, and boost your content strategy to be found in 
+                traditional and AI-assisted search.
               </p>
 
               <div className="rb-home-cta-row">
