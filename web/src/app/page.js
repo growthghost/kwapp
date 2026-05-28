@@ -274,8 +274,8 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* SECTION 2 */}
-      <section className="rb-home-band-alt">
+            {/* SECTION 2 */}
+      <section className="rb-home-band-alt rb-home-s2">
         <div className="rb-home-inner">
           <div className="rb-home-kicker">WHAT RANKEDBOX HELPS YOU DO</div>
 
@@ -283,50 +283,89 @@ export default function HomePage() {
             One workflow for keyword decisions and AI discovery visibility
           </h2>
 
-          <div className="rb-home-two-col">
-            <div>
-              <div className="rb-home-line-item">
-                <div className="rb-home-line-title">
-                  Score and tier opportunities
+          <div className="rb-home-s2-grid">
+            <div className="rb-home-s2-card">
+              <div className="rb-home-s2-top">
+                <div className="rb-home-s2-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none">
+                    <path d="M5 17V10" stroke="currentColor" strokeWidth="2" />
+                    <path d="M10 17V7" stroke="currentColor" strokeWidth="2" />
+                    <path d="M15 17V12" stroke="currentColor" strokeWidth="2" />
+                    <path d="M20 17V5" stroke="currentColor" strokeWidth="2" />
+                  </svg>
                 </div>
-                <div className="rb-home-line-copy">
-                  Quickly evaluate search volume and keyword difficulty so teams
-                  can separate high-value targets from noise.
+                <div>
+                  <div className="rb-home-s2-title">Score and tier opportunities</div>
+                  <div className="rb-home-s2-accent" aria-hidden="true" />
                 </div>
               </div>
-
-              <div className="rb-home-line-item">
-                <div className="rb-home-line-title">
-                  Evaluate prompt visibility, mentions, and citations
-                </div>
-                <div className="rb-home-line-copy">
-                  Build strategy around how discovery is changing by looking at
-                  the signals that influence how brands appear in AI-assisted
-                  search experiences.
-                </div>
+              <div className="rb-home-s2-copy">
+                Quickly evaluate search volume and keyword difficulty so teams can separate
+                high-value targets from noise.
               </div>
             </div>
 
-            <div>
-              <div className="rb-home-line-item">
-                <div className="rb-home-line-title">
-                  Align teams around what to target
+            <div className="rb-home-s2-card">
+              <div className="rb-home-s2-top">
+                <div className="rb-home-s2-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none">
+                    <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="2" />
+                    <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="2" />
+                    <path d="M12 2v3" stroke="currentColor" strokeWidth="2" />
+                    <path d="M22 12h-3" stroke="currentColor" strokeWidth="2" />
+                    <path d="M12 22v-3" stroke="currentColor" strokeWidth="2" />
+                    <path d="M2 12h3" stroke="currentColor" strokeWidth="2" />
+                  </svg>
                 </div>
-                <div className="rb-home-line-copy">
-                  Give strategists, writers, and stakeholders a clearer view of
-                  what matters most so execution stays focused.
+                <div>
+                  <div className="rb-home-s2-title">Align teams around what to target</div>
+                  <div className="rb-home-s2-accent" aria-hidden="true" />
                 </div>
               </div>
+              <div className="rb-home-s2-copy">
+                Give strategists, writers, and stakeholders a clearer view of what matters most so
+                execution stays focused.
+              </div>
+            </div>
 
-              <div className="rb-home-line-item">
-                <div className="rb-home-line-title">
-                  Move from analysis to action
+            <div className="rb-home-s2-card">
+              <div className="rb-home-s2-top">
+                <div className="rb-home-s2-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none">
+                    <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
+                    <path d="M20 20l-3.2-3.2" stroke="currentColor" strokeWidth="2" />
+                    <path d="M8 11h6" stroke="currentColor" strokeWidth="2" />
+                  </svg>
                 </div>
-                <div className="rb-home-line-copy">
-                  Export cleaner outputs and use them to support prioritization,
-                  mapping decisions, and a more repeatable workflow across
-                  client accounts.
+                <div>
+                  <div className="rb-home-s2-title">
+                    Evaluate prompt visibility, mentions, and citations
+                  </div>
+                  <div className="rb-home-s2-accent" aria-hidden="true" />
                 </div>
+              </div>
+              <div className="rb-home-s2-copy">
+                Build strategy around how discovery is changing by looking at the signals that
+                influence how brands appear in AI-assisted search experiences.
+              </div>
+            </div>
+
+            <div className="rb-home-s2-card">
+              <div className="rb-home-s2-top">
+                <div className="rb-home-s2-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none">
+                    <path d="M4 12h13" stroke="currentColor" strokeWidth="2" />
+                    <path d="M13 6l6 6-6 6" stroke="currentColor" strokeWidth="2" />
+                  </svg>
+                </div>
+                <div>
+                  <div className="rb-home-s2-title">Move from analysis to action</div>
+                  <div className="rb-home-s2-accent" aria-hidden="true" />
+                </div>
+              </div>
+              <div className="rb-home-s2-copy">
+                Export cleaner outputs and use them to support prioritization, mapping decisions,
+                and a more repeatable workflow across client accounts.
               </div>
             </div>
           </div>
