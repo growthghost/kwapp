@@ -14,7 +14,7 @@ export default function HomePage() {
             <div className="rb-home-copy">
               <div className="rb-home-eyebrow">
                 <span className="rb-home-eyebrow-dot" />
-                <span>AI SEARCH. REAL INSIGHT. BETTER RANKINGS.</span>
+                <span>SCORE.TIER.MAP.STRATEGY.</span>
               </div>
 
               <h1 className="rb-home-title">
@@ -33,7 +33,7 @@ export default function HomePage() {
 
               <div className="rb-home-cta-row">
                 <Link href="/try" className="rb-home-cta rb-home-cta-primary">
-                  Try the free scorer
+                  Try RANKEDBOX
                 </Link>
 
                 <Link
@@ -55,7 +55,7 @@ export default function HomePage() {
                 <span>Keyword scoring</span>
                 <span>Tiered prioritization</span>
                 <span>Mapping workflow</span>
-                <span>AI query planning</span>
+                <span>AI prompt planning</span>
               </div>
             </div>
 
