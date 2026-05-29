@@ -274,87 +274,163 @@ export default function HomePage() {
         </div>
       </section>
 
-            {/* SECTION 2 */}
-<section className="rb-home-s2red">
-  <div className="rb-home-inner">
-    <div className="rb-home-kicker">WHAT RANKEDBOX HELPS YOU DO</div>
+                  {/* SECTION 2 */}
+      <section className="rb-home-s2red">
+        <div className="rb-home-s2red-shell">
+          <div className="rb-home-s2red-header">
+            <div className="rb-home-s2red-kicker-line">
+              <span className="rb-home-s2red-kicker-rule rb-home-s2red-kicker-rule-red" />
+              <div className="rb-home-kicker">
+                WHAT <span>RANKEDBOX</span> HELPS YOU DO
+              </div>
+              <span className="rb-home-s2red-kicker-rule rb-home-s2red-kicker-rule-gold" />
+            </div>
 
-    <h2 className="rb-home-h2">
-      One workflow for keyword decisions and AI discovery visibility
-    </h2>
+            <h2 className="rb-home-h2">
+              One workflow for keyword decisions
+              <br />
+              and <span>AI discovery visibility</span>
+            </h2>
 
-    <div className="rb-home-s2red-rule" />
+            <div className="rb-home-s2red-rule" />
+          </div>
 
-    <div className="rb-home-s2red-rows">
-      <div className="rb-home-s2red-row">
-        <div className="rb-home-s2red-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none">
-            <path d="M5 17V10" stroke="currentColor" strokeWidth="2" />
-            <path d="M10 17V7" stroke="currentColor" strokeWidth="2" />
-            <path d="M15 17V12" stroke="currentColor" strokeWidth="2" />
-            <path d="M20 17V5" stroke="currentColor" strokeWidth="2" />
-          </svg>
-        </div>
-        <div>
-          <div className="rb-home-s2red-title">Score and tier opportunities</div>
-          <div className="rb-home-s2red-copy">
-            Quickly evaluate search volume and keyword difficulty so teams can separate high-value targets from noise.
+          <div className="rb-home-s2red-cards">
+            <article className="rb-home-s2red-card rb-home-s2red-card-red">
+              <div className="rb-home-s2red-card-top">
+                <div className="rb-home-s2red-number">01</div>
+
+                <div className="rb-home-s2red-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none">
+                    <path d="M5 17V10" stroke="currentColor" strokeWidth="2" />
+                    <path d="M10 17V7" stroke="currentColor" strokeWidth="2" />
+                    <path d="M15 17V12" stroke="currentColor" strokeWidth="2" />
+                    <path d="M20 17V5" stroke="currentColor" strokeWidth="2" />
+                  </svg>
+                </div>
+              </div>
+
+              <div className="rb-home-s2red-card-rule" />
+
+              <h3 className="rb-home-s2red-title">
+                Score and tier
+                <br />
+                opportunities
+              </h3>
+
+              <p className="rb-home-s2red-copy">
+                Quickly evaluate search volume and keyword difficulty so teams
+                can separate high-value targets from noise.
+              </p>
+            </article>
+
+            <div className="rb-home-s2red-arrow" aria-hidden="true">
+              →
+            </div>
+
+            <article className="rb-home-s2red-card rb-home-s2red-card-coral">
+              <div className="rb-home-s2red-card-top">
+                <div className="rb-home-s2red-number">02</div>
+
+                <div className="rb-home-s2red-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none">
+                    <circle cx="9" cy="8" r="3" stroke="currentColor" strokeWidth="2" />
+                    <circle cx="15" cy="8" r="3" stroke="currentColor" strokeWidth="2" />
+                    <path
+                      d="M4 19c.7-3.2 2.7-5 5-5s4.3 1.8 5 5"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                    />
+                    <path
+                      d="M10 19c.7-3.2 2.7-5 5-5s4.3 1.8 5 5"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                    />
+                  </svg>
+                </div>
+              </div>
+
+              <div className="rb-home-s2red-card-rule" />
+
+              <h3 className="rb-home-s2red-title">
+                Align teams around
+                <br />
+                what to target
+              </h3>
+
+              <p className="rb-home-s2red-copy">
+                Give strategists, writers, and stakeholders a clearer view of
+                what matters most so execution stays focused.
+              </p>
+            </article>
+
+            <div className="rb-home-s2red-arrow" aria-hidden="true">
+              →
+            </div>
+
+            <article className="rb-home-s2red-card rb-home-s2red-card-orange">
+              <div className="rb-home-s2red-card-top">
+                <div className="rb-home-s2red-number">03</div>
+
+                <div className="rb-home-s2red-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none">
+                    <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
+                    <path d="M20 20l-3.2-3.2" stroke="currentColor" strokeWidth="2" />
+                    <path d="M9 11h4" stroke="currentColor" strokeWidth="2" />
+                  </svg>
+                </div>
+              </div>
+
+              <div className="rb-home-s2red-card-rule" />
+
+              <h3 className="rb-home-s2red-title">
+                Evaluate prompt
+                <br />
+                visibility, mentions,
+                <br />
+                and citations
+              </h3>
+
+              <p className="rb-home-s2red-copy">
+                Build strategy around how discovery is changing by looking at
+                the signals that influence how brands appear in AI-assisted
+                search experiences.
+              </p>
+            </article>
+
+            <div className="rb-home-s2red-arrow" aria-hidden="true">
+              →
+            </div>
+
+            <article className="rb-home-s2red-card rb-home-s2red-card-gold">
+              <div className="rb-home-s2red-card-top">
+                <div className="rb-home-s2red-number">04</div>
+
+                <div className="rb-home-s2red-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none">
+                    <path d="M4 12h13" stroke="currentColor" strokeWidth="2" />
+                    <path d="M13 6l6 6-6 6" stroke="currentColor" strokeWidth="2" />
+                  </svg>
+                </div>
+              </div>
+
+              <div className="rb-home-s2red-card-rule" />
+
+              <h3 className="rb-home-s2red-title">
+                Move from analysis
+                <br />
+                to action
+              </h3>
+
+              <p className="rb-home-s2red-copy">
+                Export cleaner outputs and use them to support prioritization,
+                mapping decisions, and a more repeatable workflow across client
+                accounts.
+              </p>
+            </article>
           </div>
         </div>
-      </div>
-
-      <div className="rb-home-s2red-row">
-        <div className="rb-home-s2red-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none">
-            <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="2" />
-            <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="2" />
-            <path d="M12 2v3" stroke="currentColor" strokeWidth="2" />
-            <path d="M22 12h-3" stroke="currentColor" strokeWidth="2" />
-            <path d="M12 22v-3" stroke="currentColor" strokeWidth="2" />
-            <path d="M2 12h3" stroke="currentColor" strokeWidth="2" />
-          </svg>
-        </div>
-        <div>
-          <div className="rb-home-s2red-title">Align teams around what to target</div>
-          <div className="rb-home-s2red-copy">
-            Give strategists, writers, and stakeholders a clearer view of what matters most so execution stays focused.
-          </div>
-        </div>
-      </div>
-
-      <div className="rb-home-s2red-row">
-        <div className="rb-home-s2red-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none">
-            <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
-            <path d="M20 20l-3.2-3.2" stroke="currentColor" strokeWidth="2" />
-            <path d="M8 11h6" stroke="currentColor" strokeWidth="2" />
-          </svg>
-        </div>
-        <div>
-          <div className="rb-home-s2red-title">Evaluate prompt visibility, mentions, and citations</div>
-          <div className="rb-home-s2red-copy">
-            Build strategy around how discovery is changing by looking at the signals that influence how brands appear in AI-assisted search experiences.
-          </div>
-        </div>
-      </div>
-
-      <div className="rb-home-s2red-row">
-        <div className="rb-home-s2red-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none">
-            <path d="M4 12h13" stroke="currentColor" strokeWidth="2" />
-            <path d="M13 6l6 6-6 6" stroke="currentColor" strokeWidth="2" />
-          </svg>
-        </div>
-        <div>
-          <div className="rb-home-s2red-title">Move from analysis to action</div>
-          <div className="rb-home-s2red-copy">
-            Export cleaner outputs and use them to support prioritization, mapping decisions, and a more repeatable workflow across client accounts.
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
+      </section>
 
       {/* SECTION 3 */}
       <section className="rb-home-cta-band">
