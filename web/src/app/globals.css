@@ -930,12 +930,13 @@ img{
   .rb-title{
     font-size: 32px;
   }
+
 }
 
 /* =========================
    HOME — SECTION 2
    Premium light workflow panel
-   Square section container + dark cards
+   Square section container + flat dark cards
 ========================= */
 .rb-home-s2red{
   position: relative;
@@ -943,62 +944,46 @@ img{
   color: #0b0b0b;
   padding: 0;
   background:
-    radial-gradient(circle at 4% 52%, rgba(255,45,54,0.28) 0%, rgba(255,45,54,0.13) 22%, rgba(255,255,255,0) 46%),
-    radial-gradient(circle at 96% 46%, rgba(255,191,47,0.38) 0%, rgba(255,191,47,0.18) 24%, rgba(255,255,255,0) 50%),
-    linear-gradient(90deg, rgba(255,45,54,0.16) 0%, rgba(255,255,255,0.96) 32%, rgba(255,255,255,0.98) 53%, rgba(255,191,47,0.25) 100%),
-    linear-gradient(180deg, #fffaf0 0%, #f4efe6 100%);
+    radial-gradient(circle at 0% 45%, rgba(255,45,54,0.22) 0%, rgba(255,45,54,0.10) 22%, rgba(255,255,255,0) 44%),
+    radial-gradient(circle at 100% 48%, rgba(255,191,47,0.30) 0%, rgba(255,191,47,0.13) 24%, rgba(255,255,255,0) 48%),
+    linear-gradient(90deg, rgba(255,45,54,0.10) 0%, rgba(255,255,255,0.96) 28%, rgba(255,255,255,0.98) 55%, rgba(255,191,47,0.18) 100%),
+    linear-gradient(180deg, #fffaf0 0%, #f5efe3 100%);
   border-top: 1px solid rgba(0,0,0,0.04);
   border-bottom: 1px solid rgba(0,0,0,0.08);
 }
 
-/* soft bright layer */
+/* soft center brightness */
 .rb-home-s2red::before{
   content: "";
   position: absolute;
   inset: 0;
   pointer-events: none;
   background:
-    linear-gradient(115deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.72) 43%, rgba(255,255,255,0) 74%),
-    radial-gradient(circle at 50% 0%, rgba(255,255,255,0.9) 0%, rgba(255,255,255,0) 42%);
-  opacity: 0.88;
+    radial-gradient(circle at 50% 18%, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.62) 28%, rgba(255,255,255,0) 58%);
+  opacity: 0.9;
 }
 
-/* side swipe movement lines */
+/* left/right swipe light only — no pattern */
 .rb-home-s2red::after{
   content: "";
   position: absolute;
   inset: 0;
   pointer-events: none;
   background:
-    /* left red sweep */
-    radial-gradient(ellipse at -8% 72%, rgba(255,45,54,0.38) 0%, rgba(255,45,54,0.18) 24%, rgba(255,255,255,0) 50%),
-    repeating-radial-gradient(
-      ellipse at -9% 78%,
-      rgba(255,45,54,0.22) 0,
-      rgba(255,45,54,0.22) 1px,
-      rgba(255,255,255,0) 2px,
-      rgba(255,255,255,0) 13px
-    ),
-    /* right gold sweep */
-    radial-gradient(ellipse at 108% 72%, rgba(255,191,47,0.46) 0%, rgba(255,191,47,0.20) 24%, rgba(255,255,255,0) 52%),
-    repeating-radial-gradient(
-      ellipse at 109% 78%,
-      rgba(255,191,47,0.24) 0,
-      rgba(255,191,47,0.24) 1px,
-      rgba(255,255,255,0) 2px,
-      rgba(255,255,255,0) 13px
-    );
-  opacity: 0.72;
-  filter: blur(0.1px);
+    linear-gradient(118deg, transparent 0%, rgba(255,45,54,0.16) 8%, rgba(255,255,255,0) 22%),
+    linear-gradient(62deg, transparent 0%, rgba(255,191,47,0.18) 8%, rgba(255,255,255,0) 24%),
+    radial-gradient(ellipse at -8% 78%, rgba(255,45,54,0.26) 0%, rgba(255,45,54,0.12) 22%, rgba(255,255,255,0) 48%),
+    radial-gradient(ellipse at 108% 78%, rgba(255,191,47,0.34) 0%, rgba(255,191,47,0.14) 22%, rgba(255,255,255,0) 50%);
+  opacity: 0.9;
 }
 
 .rb-home-s2red-shell{
   position: relative;
   z-index: 1;
   width: 100%;
-  max-width: 1500px;
+  max-width: 1440px;
   margin: 0 auto;
-  padding: 42px 44px 62px;
+  padding: 44px 44px 66px;
 }
 
 .rb-home-s2red-header{
@@ -1010,7 +995,7 @@ img{
   align-items: center;
   justify-content: center;
   gap: 18px;
-  margin-bottom: 16px;
+  margin-bottom: 28px;
 }
 
 .rb-home-s2red .rb-home-kicker{
@@ -1018,7 +1003,7 @@ img{
   color: #151515;
   font-size: 11px;
   font-weight: 800;
-  letter-spacing: 0.38em;
+  letter-spacing: 0.36em;
   line-height: 1;
 }
 
@@ -1028,7 +1013,7 @@ img{
 
 .rb-home-s2red-kicker-rule{
   display: block;
-  width: 84px;
+  width: 78px;
   height: 2px;
   position: relative;
 }
@@ -1061,14 +1046,15 @@ img{
   background: #ffbf2f;
 }
 
+/* headline size control */
 .rb-home-s2red .rb-home-h2{
-  max-width: 1180px;
+  max-width: 1040px;
   margin: 0 auto;
   color: #111111;
   font-family: "Century Gothic", CenturyGothic, AppleGothic, "Segoe UI", Arial, sans-serif;
-  font-size: clamp(42px, 4.2vw, 70px);
-  line-height: 0.98;
-  letter-spacing: -0.06em;
+  font-size: clamp(34px, 3.35vw, 56px);
+  line-height: 1.03;
+  letter-spacing: -0.035em;
   font-weight: 800;
 }
 
@@ -1080,47 +1066,45 @@ img{
 }
 
 .rb-home-s2red-rule{
-  width: 174px;
-  height: 5px;
-  margin: 22px auto 0;
+  width: 150px;
+  height: 4px;
+  margin: 20px auto 0;
   background: linear-gradient(90deg, #ff2d36 0%, #ff6a1f 52%, #ffbf2f 100%);
   box-shadow:
-    0 0 16px rgba(255,45,54,0.18),
-    0 0 18px rgba(255,191,47,0.18);
+    0 0 12px rgba(255,45,54,0.16),
+    0 0 14px rgba(255,191,47,0.16);
 }
 
 .rb-home-s2red-cards{
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 42px minmax(0, 1fr) 42px minmax(0, 1fr) 42px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) 40px minmax(0, 1fr) 40px minmax(0, 1fr) 40px minmax(0, 1fr);
   align-items: center;
   gap: 0;
-  max-width: 1220px;
+  max-width: 1260px;
   margin: 46px auto 0;
 }
 
 .rb-home-s2red-card{
   position: relative;
-  min-height: 310px;
-  padding: 30px 24px 28px;
-  background:
-    radial-gradient(circle at 18% 0%, rgba(255,255,255,0.13), transparent 24%),
-    linear-gradient(180deg, #171717 0%, #080808 100%);
+  height: 292px;
+  padding: 28px 24px 26px;
+  background: #0c0c0c;
   border: 1px solid rgba(255,255,255,0.14);
   border-radius: 10px;
   box-shadow:
-    0 28px 42px rgba(0,0,0,0.22),
-    0 1px 0 rgba(255,255,255,0.16) inset;
+    0 18px 32px rgba(0,0,0,0.18),
+    0 1px 0 rgba(255,255,255,0.08) inset;
   overflow: hidden;
 }
 
-/* faint curved texture inside cards */
+/* remove decorative card patterns */
 .rb-home-s2red-card::before{
   content: "";
   position: absolute;
   inset: 0;
   pointer-events: none;
-  opacity: 0.82;
+  background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0));
 }
 
 .rb-home-s2red-card::after{
@@ -1134,83 +1118,55 @@ img{
 }
 
 .rb-home-s2red-card-red{
-  border-color: rgba(255,45,54,0.72);
+  border-color: rgba(255,45,54,0.74);
   box-shadow:
-    0 28px 42px rgba(0,0,0,0.22),
-    0 0 0 1px rgba(255,45,54,0.18) inset,
-    0 0 28px rgba(255,45,54,0.38);
-}
-
-.rb-home-s2red-card-red::before{
-  background:
-    radial-gradient(circle at 0% 0%, rgba(255,45,54,0.34), transparent 34%),
-    radial-gradient(circle at 0% 100%, rgba(255,45,54,0.24), transparent 44%),
-    repeating-radial-gradient(ellipse at 0% 110%, rgba(255,45,54,0.14) 0, rgba(255,45,54,0.14) 1px, transparent 2px, transparent 12px);
+    0 18px 32px rgba(0,0,0,0.18),
+    0 0 0 1px rgba(255,45,54,0.14) inset,
+    0 0 18px rgba(255,45,54,0.30);
 }
 
 .rb-home-s2red-card-red::after{
   background: linear-gradient(90deg, transparent, #ff2d36, transparent);
-  box-shadow: 0 0 18px rgba(255,45,54,0.95);
+  box-shadow: 0 0 14px rgba(255,45,54,0.78);
 }
 
 .rb-home-s2red-card-coral{
-  border-color: rgba(255,92,72,0.70);
+  border-color: rgba(255,92,72,0.72);
   box-shadow:
-    0 28px 42px rgba(0,0,0,0.22),
-    0 0 0 1px rgba(255,92,72,0.16) inset,
-    0 0 26px rgba(255,92,72,0.30);
-}
-
-.rb-home-s2red-card-coral::before{
-  background:
-    radial-gradient(circle at 0% 0%, rgba(255,65,76,0.26), transparent 34%),
-    radial-gradient(circle at 100% 100%, rgba(255,119,64,0.20), transparent 44%),
-    repeating-radial-gradient(ellipse at 20% 110%, rgba(255,92,72,0.12) 0, rgba(255,92,72,0.12) 1px, transparent 2px, transparent 12px);
+    0 18px 32px rgba(0,0,0,0.18),
+    0 0 0 1px rgba(255,92,72,0.12) inset,
+    0 0 16px rgba(255,92,72,0.24);
 }
 
 .rb-home-s2red-card-coral::after{
   background: linear-gradient(90deg, transparent, #ff5c48, transparent);
-  box-shadow: 0 0 18px rgba(255,92,72,0.75);
+  box-shadow: 0 0 14px rgba(255,92,72,0.64);
 }
 
 .rb-home-s2red-card-orange{
-  border-color: rgba(255,122,28,0.72);
+  border-color: rgba(255,122,28,0.74);
   box-shadow:
-    0 28px 42px rgba(0,0,0,0.22),
-    0 0 0 1px rgba(255,122,28,0.16) inset,
-    0 0 26px rgba(255,122,28,0.32);
-}
-
-.rb-home-s2red-card-orange::before{
-  background:
-    radial-gradient(circle at 0% 0%, rgba(255,122,28,0.26), transparent 34%),
-    radial-gradient(circle at 100% 100%, rgba(255,191,47,0.18), transparent 44%),
-    repeating-radial-gradient(ellipse at 35% 110%, rgba(255,122,28,0.12) 0, rgba(255,122,28,0.12) 1px, transparent 2px, transparent 12px);
+    0 18px 32px rgba(0,0,0,0.18),
+    0 0 0 1px rgba(255,122,28,0.12) inset,
+    0 0 16px rgba(255,122,28,0.26);
 }
 
 .rb-home-s2red-card-orange::after{
   background: linear-gradient(90deg, transparent, #ff7a1c, transparent);
-  box-shadow: 0 0 18px rgba(255,122,28,0.8);
+  box-shadow: 0 0 14px rgba(255,122,28,0.66);
 }
 
 .rb-home-s2red-card-gold{
   border-color: rgba(255,191,47,0.76);
   box-shadow:
-    0 28px 42px rgba(0,0,0,0.22),
-    0 0 0 1px rgba(255,191,47,0.16) inset,
-    0 0 28px rgba(255,191,47,0.36);
-}
-
-.rb-home-s2red-card-gold::before{
-  background:
-    radial-gradient(circle at 0% 0%, rgba(255,191,47,0.22), transparent 34%),
-    radial-gradient(circle at 100% 100%, rgba(255,191,47,0.32), transparent 44%),
-    repeating-radial-gradient(ellipse at 55% 110%, rgba(255,191,47,0.14) 0, rgba(255,191,47,0.14) 1px, transparent 2px, transparent 12px);
+    0 18px 32px rgba(0,0,0,0.18),
+    0 0 0 1px rgba(255,191,47,0.12) inset,
+    0 0 18px rgba(255,191,47,0.30);
 }
 
 .rb-home-s2red-card-gold::after{
   background: linear-gradient(90deg, transparent, #ffbf2f, transparent);
-  box-shadow: 0 0 20px rgba(255,191,47,0.95);
+  box-shadow: 0 0 16px rgba(255,191,47,0.76);
 }
 
 .rb-home-s2red-card-top{
@@ -1219,13 +1175,13 @@ img{
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 18px;
+  gap: 16px;
 }
 
 .rb-home-s2red-number{
   font-family: "Century Gothic", CenturyGothic, AppleGothic, "Segoe UI", Arial, sans-serif;
-  font-size: 70px;
-  line-height: 0.82;
+  font-size: 64px;
+  line-height: 0.84;
   letter-spacing: -0.08em;
   font-weight: 800;
 }
@@ -1255,61 +1211,29 @@ img{
 }
 
 .rb-home-s2red-icon{
-  width: 54px;
-  height: 54px;
+  width: 48px;
+  height: 48px;
   display: grid;
   place-items: center;
   flex: 0 0 auto;
   border-radius: 999px;
   border: 1px solid currentColor;
-  background: rgba(0,0,0,0.18);
-}
-
-.rb-home-s2red-card-red .rb-home-s2red-icon{
-  box-shadow: 0 0 18px rgba(255,45,54,0.35);
-}
-
-.rb-home-s2red-card-coral .rb-home-s2red-icon{
-  box-shadow: 0 0 18px rgba(255,92,72,0.32);
-}
-
-.rb-home-s2red-card-orange .rb-home-s2red-icon{
-  box-shadow: 0 0 18px rgba(255,122,28,0.34);
-}
-
-.rb-home-s2red-card-gold .rb-home-s2red-icon{
-  box-shadow: 0 0 18px rgba(255,191,47,0.36);
+  background: rgba(0,0,0,0.16);
 }
 
 .rb-home-s2red-icon svg{
-  width: 23px;
-  height: 23px;
+  width: 21px;
+  height: 21px;
   color: currentColor;
 }
 
 .rb-home-s2red-card-rule{
   position: relative;
   z-index: 1;
-  width: 66px;
-  height: 4px;
-  margin: 20px 0 20px;
+  width: 58px;
+  height: 3px;
+  margin: 18px 0 18px;
   background: currentColor;
-}
-
-.rb-home-s2red-card-red .rb-home-s2red-card-rule{
-  box-shadow: 0 0 14px rgba(255,45,54,0.45);
-}
-
-.rb-home-s2red-card-coral .rb-home-s2red-card-rule{
-  box-shadow: 0 0 14px rgba(255,92,72,0.42);
-}
-
-.rb-home-s2red-card-orange .rb-home-s2red-card-rule{
-  box-shadow: 0 0 14px rgba(255,122,28,0.45);
-}
-
-.rb-home-s2red-card-gold .rb-home-s2red-card-rule{
-  box-shadow: 0 0 14px rgba(255,191,47,0.48);
 }
 
 .rb-home-s2red-title{
@@ -1317,40 +1241,39 @@ img{
   z-index: 1;
   margin: 0;
   color: #ffffff;
-  font-size: 21px;
+  font-size: 19px;
   line-height: 1.12;
-  letter-spacing: -0.045em;
+  letter-spacing: -0.04em;
   font-weight: 800;
 }
 
 .rb-home-s2red-copy{
   position: relative;
   z-index: 1;
-  margin: 16px 0 0;
-  color: rgba(255,255,255,0.78);
-  font-size: 14px;
-  line-height: 1.55;
+  margin: 14px 0 0;
+  color: rgba(255,255,255,0.76);
+  font-size: 13px;
+  line-height: 1.48;
   font-weight: 400;
 }
 
 .rb-home-s2red-arrow{
   position: relative;
   z-index: 3;
-  width: 46px;
-  height: 46px;
-  margin: 0 -3px;
+  width: 42px;
+  height: 42px;
+  margin: 0 -2px;
   display: grid;
   place-items: center;
   border-radius: 999px;
   color: #ffffff;
-  font-size: 27px;
+  font-size: 25px;
   line-height: 1;
-  background:
-    radial-gradient(circle at 50% 50%, #141414 0%, #050505 72%);
-  border: 2px solid rgba(255,255,255,0.86);
+  background: #070707;
+  border: 2px solid rgba(255,255,255,0.88);
   box-shadow:
-    0 0 0 1px rgba(0,0,0,0.55),
-    0 12px 24px rgba(0,0,0,0.26);
+    0 0 0 1px rgba(0,0,0,0.48),
+    0 10px 18px rgba(0,0,0,0.18);
 }
 
 .rb-home-s2red-arrow::before,
@@ -1358,8 +1281,8 @@ img{
   content: "";
   position: absolute;
   top: 50%;
-  width: 28px;
-  border-top: 2px dotted rgba(0,0,0,0.36);
+  width: 26px;
+  border-top: 2px dotted rgba(0,0,0,0.34);
   transform: translateY(-50%);
   z-index: -1;
 }
@@ -1383,13 +1306,14 @@ img{
   }
 
   .rb-home-s2red-card{
-    min-height: 300px;
+    height: auto;
+    min-height: 280px;
   }
 }
 
 @media (max-width: 760px){
   .rb-home-s2red-shell{
-    padding: 44px 18px 54px;
+    padding: 42px 18px 52px;
   }
 
   .rb-home-s2red-kicker-line{
@@ -1406,19 +1330,20 @@ img{
   }
 
   .rb-home-s2red .rb-home-h2{
-    font-size: 38px;
+    font-size: 34px;
   }
 
   .rb-home-s2red-cards{
     grid-template-columns: 1fr;
-    margin-top: 38px;
+    margin-top: 36px;
   }
 
   .rb-home-s2red-card{
+    height: auto;
     min-height: auto;
   }
 
   .rb-home-s2red-number{
-    font-size: 68px;
+    font-size: 62px;
   }
 }
