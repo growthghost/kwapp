@@ -287,9 +287,9 @@ export default function HomePage() {
             </div>
 
             <h2 className="rb-home-h2">
-              One workflow for keyword decisions
+              One workflow for keyword clarity
               <br />
-              and <span>AI discovery visibility</span>
+              and <span>AI visibility</span>
             </h2>
 
             <div className="rb-home-s2red-rule" />
@@ -386,9 +386,9 @@ export default function HomePage() {
               <h3 className="rb-home-s2red-title">
                 Evaluate prompt
                 <br />
-                visibility, mentions,
+                visibility
                 <br />
-                and citations
+              
               </h3>
 
               <p className="rb-home-s2red-copy">
