@@ -931,6 +931,7 @@ img{
     font-size: 32px;
   }
 }
+
 /* =========================
    HOME — SECTION 2
    Premium light workflow panel
@@ -1246,7 +1247,22 @@ img{
   border-radius: 999px;
   border: 1px solid currentColor;
   background: rgba(0,0,0,0.18);
-  box-shadow: 0 0 18px color-mix(in srgb, currentColor 30%, transparent);
+}
+
+.rb-home-s2red-card-red .rb-home-s2red-icon{
+  box-shadow: 0 0 18px rgba(255,45,54,0.35);
+}
+
+.rb-home-s2red-card-coral .rb-home-s2red-icon{
+  box-shadow: 0 0 18px rgba(255,92,72,0.32);
+}
+
+.rb-home-s2red-card-orange .rb-home-s2red-icon{
+  box-shadow: 0 0 18px rgba(255,122,28,0.34);
+}
+
+.rb-home-s2red-card-gold .rb-home-s2red-icon{
+  box-shadow: 0 0 18px rgba(255,191,47,0.36);
 }
 
 .rb-home-s2red-icon svg{
@@ -1262,7 +1278,22 @@ img{
   height: 4px;
   margin: 22px 0 22px;
   background: currentColor;
-  box-shadow: 0 0 14px color-mix(in srgb, currentColor 36%, transparent);
+}
+
+.rb-home-s2red-card-red .rb-home-s2red-card-rule{
+  box-shadow: 0 0 14px rgba(255,45,54,0.45);
+}
+
+.rb-home-s2red-card-coral .rb-home-s2red-card-rule{
+  box-shadow: 0 0 14px rgba(255,92,72,0.42);
+}
+
+.rb-home-s2red-card-orange .rb-home-s2red-card-rule{
+  box-shadow: 0 0 14px rgba(255,122,28,0.45);
+}
+
+.rb-home-s2red-card-gold .rb-home-s2red-card-rule{
+  box-shadow: 0 0 14px rgba(255,191,47,0.48);
 }
 
 .rb-home-s2red-title{
@@ -1325,7 +1356,6 @@ img{
   left: 100%;
 }
 
-/* responsive */
 @media (max-width: 1120px){
   .rb-home-s2red-cards{
     grid-template-columns: repeat(2, minmax(0, 1fr));
